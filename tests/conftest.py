@@ -1,5 +1,6 @@
 import os
 import pytest
+import pytest_asyncio
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from src.market_data.exchange_client import ExchangeClient
@@ -53,7 +54,7 @@ def mock_aiohttp_session(monkeypatch):
 
     monkeypatch.setattr("aiohttp.ClientSession", mock_client_session)
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def exchange_client():
     """Create an ExchangeClient instance for testing."""
     client = ExchangeClient(
