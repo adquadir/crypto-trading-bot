@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 from src.market_data.exchange_client import ExchangeClient
 
 @pytest.fixture(scope="session")
@@ -26,11 +26,25 @@ def mock_env_vars():
 @pytest.fixture
 async def exchange_client(mock_env_vars):
     """Create an ExchangeClient instance for testing."""
-    with patch('aiohttp.ClientSession') as mock_session:
-        mock_session.return_value = AsyncMock()
-        mock_session.return_value.get.return_value.__aenter__.return_value = AsyncMock(status=200)
-        mock_session.return_value.ws_connect.return_value.__aenter__.return_value = AsyncMock()
-        
+    # Create mock response
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    
+    # Create mock context manager for get
+    mock_get_cm = AsyncMock()
+    mock_get_cm.__aenter__.return_value = mock_response
+    
+    # Create mock session
+    mock_session = AsyncMock()
+    mock_session.get.return_value = mock_get_cm
+    
+    # Create mock WebSocket
+    mock_ws = AsyncMock()
+    mock_ws_cm = AsyncMock()
+    mock_ws_cm.__aenter__.return_value = mock_ws
+    mock_session.ws_connect.return_value = mock_ws_cm
+    
+    with patch('aiohttp.ClientSession', return_value=mock_session):
         client = ExchangeClient(
             api_key='test_api_key',
             api_secret='test_api_secret',

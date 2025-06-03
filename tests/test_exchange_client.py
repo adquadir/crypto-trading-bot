@@ -34,11 +34,16 @@ async def test_proxy_initialization(exchange_client, mock_binance_client):
 async def test_proxy_connection_test(exchange_client, mock_binance_client):
     """Test proxy connection testing."""
     client = await exchange_client
-    with patch('aiohttp.ClientSession.get') as mock_get:
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_get.return_value.__aenter__.return_value = mock_response
-        
+    
+    # Create mock response
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    
+    # Create mock context manager
+    mock_get_cm = AsyncMock()
+    mock_get_cm.__aenter__.return_value = mock_response
+    
+    with patch('aiohttp.ClientSession.get', return_value=mock_get_cm) as mock_get:
         success = await client._test_proxy_connection()
         assert success is True
         
@@ -115,6 +120,10 @@ async def test_websocket_reinitialization(exchange_client, mock_binance_client):
     # Mock WebSocket connections
     mock_ws = AsyncMock()
     client.ws_connections['BTCUSDT'] = mock_ws
+    
+    # Create mock WebSocket context manager
+    mock_ws_cm = AsyncMock()
+    mock_ws_cm.__aenter__.return_value = mock_ws
     
     # Test reinitialization
     with patch.object(client, '_setup_symbol_websocket') as mock_setup:
