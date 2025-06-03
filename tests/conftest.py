@@ -35,6 +35,6 @@ async def exchange_client(mock_env_vars):
     
     try:
         await client.initialize()
-        yield client
+        return client  # Return instead of yield
     finally:
         await client.close() 
