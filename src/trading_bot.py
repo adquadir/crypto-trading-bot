@@ -86,7 +86,7 @@ class TradingBot:
         try:
             for symbol in self.symbols:
                 # Get market data
-                market_data = await self.exchange_client.get_market_data(symbol)
+                market_data = await self.exchange_client.get_historical_data(symbol, interval="1m", limit=100)
                 if not market_data:
                     continue
                     
