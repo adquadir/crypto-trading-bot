@@ -29,21 +29,22 @@ async def test_proxy_initialization(exchange_client, mock_binance_client):
 
 @pytest.mark.asyncio
 async def test_proxy_connection_test(exchange_client, mock_binance_client):
-    success = await exchange_client._test_proxy_connection()
-    assert success is True
+    with patch('aiohttp.ClientSession.get', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value.__aenter__.return_value.status = 200
+        success = await exchange_client._test_proxy_connection()
+        assert success is True
 
 @pytest.mark.asyncio
 async def test_proxy_rotation(exchange_client, mock_binance_client):
-    exchange_client.min_requests_before_rotation = 1
-    metrics = exchange_client.proxy_metrics['10001']
-    metrics.error_count = 8
-    metrics.total_requests = 10
-    metrics.response_times.extend([1.5] * 10)
+    exchange_client.proxy_metrics['10001'].error_count = 8
+    exchange_client.proxy_metrics['10001'].total_requests = 10
+    exchange_client.proxy_metrics['10001'].response_times.extend([1.5] * 10)
+    
     exchange_client.proxy_metrics['10002'] = ProxyMetrics()
-    alt_metrics = exchange_client.proxy_metrics['10002']
-    alt_metrics.error_count = 1
-    alt_metrics.total_requests = 10
-    alt_metrics.response_times.extend([0.1] * 10)
+    exchange_client.proxy_metrics['10002'].error_count = 1
+    exchange_client.proxy_metrics['10002'].total_requests = 10
+    exchange_client.proxy_metrics['10002'].response_times.extend([0.1] * 10)
+    
     with patch.object(exchange_client, '_reinitialize_websockets') as mock_reinit:
         await exchange_client._rotate_proxy()
         assert exchange_client.proxy_port == '10002'
@@ -52,14 +53,9 @@ async def test_proxy_rotation(exchange_client, mock_binance_client):
 @pytest.mark.asyncio
 async def test_health_check_loop(exchange_client, mock_binance_client):
     with patch.object(exchange_client, '_check_proxy_health') as mock_check:
-        task = asyncio.create_task(exchange_client._health_check_loop())
-        await asyncio.sleep(0.1)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        assert mock_check.call_count > 0
+        exchange_client._shutdown_event.set()  # Ensure the loop exits
+        await exchange_client._health_check_loop()
+        mock_check.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_proxy_metrics(exchange_client, mock_binance_client):
@@ -81,8 +77,8 @@ async def test_websocket_reinitialization(exchange_client, mock_binance_client):
     exchange_client.ws_connections['BTCUSDT'] = mock_ws
     with patch.object(exchange_client, '_setup_symbol_websocket') as mock_setup:
         await exchange_client._reinitialize_websockets()
-        mock_ws.close.assert_called_once()
-        mock_setup.assert_called_once_with('BTCUSDT')
+        mock_ws.close.assert_awaited_once()
+        mock_setup.assert_awaited_once_with('BTCUSDT')
 
 @pytest.mark.asyncio
 async def test_proxy_failover(exchange_client, mock_binance_client):

@@ -92,6 +92,8 @@ class ExchangeClient:
         passwd = self.proxy_config["pass"]
         self.proxy_host = host
         self.proxy_port = port
+        self.proxy_user = user
+        self.proxy_pass = passwd
         self.proxy_auth = BasicAuth(user, passwd)
         self.proxies = {
             "http": f"http://{user}:{passwd}@{host}:{port}",
@@ -122,6 +124,30 @@ class ExchangeClient:
                 os.getenv("BINANCE_API_KEY"),
                 os.getenv("BINANCE_API_SECRET")
             )
+            await self._reinitialize_websockets()
+
+    async def _reinitialize_websockets(self):
+        """Close and reopen all websocket connections."""
+        for symbol, ws in list(self.ws_connections.items()):
+            await ws.close()
+            del self.ws_connections[symbol]
+            await self._setup_symbol_websocket(symbol)
+
+    async def _setup_symbol_websocket(self, symbol: str):
+        """Setup websocket for a specific symbol."""
+        try:
+            ws = await self.session.ws_connect(
+                f"wss://stream.binance.com:9443/ws/{symbol.lower()}@depth",
+                proxy=f"http://{self.proxy_host}:{self.proxy_port}",
+                proxy_auth=self.proxy_auth
+            )
+            self.ws_connections[symbol] = ws
+        except Exception as e:
+            logger.error(f"Failed to setup websocket for {symbol}: {e}")
+
+    async def _handle_connection_error(self):
+        """Handle connection errors by rotating proxy."""
+        await self._rotate_proxy()
 
     def _find_best_proxy(self) -> str:
         best_port = self.proxy_port
