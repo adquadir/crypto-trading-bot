@@ -3,6 +3,7 @@ import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime, timedelta
 import aiohttp
+import statistics
 from src.market_data.exchange_client import ExchangeClient, ProxyMetrics
 
 @pytest.fixture
@@ -37,6 +38,8 @@ async def test_proxy_initialization(exchange_client):
     assert exchange_client.proxy_user == 'test_user'
     assert exchange_client.proxy_pass == 'test_pass'
     assert isinstance(exchange_client.proxy_auth, aiohttp.BasicAuth)
+    assert isinstance(exchange_client.proxy_metrics, dict)
+    assert isinstance(exchange_client.ws_connections, dict)
 
 @pytest.mark.asyncio
 async def test_proxy_connection_test(exchange_client):
@@ -153,6 +156,29 @@ async def test_proxy_performance_scoring(exchange_client):
     # Test performance scoring
     best_port = exchange_client._find_best_proxy()
     assert best_port in exchange_client.failover_ports
+
+@pytest.mark.asyncio
+async def test_proxy_health_check(exchange_client):
+    """Test proxy health check functionality."""
+    with patch.object(exchange_client, '_test_proxy_connection', return_value=True):
+        await exchange_client._check_proxy_health()
+        
+        # Verify metrics were updated
+        metrics = exchange_client.proxy_metrics[exchange_client.proxy_port]
+        assert metrics.total_requests > 0
+        assert metrics.successful_requests > 0
+        assert metrics.last_success is not None
+
+@pytest.mark.asyncio
+async def test_proxy_connection_failure(exchange_client):
+    """Test handling of proxy connection failures."""
+    with patch.object(exchange_client, '_test_proxy_connection', return_value=False):
+        await exchange_client._check_proxy_health()
+        
+        # Verify error metrics were updated
+        metrics = exchange_client.proxy_metrics[exchange_client.proxy_port]
+        assert metrics.error_count > 0
+        assert metrics.last_error is not None
 
 if __name__ == '__main__':
     pytest.main(['-v', 'test_exchange_client.py']) 
