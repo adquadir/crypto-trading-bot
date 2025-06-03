@@ -70,7 +70,6 @@ class ExchangeClient:
         self.session = None
         self.health_check_task = None
         self.ws_connections = {}
-        self.market_data = {}
 
         self.proxy_list = proxy_list or ['10001', '10002', '10003']
         self.failover_ports = failover_ports or ['10001', '10002', '10003']
@@ -81,6 +80,7 @@ class ExchangeClient:
             "user": os.getenv('PROXY_USER', 'sp6qilmhb3'),
             "pass": os.getenv('PROXY_PASS', 'y2ok7Y3FEygM~rs7de')
         }
+        self.market_data = {}
 
         self._setup_proxy()
         self._init_client(api_key, api_secret)
@@ -106,6 +106,7 @@ class ExchangeClient:
     def _init_client(self, api_key: str, api_secret: str):
         self.client = Client(api_key, api_secret, testnet=self.testnet, requests_params={"proxies": self.proxies})
 
+    @rate_limit(max_calls=10, period=1.0)
     async def get_historical_data(self, symbol: str, interval: str, limit: int) -> List[Dict]:
         """Fetch historical market data (OHLCV) from Binance."""
         try:
@@ -116,28 +117,40 @@ class ExchangeClient:
                 limit=limit
             )
             
-            # Format the data into a list of dictionaries
-            return [{
-                'timestamp': k[0],
-                'open': float(k[1]),
-                'high': float(k[2]),
-                'low': float(k[3]),
-                'close': float(k[4]),
-                'volume': float(k[5]),
-                'close_time': k[6],
-                'quote_asset_volume': float(k[7]),
-                'number_of_trades': k[8],
-                'taker_buy_base_asset_volume': float(k[9]),
-                'taker_buy_quote_asset_volume': float(k[10]),
-                'ignore': k[11]
-            } for k in klines]
+            # Format the data into a standardized dictionary format
+            formatted_data = []
+            for kline in klines:
+                try:
+                    formatted_data.append({
+                        'timestamp': int(kline[0]),
+                        'open': float(kline[1]),
+                        'high': float(kline[2]),
+                        'low': float(kline[3]),
+                        'close': float(kline[4]),
+                        'volume': float(kline[5]),
+                        'close_time': int(kline[6]),
+                        'quote_volume': float(kline[7]),
+                        'trades': int(kline[8]),
+                        'taker_buy_base': float(kline[9]),
+                        'taker_buy_quote': float(kline[10])
+                    })
+                except (IndexError, ValueError) as e:
+                    logger.warning(f"Malformed kline data: {kline}. Error: {e}")
+                    continue
+            
+            if not formatted_data:
+                logger.warning(f"No valid data points received for {symbol}")
+                return []
+            
+            logger.debug(f"Retrieved {len(formatted_data)} data points for {symbol}")
+            return formatted_data
             
         except BinanceAPIException as e:
-            logger.error(f"Binance API error fetching historical data: {e}")
+            logger.error(f"Binance API error for {symbol}: {e}")
             await self._handle_connection_error()
             return []
         except Exception as e:
-            logger.error(f"Error fetching historical data: {e}")
+            logger.error(f"Unexpected error fetching data for {symbol}: {e}")
             return []
 
     def _should_rotate_proxy(self) -> bool:
@@ -151,6 +164,7 @@ class ExchangeClient:
     async def _rotate_proxy(self):
         best_port = self._find_best_proxy()
         if best_port != self.proxy_port:
+            logger.info(f"Rotating proxy from {self.proxy_port} to {best_port}")
             self.proxy_port = best_port
             self.proxy_config["port"] = best_port
             self._setup_proxy()
@@ -163,9 +177,12 @@ class ExchangeClient:
     async def _reinitialize_websockets(self):
         """Close and reopen all websocket connections."""
         for symbol, ws in list(self.ws_connections.items()):
-            await ws.close()
-            del self.ws_connections[symbol]
-            await self._setup_symbol_websocket(symbol)
+            try:
+                await ws.close()
+                del self.ws_connections[symbol]
+                await self._setup_symbol_websocket(symbol)
+            except Exception as e:
+                logger.error(f"Error reinitializing websocket for {symbol}: {e}")
 
     async def _setup_symbol_websocket(self, symbol: str):
         """Setup websocket for a specific symbol."""
@@ -173,14 +190,17 @@ class ExchangeClient:
             ws = await self.session.ws_connect(
                 f"wss://stream.binance.com:9443/ws/{symbol.lower()}@depth",
                 proxy=f"http://{self.proxy_host}:{self.proxy_port}",
-                proxy_auth=self.proxy_auth
+                proxy_auth=self.proxy_auth,
+                timeout=aiohttp.ClientTimeout(total=10)
             )
             self.ws_connections[symbol] = ws
+            logger.info(f"Websocket connected for {symbol}")
         except Exception as e:
             logger.error(f"Failed to setup websocket for {symbol}: {e}")
 
     async def _handle_connection_error(self):
         """Handle connection errors by rotating proxy."""
+        logger.warning("Handling connection error - rotating proxy")
         await self._rotate_proxy()
 
     def _find_best_proxy(self) -> str:
@@ -222,9 +242,11 @@ class ExchangeClient:
             metrics.response_times.append(duration)
             metrics.successful_requests += 1
             metrics.last_success = datetime.now()
+            logger.debug(f"Proxy health check successful (response time: {duration:.2f}s)")
         else:
             metrics.error_count += 1
             metrics.last_error = datetime.now()
+            logger.warning("Proxy health check failed")
         metrics.total_requests += 1
 
         if self._should_rotate_proxy():
@@ -235,14 +257,21 @@ class ExchangeClient:
             try:
                 await self._check_proxy_health()
             except Exception as e:
-                logger.error(f"Health check failed for proxy port {self.proxy_port}: {e}")
+                logger.error(f"Health check failed: {e}")
             await asyncio.sleep(self.health_check_interval)
 
     async def initialize(self):
-        self.session = aiohttp.ClientSession()
-        self.health_check_task = asyncio.create_task(self._health_check_loop())
+        """Initialize the exchange client."""
+        try:
+            self.session = aiohttp.ClientSession()
+            self.health_check_task = asyncio.create_task(self._health_check_loop())
+            logger.info("Exchange client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize exchange client: {e}")
+            raise
 
     async def close(self):
+        """Clean up resources."""
         self._shutdown_event.set()
         if self.health_check_task:
             self.health_check_task.cancel()
@@ -252,5 +281,10 @@ class ExchangeClient:
                 pass
         if self.session:
             await self.session.close()
-        for ws in self.ws_connections.values():
-            await ws.close()
+        for symbol, ws in self.ws_connections.items():
+            try:
+                await ws.close()
+                logger.debug(f"Closed websocket for {symbol}")
+            except Exception as e:
+                logger.error(f"Error closing websocket for {symbol}: {e}")
+        logger.info("Exchange client shutdown complete")
