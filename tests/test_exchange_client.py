@@ -29,19 +29,23 @@ async def test_proxy_initialization(exchange_client, mock_binance_client):
 
 @pytest.mark.asyncio
 async def test_proxy_connection_test(exchange_client, mock_binance_client):
-    # Mock the response object
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    
-    # Mock the session's get method to return a context manager
-    mock_session = AsyncMock()
-    mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_response)
-    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=None)
-    
-    # Mock ClientSession to return our mock session
-    with patch('aiohttp.ClientSession') as MockClientSession:
-        MockClientSession.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        MockClientSession.return_value.__aexit__ = AsyncMock(return_value=None)
+    # Mock the entire aiohttp module at the import level
+    with patch('src.market_data.exchange_client.aiohttp.ClientSession') as mock_session_class:
+        # Create a mock session instance
+        mock_session = AsyncMock()
+        
+        # Create a mock response
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        
+        # Set up the context managers properly
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = None
+        mock_session.get.return_value.__aenter__.return_value = mock_response
+        mock_session.get.return_value.__aexit__.return_value = None
+        
+        # Make the class return our mock session
+        mock_session_class.return_value = mock_session
         
         success = await exchange_client._test_proxy_connection()
         assert success is True
