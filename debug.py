@@ -1,4 +1,4 @@
-# File: debug.py (updated version)
+# File: debug.py
 import asyncio
 import logging
 import os
@@ -21,32 +21,28 @@ async def test_connection():
         api_secret=os.getenv('BINANCE_API_SECRET')
     )
     
-    # Initialize processor with explicit window size
-    processor = MarketDataProcessor(window_sizes=[20, 50, 200])  # Match your strategy needs
+    processor = MarketDataProcessor()
     
     try:
         logger.info("=== Starting Connection Test ===")
         
+        # Test initialization
         await client.initialize()
         await client.test_proxy_connection()
         
+        # Test data fetching
         symbol = "BTCUSDT"
-        # Fetch enough data for the largest window (200)
-        data = await client.get_historical_data(symbol, "1m", 200)  # Changed from 5 to 200
+        data = await client.get_historical_data(symbol, "1m", 200)
         logger.info(f"Received {len(data) if data else 0} data points")
         
         if data:
+            # Test processing
             success = processor.update_ohlcv(symbol, data)
             logger.info(f"Data processing: {'SUCCESS' if success else 'FAILED'}")
             
             if success:
                 market_state = processor.get_market_state(symbol)
-                if market_state.get('indicators'):
-                    logger.info(f"Calculated {len(market_state['indicators'])} indicators")
-                    # Log first 3 indicators for verification
-                    logger.debug(f"Sample indicators: {dict(list(market_state['indicators'].items())[:3]}")
-                else:
-                    logger.warning("No indicators calculated - check data sufficiency")
+                logger.info(f"Market state: {market_state}")
         
     except Exception as e:
         logger.error(f"Test failed: {str(e)}")
