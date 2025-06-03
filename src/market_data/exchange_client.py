@@ -69,6 +69,9 @@ class ExchangeClient:
         self.proxy_metrics = {}  # Store metrics for each proxy
         self.health_check_interval = 60  # seconds
         self.rotation_threshold = 0.8  # Rotate if error rate > 80%
+        self._shutdown_event = asyncio.Event()  # Initialize shutdown event
+        self.session = None  # Initialize session as None
+        self.health_check_task = None  # Initialize health check task as None
         self._setup_proxy()
         self._init_client(api_key, api_secret)
         self._setup_websocket()
@@ -127,12 +130,18 @@ class ExchangeClient:
     async def initialize(self):
         """Initialize the client and test connection."""
         try:
+            # Create aiohttp session
+            self.session = aiohttp.ClientSession()
+            
             # Test connection
             await self._test_connection()
             
             # Initialize WebSocket connections for each symbol
             for symbol in self.symbols:
                 await self._setup_symbol_websocket(symbol)
+            
+            # Start health check task
+            self.health_check_task = asyncio.create_task(self._health_check_loop())
                 
             logger.info("Exchange client initialized successfully")
         except Exception as e:
@@ -284,8 +293,10 @@ class ExchangeClient:
             
     async def close(self):
         """Close all connections and cleanup resources."""
-        self._shutdown_event.set()
-        if self.health_check_task:
+        if hasattr(self, "_shutdown_event"):
+            self._shutdown_event.set()
+            
+        if hasattr(self, "health_check_task") and self.health_check_task:
             self.health_check_task.cancel()
             try:
                 await self.health_check_task
@@ -293,12 +304,12 @@ class ExchangeClient:
                 pass
         
         # Close all WebSocket connections
-        for symbol, ws in self.ws_connections.items():
+        for ws in getattr(self, "ws_connections", {}).values():
             if ws:
                 await ws.close()
         
         # Close the session
-        if self.session:
+        if hasattr(self, "session") and self.session:
             await self.session.close()
         
         logger.info("Exchange client closed successfully")
