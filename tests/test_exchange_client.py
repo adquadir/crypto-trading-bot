@@ -29,32 +29,31 @@ async def test_proxy_initialization(exchange_client, mock_binance_client):
 
 @pytest.mark.asyncio
 async def test_proxy_connection_test(exchange_client, mock_binance_client):
-    # Mock the entire aiohttp module at the import level
+    # Mock aiohttp.ClientSession directly where it's used
     with patch('src.market_data.exchange_client.aiohttp.ClientSession') as mock_session_class:
-        # Create a mock session instance
+        # Create mock session and response
         mock_session = AsyncMock()
-        
-        # Create a mock response
         mock_response = AsyncMock()
         mock_response.status = 200
         
-        # Create a mock context manager for the GET request
-        mock_get_context = AsyncMock()
-        mock_get_context.__aenter__.return_value = mock_response
-        mock_get_context.__aexit__.return_value = None
+        # Set up the session as an async context manager
+        mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
         
-        # Set up the session context manager
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = None
-        
-        # Make session.get() return the mock context manager
-        mock_session.get.return_value = mock_get_context
-        
-        # Make the class return our mock session
-        mock_session_class.return_value = mock_session
+        # Set up the get method to return a response context manager
+        mock_session.get.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=None)
         
         success = await exchange_client._test_proxy_connection()
         assert success is True
+        
+        # Verify the session was created and used correctly
+        mock_session_class.assert_called_once()
+        mock_session.get.assert_called_once_with(
+            "https://api.binance.com/api/v3/ping",
+            proxy=f"http://{exchange_client.proxy_host}:{exchange_client.proxy_port}",
+            proxy_auth=exchange_client.proxy_auth
+        )
 
 @pytest.mark.asyncio
 async def test_proxy_rotation(exchange_client, mock_binance_client):
