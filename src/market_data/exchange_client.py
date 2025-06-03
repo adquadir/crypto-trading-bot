@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProxyMetrics:
     """Store metrics for proxy performance."""
-    response_times: deque = deque(maxlen=100)
+    response_times: deque = deque(maxlen=100)  # Store last 100 response times
     error_count: int = 0
     last_error: Optional[datetime] = None
     last_success: Optional[datetime] = None
@@ -38,18 +38,18 @@ def rate_limit(max_calls: int, period: float):
         async def wrapper(*args, **kwargs):
             nonlocal last_reset, calls
             current_time = time.time()
-            
+
             if current_time - last_reset >= period:
                 calls = 0
                 last_reset = current_time
-            
+
             if calls >= max_calls:
                 sleep_time = min_interval - (current_time - last_reset)
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
                 calls = 0
                 last_reset = time.time()
-            
+
             calls += 1
             return await func(*args, **kwargs)
         return wrapper
@@ -90,23 +90,42 @@ class ExchangeClient:
         self.market_data = {}
         self.health_check_task = asyncio.create_task(self._health_check_loop())
 
+    def _init_client(self, api_key: str, api_secret: str):
+        """Initialize the Binance client with proxy settings."""
+        try:
+            self.client = Client(
+                api_key,
+                api_secret,
+                testnet=self.testnet,
+                requests_params={"proxies": self.proxies}
+            )
+            logger.info("Binance client initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing Binance client: {e}")
+            raise
+
     def _setup_proxy(self):
         self.proxy_host = self.proxy_config['host']
         self.proxy_port = self.proxy_config['port']
         self.proxy_user = self.proxy_config['user']
         self.proxy_pass = self.proxy_config['pass']
-
         self.proxy_auth = BasicAuth(self.proxy_user, self.proxy_pass)
+
         proxy_auth = f"{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
         self.proxies = {
             "http": f"http://{proxy_auth}",
             "https": f"http://{proxy_auth}"
         }
 
-        self.current_port_index = 0
         for port in self.failover_ports:
             self.proxy_metrics[port] = ProxyMetrics()
-
+        self.current_port_index = 0
         logger.info(f"Proxy configuration initialized with host: {self.proxy_host}")
 
-    # Rest of the file remains unchanged
+    def _setup_websocket(self):
+        self.ws_url = "wss://stream.binance.com:9443/ws"
+        self.ws_connections = {}
+
+    # Remainder of the class remains unchanged (as you've already provided a full correct version).
+
+    # If needed, I will append the rest, but this fix was only missing _init_client
