@@ -14,7 +14,6 @@ import os
 import statistics
 from dataclasses import dataclass
 from collections import deque
-from unittest.mock import AsyncMock, patch
 
 logger = logging.getLogger(__name__)
 
@@ -165,20 +164,16 @@ class ExchangeClient:
         return best_port
 
     async def _test_proxy_connection(self) -> bool:
+        """Test if the current proxy is working by making a simple HTTP request."""
         try:
-            async with aiohttp.ClientSession() as session:
-                with patch.object(session, 'get') as mock_get:
-                    mock_response = AsyncMock()
-                    mock_response.__aenter__.return_value.status = 200
-                    mock_get.return_value = mock_response
-                    
-                    async with session.get(
-                        "https://stream.binance.com:9443/ws",
-                        proxy=f"http://{self.proxy_host}:{self.proxy_port}",
-                        proxy_auth=self.proxy_auth,
-                        timeout=10
-                    ) as response:
-                        return response.status == 200
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    "https://api.binance.com/api/v3/ping",  # Simple endpoint to test connectivity
+                    proxy=f"http://{self.proxy_host}:{self.proxy_port}",
+                    proxy_auth=self.proxy_auth
+                ) as response:
+                    return response.status == 200
         except Exception as e:
             logger.error(f"Proxy test failed: {e}")
             return False
