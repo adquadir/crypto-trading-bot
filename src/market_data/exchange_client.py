@@ -101,6 +101,7 @@ class ExchangeClient:
         # Failover proxy ports
         self.failover_ports = ['10001', '10002', '10003']
         self.current_port_index = 0
+        self.proxy_list = self.failover_ports.copy()  # Initialize proxy list
         
         # Initialize metrics for all proxy ports
         for port in self.failover_ports:
@@ -173,10 +174,10 @@ class ExchangeClient:
             
     async def _handle_connection_error(self):
         """Handle connection errors and attempt failover."""
-        if self.current_port_index < len(self.failover_ports):
+        if self.current_port_index < len(self.failover_ports) - 1:
             # Try next failover port
-            self.proxy_port = self.failover_ports[self.current_port_index]
             self.current_port_index += 1
+            self.proxy_port = self.failover_ports[self.current_port_index]
             
             # Update proxy configuration
             self._setup_proxy()
@@ -470,6 +471,7 @@ class ExchangeClient:
                 
         except Exception as e:
             logger.error(f"Error rotating proxy: {e}")
+            raise
             
     def _find_best_proxy(self) -> str:
         """Find the best performing proxy based on metrics."""
