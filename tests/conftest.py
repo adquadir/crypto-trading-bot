@@ -29,14 +29,17 @@ async def exchange_client():
                     api_key='test_api_key',
                     api_secret='test_api_secret',
                     symbol_set={"BTCUSDT"},
-                    proxy_host="test.proxy.com",
-                    proxy_port="10001",
-                    proxy_user="test_user",
-                    proxy_pass="test_pass",
                     proxy_list=["10001", "10002"],
                     failover_ports=["10001", "10002", "10003"],
-                    testnet=True
-                )
+                    testnet=True,
+                    proxy_config={
+                        "host": "test.proxy.com",
+                        "port": "10001",
+                        "user": "test_user",
+                        "pass": "test_pass"
+                    }
+)
+
                 await client.initialize()
                 yield client
                 await client.close()
