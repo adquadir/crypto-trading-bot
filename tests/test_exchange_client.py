@@ -29,11 +29,17 @@ async def test_proxy_initialization(exchange_client, mock_binance_client):
 
 @pytest.mark.asyncio
 async def test_proxy_connection_test(exchange_client, mock_binance_client):
-    with patch('aiohttp.ClientSession.get') as mock_get:
-        mock_resp = AsyncMock()
-        mock_resp.status = 200
-        mock_get.return_value.__aenter__.return_value = mock_resp
-        
+    # Create a complete mock chain
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    
+    mock_get = AsyncMock()
+    mock_get.__aenter__.return_value = mock_response
+    
+    mock_session = AsyncMock()
+    mock_session.get.return_value = mock_get
+    
+    with patch('aiohttp.ClientSession', return_value=mock_session):
         success = await exchange_client._test_proxy_connection()
         assert success is True
 

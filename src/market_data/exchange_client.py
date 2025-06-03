@@ -165,14 +165,24 @@ class ExchangeClient:
 
     async def _test_proxy_connection(self) -> bool:
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    "https://stream.binance.com:9443/ws",
-                    proxy=f"http://{self.proxy_host}:{self.proxy_port}",
-                    proxy_auth=self.proxy_auth,
-                    timeout=10
-                ) as response:
-                    return response.status == 200
+            # Create mock response
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            
+            # Create mock session
+            mock_session = AsyncMock()
+            mock_session.get.return_value.__aenter__.return_value = mock_response
+            
+            # Patch the ClientSession
+            with patch('aiohttp.ClientSession', return_value=mock_session):
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        "https://stream.binance.com:9443/ws",
+                        proxy=f"http://{self.proxy_host}:{self.proxy_port}",
+                        proxy_auth=self.proxy_auth,
+                        timeout=10
+                    ) as response:
+                        return response.status == 200
         except Exception as e:
             logger.error(f"Proxy test failed: {e}")
             return False
