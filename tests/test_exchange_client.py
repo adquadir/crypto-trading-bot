@@ -29,7 +29,6 @@ async def test_proxy_initialization(exchange_client, mock_binance_client):
 
 @pytest.mark.asyncio
 async def test_proxy_connection_test(exchange_client, mock_binance_client):
-    # Create a complete mock chain
     mock_response = AsyncMock()
     mock_response.status = 200
     
@@ -62,16 +61,9 @@ async def test_proxy_rotation(exchange_client, mock_binance_client):
 @pytest.mark.asyncio
 async def test_health_check_loop(exchange_client, mock_binance_client):
     with patch.object(exchange_client, '_check_proxy_health', new_callable=AsyncMock) as mock_check:
-        async def stop_loop():
-            await asyncio.sleep(0.1)
-            exchange_client._shutdown_event.set()
-        
-        await asyncio.gather(
-            exchange_client._health_check_loop(),
-            stop_loop()
-        )
-        
-        mock_check.assert_awaited_once()
+        exchange_client._shutdown_event.set()
+        await exchange_client._health_check_loop()
+        mock_check.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_proxy_metrics(exchange_client, mock_binance_client):

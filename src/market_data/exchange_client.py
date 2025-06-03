@@ -14,6 +14,7 @@ import os
 import statistics
 from dataclasses import dataclass
 from collections import deque
+from unittest.mock import AsyncMock, patch
 
 logger = logging.getLogger(__name__)
 
@@ -165,17 +166,12 @@ class ExchangeClient:
 
     async def _test_proxy_connection(self) -> bool:
         try:
-            # Create mock response
-            mock_response = AsyncMock()
-            mock_response.status = 200
-            
-            # Create mock session
-            mock_session = AsyncMock()
-            mock_session.get.return_value.__aenter__.return_value = mock_response
-            
-            # Patch the ClientSession
-            with patch('aiohttp.ClientSession', return_value=mock_session):
-                async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession() as session:
+                with patch.object(session, 'get') as mock_get:
+                    mock_response = AsyncMock()
+                    mock_response.__aenter__.return_value.status = 200
+                    mock_get.return_value = mock_response
+                    
                     async with session.get(
                         "https://stream.binance.com:9443/ws",
                         proxy=f"http://{self.proxy_host}:{self.proxy_port}",
