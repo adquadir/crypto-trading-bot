@@ -283,17 +283,25 @@ class ExchangeClient:
             return False
             
     async def close(self):
-        """Close all connections."""
-        try:
-            # Close WebSocket connections
-            for symbol, ws in self.ws_connections.items():
+        """Close all connections and cleanup resources."""
+        self._shutdown_event.set()
+        if self.health_check_task:
+            self.health_check_task.cancel()
+            try:
+                await self.health_check_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Close all WebSocket connections
+        for symbol, ws in self.ws_connections.items():
+            if ws:
                 await ws.close()
-            self.ws_connections.clear()
-            
-            logger.info("Exchange client closed successfully")
-        except Exception as e:
-            logger.error(f"Error closing exchange client: {e}")
-            raise
+        
+        # Close the session
+        if self.session:
+            await self.session.close()
+        
+        logger.info("Exchange client closed successfully")
         
     async def _handle_orderbook(self, msg: Dict):
         """Handle incoming order book updates."""
