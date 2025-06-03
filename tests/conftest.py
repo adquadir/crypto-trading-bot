@@ -35,7 +35,7 @@ def mock_aiohttp_session(monkeypatch):
     mock_ws.__aiter__.return_value = iter([])
 
     # Mock session methods
-    mock_session = MagicMock()
+    mock_session = AsyncMock()
     mock_session.get.return_value = AsyncMock()
     mock_session.get.return_value.__aenter__.return_value = mock_response
     mock_session.get.return_value.__aexit__.return_value = None
@@ -44,7 +44,7 @@ def mock_aiohttp_session(monkeypatch):
     mock_session.ws_connect.return_value.__aenter__.return_value = mock_ws
     mock_session.ws_connect.return_value.__aexit__.return_value = None
 
-    mock_session.close.return_value = AsyncMock()
+    mock_session.close = AsyncMock()
 
     # Patch aiohttp.ClientSession to return the mocked session
     mock_client_session = MagicMock()
