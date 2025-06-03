@@ -71,7 +71,7 @@ class TradingBot:
             if self.debug_mode:
                 logger.info("=== DEBUG MODE ===")
                 test_data = await self.exchange_client.get_historical_data(
-                    next(iter(self.symbols)), "1m", 5
+                    next(iter(self.symbols)), "1m", 200
                 )
                 logger.debug(f"Test data sample: {test_data[:1] if test_data else 'No data'}")
                 
