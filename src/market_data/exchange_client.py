@@ -1,7 +1,7 @@
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import aiohttp
 from aiohttp import BasicAuth
 from binance.client import Client
@@ -11,8 +11,21 @@ import time
 from functools import wraps
 import os
 from dotenv import load_dotenv
+import statistics
+from dataclasses import dataclass
+from collections import deque
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class ProxyMetrics:
+    """Store metrics for proxy performance."""
+    response_times: deque = deque(maxlen=100)  # Store last 100 response times
+    error_count: int = 0
+    last_error: Optional[datetime] = None
+    last_success: Optional[datetime] = None
+    total_requests: int = 0
+    successful_requests: int = 0
 
 def rate_limit(max_calls: int, period: float):
     """Rate limiting decorator."""
@@ -53,10 +66,16 @@ class ExchangeClient:
         """Initialize the exchange client with proxy support."""
         self.symbols = symbol_set or {'BTCUSDT'}
         self.testnet = testnet
+        self.proxy_metrics = {}  # Store metrics for each proxy
+        self.health_check_interval = 60  # seconds
+        self.rotation_threshold = 0.8  # Rotate if error rate > 80%
         self._setup_proxy()
         self._init_client(api_key, api_secret)
         self._setup_websocket()
-        self.market_data = {}  # Initialize market data dictionary
+        self.market_data = {}
+        
+        # Start health check task
+        self.health_check_task = asyncio.create_task(self._health_check_loop())
         
     def _setup_proxy(self):
         """Set up proxy configuration."""
@@ -66,6 +85,9 @@ class ExchangeClient:
         self.proxy_user = os.getenv('PROXY_USER', 'sp6qilmhb3')
         self.proxy_pass = os.getenv('PROXY_PASS', 'y2ok7Y3FEygM~rs7de')
         
+        # Create BasicAuth object for proxy authentication
+        self.proxy_auth = BasicAuth(self.proxy_user, self.proxy_pass)
+        
         # Construct proxy URLs
         proxy_auth = f"{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
         self.proxies = {
@@ -74,8 +96,14 @@ class ExchangeClient:
         }
         
         # Failover proxy ports
-        self.failover_ports = ['10002', '10003']
+        self.failover_ports = ['10001', '10002', '10003']
         self.current_port_index = 0
+        
+        # Initialize metrics for all proxy ports
+        for port in self.failover_ports:
+            self.proxy_metrics[port] = ProxyMetrics()
+            
+        logger.info(f"Proxy configuration initialized with host: {self.proxy_host}")
         
     def _init_client(self, api_key: str, api_secret: str):
         """Initialize the Binance client with proxy settings."""
@@ -118,13 +146,11 @@ class ExchangeClient:
             self.client.ping()
 
             # Test WebSocket connectivity using aiohttp with proxy auth
-            proxy_auth = BasicAuth(self.proxy_user, self.proxy_pass)
-
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     self.ws_url,
                     proxy=f"http://{self.proxy_host}:{self.proxy_port}",
-                    proxy_auth=proxy_auth
+                    proxy_auth=self.proxy_auth
                 ) as response:
                     if response.status != 200:
                         raise ConnectionError("WebSocket connection test failed")
@@ -165,7 +191,8 @@ class ExchangeClient:
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(
                     ws_url,
-                    proxy=self.proxies['http']
+                    proxy=f"http://{self.proxy_host}:{self.proxy_port}",
+                    proxy_auth=self.proxy_auth
                 ) as ws:
                     self.ws_connections[symbol] = ws
                     logger.info(f"WebSocket connection established for {symbol}")
@@ -336,4 +363,150 @@ class ExchangeClient:
         """Get the latest market data from memory."""
         if symbol not in self.market_data:
             return None
-        return self.market_data[symbol] 
+        return self.market_data[symbol]
+
+    async def _health_check_loop(self):
+        """Periodic health check of proxy connections."""
+        while True:
+            try:
+                await self._check_proxy_health()
+                await asyncio.sleep(self.health_check_interval)
+            except Exception as e:
+                logger.error(f"Error in health check loop: {e}")
+                await asyncio.sleep(5)  # Wait before retrying
+                
+    async def _check_proxy_health(self):
+        """Check health of current proxy and rotate if necessary."""
+        try:
+            # Test current proxy
+            start_time = time.time()
+            success = await self._test_proxy_connection()
+            response_time = time.time() - start_time
+            
+            current_port = self.proxy_port
+            metrics = self.proxy_metrics[current_port]
+            
+            if success:
+                metrics.response_times.append(response_time)
+                metrics.successful_requests += 1
+                metrics.last_success = datetime.now()
+                logger.info(f"Proxy health check successful for port {current_port}. "
+                          f"Response time: {response_time:.3f}s")
+            else:
+                metrics.error_count += 1
+                metrics.last_error = datetime.now()
+                logger.warning(f"Proxy health check failed for port {current_port}")
+                
+            metrics.total_requests += 1
+            
+            # Check if rotation is needed
+            if self._should_rotate_proxy():
+                await self._rotate_proxy()
+                
+        except Exception as e:
+            logger.error(f"Error in proxy health check: {e}")
+            
+    def _should_rotate_proxy(self) -> bool:
+        """Determine if proxy rotation is needed based on performance metrics."""
+        current_port = self.proxy_port
+        metrics = self.proxy_metrics[current_port]
+        
+        if metrics.total_requests < 10:  # Need minimum sample size
+            return False
+            
+        error_rate = metrics.error_count / metrics.total_requests
+        avg_response_time = statistics.mean(metrics.response_times) if metrics.response_times else float('inf')
+        
+        should_rotate = (
+            error_rate > self.rotation_threshold or
+            avg_response_time > 1.0 or  # More than 1 second average response time
+            (metrics.last_error and 
+             datetime.now() - metrics.last_error > timedelta(minutes=5))
+        )
+        
+        if should_rotate:
+            logger.info(f"Proxy rotation needed for port {current_port}. "
+                       f"Error rate: {error_rate:.2%}, "
+                       f"Avg response time: {avg_response_time:.3f}s")
+            
+        return should_rotate
+        
+    async def _rotate_proxy(self):
+        """Rotate to the next best performing proxy."""
+        try:
+            # Find best performing proxy
+            best_port = self._find_best_proxy()
+            if best_port != self.proxy_port:
+                logger.info(f"Rotating proxy from {self.proxy_port} to {best_port}")
+                self.proxy_port = best_port
+                self._setup_proxy()
+                
+                # Reinitialize client with fresh credentials
+                api_key = os.getenv("BINANCE_API_KEY")
+                api_secret = os.getenv("BINANCE_API_SECRET")
+                self._init_client(api_key, api_secret)
+                
+                # Reinitialize WebSocket connections
+                await self._reinitialize_websockets()
+                
+        except Exception as e:
+            logger.error(f"Error rotating proxy: {e}")
+            
+    def _find_best_proxy(self) -> str:
+        """Find the best performing proxy based on metrics."""
+        best_port = self.proxy_port
+        best_score = float('-inf')
+        
+        for port, metrics in self.proxy_metrics.items():
+            if metrics.total_requests < 10:  # Skip if not enough data
+                continue
+                
+            error_rate = metrics.error_count / metrics.total_requests
+            avg_response_time = statistics.mean(metrics.response_times) if metrics.response_times else float('inf')
+            
+            # Calculate performance score (lower is better)
+            score = -(error_rate + avg_response_time)
+            
+            if score > best_score:
+                best_score = score
+                best_port = port
+                
+        return best_port
+        
+    async def _test_proxy_connection(self) -> bool:
+        """Test proxy connection with detailed logging."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    self.ws_url,
+                    proxy=f"http://{self.proxy_host}:{self.proxy_port}",
+                    proxy_auth=self.proxy_auth,
+                    timeout=10
+                ) as response:
+                    success = response.status == 200
+                    if success:
+                        logger.debug(f"Proxy test successful for port {self.proxy_port}")
+                    else:
+                        logger.warning(f"Proxy test failed for port {self.proxy_port}. "
+                                     f"Status: {response.status}")
+                    return success
+        except Exception as e:
+            logger.error(f"Proxy test error for port {self.proxy_port}: {str(e)}")
+            return False
+            
+    async def _reinitialize_websockets(self):
+        """Reinitialize WebSocket connections after proxy rotation."""
+        try:
+            # Close existing connections
+            for symbol, ws in self.ws_connections.items():
+                await ws.close()
+            self.ws_connections.clear()
+            
+            # Reestablish connections
+            for symbol in self.symbols:
+                await self._setup_symbol_websocket(symbol)
+                
+            logger.info("WebSocket connections reinitialized successfully")
+        except Exception as e:
+            logger.error(f"Error reinitializing WebSocket connections: {e}")
+            raise 
