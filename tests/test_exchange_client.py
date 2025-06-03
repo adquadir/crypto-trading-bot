@@ -38,11 +38,17 @@ async def test_proxy_connection_test(exchange_client, mock_binance_client):
         mock_response = AsyncMock()
         mock_response.status = 200
         
-        # Set up the context managers properly
+        # Create a mock context manager for the GET request
+        mock_get_context = AsyncMock()
+        mock_get_context.__aenter__.return_value = mock_response
+        mock_get_context.__aexit__.return_value = None
+        
+        # Set up the session context manager
         mock_session.__aenter__.return_value = mock_session
         mock_session.__aexit__.return_value = None
-        mock_session.get.return_value.__aenter__.return_value = mock_response
-        mock_session.get.return_value.__aexit__.return_value = None
+        
+        # Make session.get() return the mock context manager
+        mock_session.get.return_value = mock_get_context
         
         # Make the class return our mock session
         mock_session_class.return_value = mock_session
