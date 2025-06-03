@@ -5,7 +5,7 @@ from datetime import datetime
 import aiohttp
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-from binance.websockets import BinanceSocketManager
+from binance.streams import BinanceSocketManager
 import time
 from functools import wraps
 
