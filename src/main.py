@@ -5,8 +5,8 @@ from typing import Optional
 import signal
 import sys
 
-from config import LOGGING_CONFIG, validate_config
-from trading_bot import TradingBot
+from srcconfig import LOGGING_CONFIG, validate_config
+from src.trading_bot import TradingBot
 
 # Configure logging
 logging.config.dictConfig(LOGGING_CONFIG)
