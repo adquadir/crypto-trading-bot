@@ -29,20 +29,20 @@ async def exchange_client(mock_env_vars):
     # Create mock response
     mock_response = AsyncMock()
     mock_response.status = 200
-    
-    # Create mock context manager for get
-    mock_get_cm = AsyncMock()
-    mock_get_cm.__aenter__.return_value = mock_response
+    mock_response.__aenter__.return_value = mock_response
+    mock_response.__aexit__.return_value = None
     
     # Create mock session
     mock_session = AsyncMock()
-    mock_session.get.return_value = mock_get_cm
+    mock_session.get.return_value = mock_response
+    mock_session.__aenter__.return_value = mock_session
+    mock_session.__aexit__.return_value = None
     
     # Create mock WebSocket
     mock_ws = AsyncMock()
-    mock_ws_cm = AsyncMock()
-    mock_ws_cm.__aenter__.return_value = mock_ws
-    mock_session.ws_connect.return_value = mock_ws_cm
+    mock_ws.__aenter__.return_value = mock_ws
+    mock_ws.__aexit__.return_value = None
+    mock_session.ws_connect.return_value = mock_ws
     
     with patch('aiohttp.ClientSession', return_value=mock_session):
         client = ExchangeClient(
@@ -54,6 +54,6 @@ async def exchange_client(mock_env_vars):
         
         try:
             await client.initialize()
-            return client
+            yield client
         finally:
             await client.close() 
