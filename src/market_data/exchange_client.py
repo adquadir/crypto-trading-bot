@@ -8,6 +8,8 @@ from binance.exceptions import BinanceAPIException
 from binance.streams import BinanceSocketManager
 import time
 from functools import wraps
+import os
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -40,58 +42,221 @@ def rate_limit(max_calls: int, period: float):
     return decorator
 
 class ExchangeClient:
-    def __init__(self, api_key: str, api_secret: str, symbols: Set[str] = {'BTCUSDT'}):
-        self.client = Client(api_key, api_secret)
-        self.ws_manager = None
-        self.connections = []
-        self.market_data = {}
-        self.symbols = symbols
-        self.reconnect_attempts = 0
-        self.max_reconnect_attempts = 5
-        self.reconnect_delay = 1  # seconds
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        symbol_set: Optional[Set[str]] = None,
+        testnet: bool = False
+    ):
+        """Initialize the exchange client with proxy support."""
+        self.symbols = symbol_set or {'BTCUSDT'}
+        self.testnet = testnet
+        self._setup_proxy()
+        self._init_client(api_key, api_secret)
+        self._setup_websocket()
+        
+    def _setup_proxy(self):
+        """Set up proxy configuration."""
+        # Load proxy settings from environment or use defaults
+        self.proxy_host = os.getenv('PROXY_HOST', 'isp.decodo.com')
+        self.proxy_port = os.getenv('PROXY_PORT', '10001')
+        self.proxy_user = os.getenv('PROXY_USER', 'sp6qilmhb3')
+        self.proxy_pass = os.getenv('PROXY_PASS', 'y2ok7Y3FEygM~rs7de')
+        
+        # Construct proxy URLs
+        proxy_auth = f"{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+        self.proxies = {
+            "http": f"http://{proxy_auth}",
+            "https": f"http://{proxy_auth}"
+        }
+        
+        # Failover proxy ports
+        self.failover_ports = ['10002', '10003']
+        self.current_port_index = 0
+        
+    def _init_client(self, api_key: str, api_secret: str):
+        """Initialize the Binance client with proxy settings."""
+        try:
+            self.client = Client(
+                api_key,
+                api_secret,
+                testnet=self.testnet,
+                requests_params={"proxies": self.proxies}
+            )
+            logger.info("Binance client initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing Binance client: {e}")
+            raise
+            
+    def _setup_websocket(self):
+        """Set up WebSocket connection for real-time data."""
+        self.ws_url = "wss://stream.binance.com:9443/ws"
+        self.ws_connections = {}
         
     async def initialize(self):
-        """Initialize WebSocket connections for real-time data."""
+        """Initialize the client and test connection."""
         try:
-            self.ws_manager = BinanceSocketManager(self.client)
+            # Test connection
+            await self._test_connection()
             
+            # Initialize WebSocket connections for each symbol
             for symbol in self.symbols:
-                # Subscribe to order book updates
-                self.connections.append(
-                    self.ws_manager.start_depth_socket(symbol, self._handle_orderbook)
-                )
+                await self._setup_symbol_websocket(symbol)
                 
-                # Subscribe to funding rate updates
-                self.connections.append(
-                    self.ws_manager.start_futures_socket(self._handle_funding_rate)
-                )
-                
-                # Initialize market data structure
-                self.market_data[symbol] = {
-                    'orderbook': {},
-                    'funding_rate': {},
-                    'last_update': None
-                }
-            
-            # Start the socket manager
-            self.ws_manager.start()
-            self.reconnect_attempts = 0
-            logger.info(f"Successfully initialized WebSocket connections for {len(self.symbols)} symbols")
-            
+            logger.info("Exchange client initialized successfully")
         except Exception as e:
-            logger.error(f"Error initializing WebSocket connections: {e}")
-            await self._handle_reconnection()
+            logger.error(f"Error initializing exchange client: {e}")
+            raise
             
-    async def _handle_reconnection(self):
-        """Handle WebSocket reconnection logic."""
-        if self.reconnect_attempts < self.max_reconnect_attempts:
-            self.reconnect_attempts += 1
-            delay = self.reconnect_delay * (2 ** (self.reconnect_attempts - 1))  # Exponential backoff
-            logger.info(f"Attempting to reconnect in {delay} seconds (attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})")
-            await asyncio.sleep(delay)
-            await self.initialize()
+    async def _test_connection(self):
+        """Test the connection to the exchange."""
+        try:
+            # Test REST API
+            self.client.ping()
+            
+            # Test WebSocket
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    self.ws_url,
+                    proxy=self.proxies['http']
+                ) as response:
+                    if response.status != 200:
+                        raise ConnectionError("WebSocket connection test failed")
+                        
+            logger.info("Connection test successful")
+        except Exception as e:
+            logger.error(f"Connection test failed: {e}")
+            await self._handle_connection_error()
+            raise
+            
+    async def _handle_connection_error(self):
+        """Handle connection errors and attempt failover."""
+        if self.current_port_index < len(self.failover_ports):
+            # Try next failover port
+            self.proxy_port = self.failover_ports[self.current_port_index]
+            self.current_port_index += 1
+            
+            # Update proxy configuration
+            self._setup_proxy()
+            self._init_client(self.client.api_key, self.client.api_secret)
+            
+            logger.info(f"Switched to failover port: {self.proxy_port}")
         else:
-            logger.error("Max reconnection attempts reached. Please check your connection and API credentials.")
+            logger.error("All failover ports exhausted")
+            raise ConnectionError("Failed to establish connection with all proxy ports")
+            
+    async def _setup_symbol_websocket(self, symbol: str):
+        """Set up WebSocket connection for a specific symbol."""
+        try:
+            stream_name = f"{symbol.lower()}@kline_1m"
+            ws_url = f"{self.ws_url}/{stream_name}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                    ws_url,
+                    proxy=self.proxies['http']
+                ) as ws:
+                    self.ws_connections[symbol] = ws
+                    logger.info(f"WebSocket connection established for {symbol}")
+        except Exception as e:
+            logger.error(f"Error setting up WebSocket for {symbol}: {e}")
+            raise
+            
+    async def get_market_data(self, symbol: str) -> Optional[Dict]:
+        """Get market data for a symbol."""
+        try:
+            # Get klines (candlestick data)
+            klines = self.client.get_klines(
+                symbol=symbol,
+                interval=Client.KLINE_INTERVAL_1MINUTE,
+                limit=100
+            )
+            
+            # Get order book
+            depth = self.client.get_order_book(symbol=symbol, limit=10)
+            
+            # Get 24hr ticker
+            ticker = self.client.get_ticker(symbol=symbol)
+            
+            return {
+                'symbol': symbol,
+                'timestamp': datetime.now().timestamp(),
+                'klines': klines,
+                'orderbook': depth,
+                'ticker': ticker
+            }
+        except BinanceAPIException as e:
+            logger.error(f"Binance API error for {symbol}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting market data for {symbol}: {e}")
+            return None
+            
+    async def place_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        stop_price: Optional[float] = None
+    ) -> Optional[Dict]:
+        """Place an order on the exchange."""
+        try:
+            params = {
+                'symbol': symbol,
+                'side': side,
+                'type': order_type,
+                'quantity': quantity
+            }
+            
+            if price:
+                params['price'] = price
+            if stop_price:
+                params['stopPrice'] = stop_price
+                
+            order = self.client.create_order(**params)
+            logger.info(f"Order placed successfully: {order}")
+            return order
+        except BinanceAPIException as e:
+            logger.error(f"Error placing order: {e}")
+            return None
+            
+    async def get_open_orders(self, symbol: Optional[str] = None) -> List[Dict]:
+        """Get open orders for a symbol or all symbols."""
+        try:
+            if symbol:
+                orders = self.client.get_open_orders(symbol=symbol)
+            else:
+                orders = self.client.get_open_orders()
+            return orders
+        except BinanceAPIException as e:
+            logger.error(f"Error getting open orders: {e}")
+            return []
+            
+    async def cancel_order(self, symbol: str, order_id: int) -> bool:
+        """Cancel an order."""
+        try:
+            self.client.cancel_order(symbol=symbol, orderId=order_id)
+            logger.info(f"Order {order_id} cancelled successfully")
+            return True
+        except BinanceAPIException as e:
+            logger.error(f"Error cancelling order {order_id}: {e}")
+            return False
+            
+    async def close(self):
+        """Close all connections."""
+        try:
+            # Close WebSocket connections
+            for symbol, ws in self.ws_connections.items():
+                await ws.close()
+            self.ws_connections.clear()
+            
+            logger.info("Exchange client closed successfully")
+        except Exception as e:
+            logger.error(f"Error closing exchange client: {e}")
+            raise
             
     async def _handle_orderbook(self, msg: Dict):
         """Handle incoming order book updates."""
@@ -127,39 +292,6 @@ class ExchangeClient:
             logger.error(f"Error handling funding rate for {symbol}: {e}")
             
     @rate_limit(max_calls=1200, period=60)  # 1200 calls per minute
-    async def get_market_data(self, symbol: str) -> Dict:
-        """Get current market data for a symbol."""
-        try:
-            if symbol not in self.symbols:
-                raise ValueError(f"Symbol {symbol} not in configured symbols")
-                
-            # Get current price
-            ticker = self.client.futures_symbol_ticker(symbol=symbol)
-            
-            # Get open interest
-            open_interest = self.client.futures_open_interest(symbol=symbol)
-            
-            # Get funding rate
-            funding_rate = self.client.futures_funding_rate(symbol=symbol)
-            
-            data = {
-                'price': float(ticker['price']),
-                'open_interest': float(open_interest['openInterest']),
-                'funding_rate': float(funding_rate[0]['fundingRate']),
-                'timestamp': datetime.now().timestamp()
-            }
-            
-            # Update market data
-            self.market_data[symbol].update(data)
-            self.market_data[symbol]['last_update'] = datetime.now().timestamp()
-            
-            return data
-            
-        except BinanceAPIException as e:
-            logger.error(f"Error fetching market data for {symbol}: {e}")
-            return {}
-            
-    @rate_limit(max_calls=1200, period=60)
     async def get_historical_data(
         self,
         symbol: str,
@@ -189,17 +321,6 @@ class ExchangeClient:
         except BinanceAPIException as e:
             logger.error(f"Error fetching historical data for {symbol}: {e}")
             return []
-            
-    async def close(self):
-        """Close all WebSocket connections."""
-        try:
-            if self.ws_manager:
-                self.ws_manager.close()
-            for conn in self.connections:
-                await conn.close()
-            logger.info("Successfully closed all WebSocket connections")
-        except Exception as e:
-            logger.error(f"Error closing WebSocket connections: {e}")
             
     def get_latest_data(self, symbol: str) -> Optional[Dict]:
         """Get the latest market data from memory."""
