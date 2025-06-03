@@ -1,13 +1,25 @@
 import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from datetime import datetime, timedelta
 import aiohttp
 import statistics
 from src.market_data.exchange_client import ExchangeClient, ProxyMetrics
 
+@pytest.fixture
+def mock_binance_client():
+    """Mock Binance client."""
+    with patch('src.market_data.exchange_client.Client') as mock_client:
+        mock_instance = MagicMock()
+        mock_instance.ping.return_value = {}
+        mock_instance.get_klines.return_value = []
+        mock_instance.get_order_book.return_value = {'bids': [], 'asks': []}
+        mock_instance.get_ticker.return_value = {'price': '100.0'}
+        mock_client.return_value = mock_instance
+        yield mock_instance
+
 @pytest.mark.asyncio
-async def test_proxy_initialization(exchange_client):
+async def test_proxy_initialization(exchange_client, mock_binance_client):
     """Test proxy initialization."""
     client = await exchange_client
     assert client.proxy_host == 'test.proxy.com'
@@ -19,7 +31,7 @@ async def test_proxy_initialization(exchange_client):
     assert isinstance(client.ws_connections, dict)
 
 @pytest.mark.asyncio
-async def test_proxy_connection_test(exchange_client):
+async def test_proxy_connection_test(exchange_client, mock_binance_client):
     """Test proxy connection testing."""
     client = await exchange_client
     with patch('aiohttp.ClientSession.get') as mock_get:
@@ -37,7 +49,7 @@ async def test_proxy_connection_test(exchange_client):
         assert isinstance(call_args['proxy_auth'], aiohttp.BasicAuth)
 
 @pytest.mark.asyncio
-async def test_proxy_rotation(exchange_client):
+async def test_proxy_rotation(exchange_client, mock_binance_client):
     """Test proxy rotation logic."""
     client = await exchange_client
     # Simulate poor performance for current proxy
@@ -58,7 +70,7 @@ async def test_proxy_rotation(exchange_client):
         mock_reinit.assert_called_once()
 
 @pytest.mark.asyncio
-async def test_health_check_loop(exchange_client):
+async def test_health_check_loop(exchange_client, mock_binance_client):
     """Test health check loop functionality."""
     client = await exchange_client
     with patch.object(client, '_check_proxy_health') as mock_check:
@@ -78,7 +90,7 @@ async def test_health_check_loop(exchange_client):
         assert mock_check.call_count > 0
 
 @pytest.mark.asyncio
-async def test_proxy_metrics(exchange_client):
+async def test_proxy_metrics(exchange_client, mock_binance_client):
     """Test proxy metrics collection and analysis."""
     client = await exchange_client
     metrics = client.proxy_metrics['10001']
@@ -97,7 +109,7 @@ async def test_proxy_metrics(exchange_client):
     assert statistics.mean(metrics.response_times) == 0.2
 
 @pytest.mark.asyncio
-async def test_websocket_reinitialization(exchange_client):
+async def test_websocket_reinitialization(exchange_client, mock_binance_client):
     """Test WebSocket reinitialization after proxy rotation."""
     client = await exchange_client
     # Mock WebSocket connections
@@ -115,7 +127,7 @@ async def test_websocket_reinitialization(exchange_client):
         mock_setup.assert_called_once_with('BTCUSDT')
 
 @pytest.mark.asyncio
-async def test_proxy_failover(exchange_client):
+async def test_proxy_failover(exchange_client, mock_binance_client):
     """Test proxy failover mechanism."""
     client = await exchange_client
     # Simulate connection failure
@@ -128,7 +140,7 @@ async def test_proxy_failover(exchange_client):
             assert client.proxy_port in ['10002', '10003']
 
 @pytest.mark.asyncio
-async def test_proxy_performance_scoring(exchange_client):
+async def test_proxy_performance_scoring(exchange_client, mock_binance_client):
     """Test proxy performance scoring."""
     client = await exchange_client
     # Set up test metrics
@@ -142,7 +154,7 @@ async def test_proxy_performance_scoring(exchange_client):
     assert best_port in client.failover_ports
 
 @pytest.mark.asyncio
-async def test_proxy_health_check(exchange_client):
+async def test_proxy_health_check(exchange_client, mock_binance_client):
     """Test proxy health check functionality."""
     client = await exchange_client
     with patch.object(client, '_test_proxy_connection', return_value=True):
@@ -155,7 +167,7 @@ async def test_proxy_health_check(exchange_client):
         assert metrics.last_success is not None
 
 @pytest.mark.asyncio
-async def test_proxy_connection_failure(exchange_client):
+async def test_proxy_connection_failure(exchange_client, mock_binance_client):
     """Test handling of proxy connection failures."""
     client = await exchange_client
     with patch.object(client, '_test_proxy_connection', return_value=False):

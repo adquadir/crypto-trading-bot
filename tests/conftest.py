@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 from src.market_data.exchange_client import ExchangeClient
 
 @pytest.fixture(scope="session")
@@ -26,15 +26,20 @@ def mock_env_vars():
 @pytest.fixture
 async def exchange_client(mock_env_vars):
     """Create an ExchangeClient instance for testing."""
-    client = ExchangeClient(
-        api_key='test_api_key',
-        api_secret='test_api_secret',
-        symbol_set={'BTCUSDT'},
-        testnet=True
-    )
-    
-    try:
-        await client.initialize()
-        return client  # Return instead of yield
-    finally:
-        await client.close() 
+    with patch('aiohttp.ClientSession') as mock_session:
+        mock_session.return_value = AsyncMock()
+        mock_session.return_value.get.return_value.__aenter__.return_value = AsyncMock(status=200)
+        mock_session.return_value.ws_connect.return_value.__aenter__.return_value = AsyncMock()
+        
+        client = ExchangeClient(
+            api_key='test_api_key',
+            api_secret='test_api_secret',
+            symbol_set={'BTCUSDT'},
+            testnet=True
+        )
+        
+        try:
+            await client.initialize()
+            return client
+        finally:
+            await client.close() 

@@ -294,7 +294,7 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error closing exchange client: {e}")
             raise
-            
+        
     async def _handle_orderbook(self, msg: Dict):
         """Handle incoming order book updates."""
         try:
@@ -303,10 +303,10 @@ class ExchangeClient:
                 return
                 
             self.market_data[symbol]['orderbook'] = {
-                'bids': msg['b'],
-                'asks': msg['a'],
-                'timestamp': datetime.now().timestamp()
-            }
+                    'bids': msg['b'],
+                    'asks': msg['a'],
+                    'timestamp': datetime.now().timestamp()
+                }
             self.market_data[symbol]['last_update'] = datetime.now().timestamp()
             
         except Exception as e:
@@ -318,7 +318,7 @@ class ExchangeClient:
             symbol = msg['s']
             if symbol not in self.market_data:
                 return
-                
+            
             self.market_data[symbol]['funding_rate'] = {
                 'rate': float(msg['r']),
                 'timestamp': datetime.now().timestamp()
