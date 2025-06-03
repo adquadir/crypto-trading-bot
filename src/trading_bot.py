@@ -67,11 +67,18 @@ class TradingBot:
             
             # Start main trading loop
             while self.is_running:
-                await self._trading_loop()
-                await asyncio.sleep(1)  # Prevent excessive CPU usage
+                try:
+                    await self._trading_loop()
+                except Exception as e:
+                    logger.error(f"Error in trading loop: {e}")
+                    # Add a small delay before retrying
+                    await asyncio.sleep(5)
+                finally:
+                    # Prevent excessive CPU usage
+                    await asyncio.sleep(1)
                 
         except Exception as e:
-            logger.error(f"Error in trading bot: {e}")
+            logger.error(f"Critical error in trading bot: {e}")
             self.is_running = False
             raise
             
@@ -83,16 +90,28 @@ class TradingBot:
         
     async def _trading_loop(self):
         """Main trading loop."""
-        try:
-            for symbol in self.symbols:
-                # Get market data
-                market_data = await self.exchange_client.get_historical_data(symbol, interval="1m", limit=100)
+        for symbol in self.symbols:
+            try:
+                # Get market data with error handling
+                market_data = await self.exchange_client.get_historical_data(
+                    symbol, 
+                    interval="1m", 
+                    limit=100
+                )
                 if not market_data:
+                    logger.warning(f"No market data received for {symbol}")
                     continue
                     
                 # Process market data
-                self.market_processor.update_ohlcv(symbol, market_data)
+                processed = self.market_processor.update_ohlcv(symbol, market_data)
+                if not processed:
+                    logger.warning(f"Failed to process market data for {symbol}")
+                    continue
+                    
                 market_state = self.market_processor.get_market_state(symbol)
+                if not market_state:
+                    logger.warning(f"No market state available for {symbol}")
+                    continue
                 
                 # Generate signals
                 signals = self.signal_engine.generate_signals(market_state)
@@ -101,10 +120,15 @@ class TradingBot:
                     
                 # Process each signal
                 for signal in signals:
-                    await self._process_signal(symbol, signal, market_state)
+                    try:
+                        await self._process_signal(symbol, signal, market_state)
+                    except Exception as e:
+                        logger.error(f"Error processing signal for {symbol}: {e}")
+                        continue
                     
-        except Exception as e:
-            logger.error(f"Error in trading loop: {e}")
+            except Exception as e:
+                logger.error(f"Error processing symbol {symbol}: {e}")
+                continue
             
     async def _process_signal(
         self,
@@ -114,6 +138,11 @@ class TradingBot:
     ):
         """Process a trading signal."""
         try:
+            # Validate signal
+            if not all(k in signal for k in ['price', 'signal_type', 'timestamp']):
+                logger.error(f"Invalid signal structure for {symbol}")
+                return
+                
             # Calculate position parameters
             entry_price = signal['price']
             direction = signal['signal_type']
@@ -122,11 +151,17 @@ class TradingBot:
             stop_loss = self.risk_manager.calculate_stop_loss(
                 symbol, entry_price, direction, market_state
             )
+            if stop_loss is None:
+                logger.error(f"Failed to calculate stop loss for {symbol}")
+                return
             
             # Calculate position size and leverage
             position_size, leverage = self.risk_manager.calculate_position_size(
                 symbol, entry_price, stop_loss, direction, market_state
             )
+            if position_size is None or leverage is None:
+                logger.error(f"Failed to calculate position size for {symbol}")
+                return
             
             # Check risk limits
             if not self.risk_manager.check_risk_limits(symbol, position_size, leverage):
@@ -137,6 +172,9 @@ class TradingBot:
             take_profit = self.risk_manager.calculate_take_profit(
                 symbol, entry_price, stop_loss, direction, market_state
             )
+            if take_profit is None:
+                logger.error(f"Failed to calculate take profit for {symbol}")
+                return
             
             # Add position to risk manager
             if self.risk_manager.add_position(
@@ -157,93 +195,88 @@ class TradingBot:
         leverage: float
     ):
         """Execute a trade and persist data."""
+        db = None
         try:
             # Create database session
             db = self._get_db_session()
             
-            try:
-                # Save signal
-                db_signal = TradingSignal(
-                    symbol=symbol,
-                    timestamp=datetime.fromtimestamp(signal['timestamp']),
-                    signal_type=signal['signal_type'],
-                    confidence=signal['confidence'],
-                    price=signal['price'],
-                    indicators=signal['indicators'],
-                    strategy=signal['strategy']
-                )
-                db.add(db_signal)
-                db.flush()
-                
-                # Create trade
-                trade = Trade(
-                    symbol=symbol,
-                    entry_time=datetime.fromtimestamp(signal['timestamp']),
-                    entry_price=signal['price'],
-                    position_size=position_size,
-                    leverage=leverage,
-                    status='OPEN',
-                    signal_id=db_signal.id
-                )
-                db.add(trade)
-                
-                # Commit changes
-                db.commit()
-                logger.info(f"Trade executed for {symbol}: {signal['signal_type']} at {signal['price']}")
-                
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Database error executing trade: {e}")
-                raise
-                
-            finally:
-                db.close()
-                
+            # Save signal
+            db_signal = TradingSignal(
+                symbol=symbol,
+                timestamp=datetime.fromtimestamp(signal['timestamp']),
+                signal_type=signal['signal_type'],
+                confidence=signal.get('confidence', 0.5),  # Default confidence
+                price=signal['price'],
+                indicators=signal.get('indicators', {}),
+                strategy=signal.get('strategy', 'default')
+            )
+            db.add(db_signal)
+            db.flush()
+            
+            # Create trade
+            trade = Trade(
+                symbol=symbol,
+                entry_time=datetime.fromtimestamp(signal['timestamp']),
+                entry_price=signal['price'],
+                position_size=position_size,
+                leverage=leverage,
+                status='OPEN',
+                signal_id=db_signal.id
+            )
+            db.add(trade)
+            
+            # Commit changes
+            db.commit()
+            logger.info(f"Trade executed for {symbol}: {signal['signal_type']} at {signal['price']}")
+            
         except Exception as e:
+            if db:
+                db.rollback()
             logger.error(f"Error executing trade for {symbol}: {e}")
+            raise
+        finally:
+            if db:
+                db.close()
             
     def get_performance_summary(self) -> Dict:
         """Get performance summary of the trading bot."""
+        db = None
         try:
             db = self._get_db_session()
             
-            try:
-                # Get all closed trades
-                trades = db.query(Trade).filter(Trade.status == 'CLOSED').all()
-                
-                if not trades:
-                    return {
-                        'total_trades': 0,
-                        'win_rate': 0.0,
-                        'total_pnl': 0.0,
-                        'sharpe_ratio': 0.0
-                    }
-                    
-                # Calculate metrics
-                total_trades = len(trades)
-                winning_trades = len([t for t in trades if t.pnl > 0])
-                total_pnl = sum(t.pnl for t in trades)
-                
-                # Calculate win rate
-                win_rate = winning_trades / total_trades if total_trades > 0 else 0
-                
-                # Calculate Sharpe ratio (simplified)
-                returns = [t.pnl_pct for t in trades if t.pnl_pct is not None]
-                if returns:
-                    sharpe_ratio = np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0
-                else:
-                    sharpe_ratio = 0
-                    
+            # Get all closed trades
+            trades = db.query(Trade).filter(Trade.status == 'CLOSED').all()
+            
+            if not trades:
                 return {
-                    'total_trades': total_trades,
-                    'win_rate': win_rate,
-                    'total_pnl': total_pnl,
-                    'sharpe_ratio': sharpe_ratio
+                    'total_trades': 0,
+                    'win_rate': 0.0,
+                    'total_pnl': 0.0,
+                    'sharpe_ratio': 0.0
                 }
                 
-            finally:
-                db.close()
+            # Calculate metrics
+            total_trades = len(trades)
+            winning_trades = len([t for t in trades if t.pnl and t.pnl > 0])
+            total_pnl = sum(t.pnl for t in trades if t.pnl is not None)
+            
+            # Calculate win rate
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0
+            
+            # Calculate Sharpe ratio (simplified)
+            returns = [t.pnl_pct for t in trades if t.pnl_pct is not None]
+            if returns:
+                sharpe_ratio = np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0
+            else:
+                sharpe_ratio = 0
                 
+            return {
+                'total_trades': total_trades,
+                'win_rate': win_rate,
+                'total_pnl': total_pnl,
+                'sharpe_ratio': sharpe_ratio
+            }
+            
         except Exception as e:
             logger.error(f"Error getting performance summary: {e}")
             return {
@@ -251,4 +284,7 @@ class TradingBot:
                 'win_rate': 0.0,
                 'total_pnl': 0.0,
                 'sharpe_ratio': 0.0
-            } 
+            }
+        finally:
+            if db:
+                db.close()

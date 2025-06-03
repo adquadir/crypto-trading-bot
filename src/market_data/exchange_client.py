@@ -70,6 +70,7 @@ class ExchangeClient:
         self.session = None
         self.health_check_task = None
         self.ws_connections = {}
+        self.market_data = {}
 
         self.proxy_list = proxy_list or ['10001', '10002', '10003']
         self.failover_ports = failover_ports or ['10001', '10002', '10003']
@@ -80,7 +81,6 @@ class ExchangeClient:
             "user": os.getenv('PROXY_USER', 'sp6qilmhb3'),
             "pass": os.getenv('PROXY_PASS', 'y2ok7Y3FEygM~rs7de')
         }
-        self.market_data = {}
 
         self._setup_proxy()
         self._init_client(api_key, api_secret)
@@ -105,6 +105,40 @@ class ExchangeClient:
 
     def _init_client(self, api_key: str, api_secret: str):
         self.client = Client(api_key, api_secret, testnet=self.testnet, requests_params={"proxies": self.proxies})
+
+    async def get_historical_data(self, symbol: str, interval: str, limit: int) -> List[Dict]:
+        """Fetch historical market data (OHLCV) from Binance."""
+        try:
+            # Use the synchronous Binance client with proxies
+            klines = self.client.get_klines(
+                symbol=symbol,
+                interval=interval,
+                limit=limit
+            )
+            
+            # Format the data into a list of dictionaries
+            return [{
+                'timestamp': k[0],
+                'open': float(k[1]),
+                'high': float(k[2]),
+                'low': float(k[3]),
+                'close': float(k[4]),
+                'volume': float(k[5]),
+                'close_time': k[6],
+                'quote_asset_volume': float(k[7]),
+                'number_of_trades': k[8],
+                'taker_buy_base_asset_volume': float(k[9]),
+                'taker_buy_quote_asset_volume': float(k[10]),
+                'ignore': k[11]
+            } for k in klines]
+            
+        except BinanceAPIException as e:
+            logger.error(f"Binance API error fetching historical data: {e}")
+            await self._handle_connection_error()
+            return []
+        except Exception as e:
+            logger.error(f"Error fetching historical data: {e}")
+            return []
 
     def _should_rotate_proxy(self) -> bool:
         metrics = self.proxy_metrics[self.proxy_port]
@@ -169,7 +203,7 @@ class ExchangeClient:
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(
-                    "https://api.binance.com/api/v3/ping",  # Simple endpoint to test connectivity
+                    "https://api.binance.com/api/v3/ping",
                     proxy=f"http://{self.proxy_host}:{self.proxy_port}",
                     proxy_auth=self.proxy_auth
                 ) as response:
