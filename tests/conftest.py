@@ -1,39 +1,36 @@
-import pytest
-import asyncio
+import pytest_asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 from src.market_data.exchange_client import ExchangeClient
 
-@pytest.fixture(scope="function")
+
+@pytest_asyncio.fixture
 async def exchange_client():
     with patch("aiohttp.ClientSession") as mock_session_class:
-        mock_session = MagicMock()
-        mock_session.__aenter__.return_value = mock_session
-        mock_session.__aexit__.return_value = AsyncMock()
-
-        mock_response = MagicMock()
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = AsyncMock()
+        # Create the mock session
+        mock_session = AsyncMock()
+        mock_response = AsyncMock()
         mock_response.status = 200
-        mock_response.text = AsyncMock(return_value='pong')
-        mock_session.get.return_value = mock_response
-        mock_session.ws_connect.return_value = mock_response
+        mock_response.text.return_value = "pong"
 
+        # Setup return values for get and ws_connect
+        mock_session.get.return_value.__aenter__.return_value = mock_response
+        mock_session.ws_connect.return_value.__aenter__.return_value = mock_response
         mock_session_class.return_value.__aenter__.return_value = mock_session
-        mock_session_class.return_value.__aexit__.return_value = AsyncMock()
-        mock_session_class.return_value.get.return_value = mock_response
-        mock_session_class.return_value.ws_connect.return_value = mock_response
 
-        client = ExchangeClient()
+        # Patch Binance Client
+        with patch('src.market_data.exchange_client.Client') as mock_binance_client_class:
+            mock_binance = MagicMock()
+            mock_binance.ping.return_value = {}
+            mock_binance_client_class.return_value = mock_binance
 
-        client._test_proxy_connection = AsyncMock(return_value=True)
-        client._check_proxy_health = AsyncMock()
-        client._start_health_check_loop = AsyncMock()
-        client._score_proxies = AsyncMock()
-        client._rotate_proxy = AsyncMock()
+            # Create the exchange client
+            client = ExchangeClient(
+                api_key='test_api_key',
+                api_secret='test_api_secret',
+                symbol_set={'BTCUSDT'},
+                testnet=True
+            )
 
-        client.client = MagicMock()
-        client.client.ping.return_value = True
-
-        await client.initialize()
-        yield client
-        await client.shutdown()
+            await client.initialize()
+            yield client
+            await client.close()
