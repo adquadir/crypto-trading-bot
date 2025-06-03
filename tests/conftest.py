@@ -2,7 +2,7 @@ import os
 import pytest
 import pytest_asyncio
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from src.market_data.exchange_client import ExchangeClient
 
 @pytest.fixture(scope="session")
@@ -57,13 +57,20 @@ def mock_aiohttp_session(monkeypatch):
 @pytest_asyncio.fixture
 async def exchange_client():
     """Create an ExchangeClient instance for testing."""
-    client = ExchangeClient(
-        api_key='test_api_key',
-        api_secret='test_api_secret',
-        symbol_set={'BTCUSDT'},
-        testnet=True
-    )
+    # ✅ Patch the Binance Client to prevent real network calls
+    with patch('src.market_data.exchange_client.Client') as mock_client_class:
+        mock_client_instance = MagicMock()
+        mock_client_instance.ping.return_value = {}
+        mock_client_instance.get_order_book.return_value = {'bids': [], 'asks': []}
+        mock_client_class.return_value = mock_client_instance
 
-    await client.initialize()
-    yield client
-    await client.close() 
+        client = ExchangeClient(
+            api_key='test_api_key',
+            api_secret='test_api_secret',
+            symbol_set={'BTCUSDT'},
+            testnet=True
+        )
+
+        await client.initialize()
+        yield client
+        await client.close() 
