@@ -1,5 +1,4 @@
 # File: src/market_data/exchange_client.py
-
 from typing import Dict, List, Optional, Set, Tuple
 import asyncio
 import logging
@@ -80,7 +79,6 @@ class ExchangeClient:
             "user": os.getenv('PROXY_USER', 'sp6qilmhb3'),
             "pass": os.getenv('PROXY_PASS', 'y2ok7Y3FEygM~rs7de')
         }
-        self.market_data = {}
 
         self._setup_proxy()
         self._init_client(api_key, api_secret)
@@ -106,51 +104,77 @@ class ExchangeClient:
     def _init_client(self, api_key: str, api_secret: str):
         self.client = Client(api_key, api_secret, testnet=self.testnet, requests_params={"proxies": self.proxies})
 
+    async def test_proxy_connection(self):
+        """Test and log proxy connection details."""
+        logger.info("=== Proxy Connection Test ===")
+        logger.info(f"Current proxy: {self.proxy_host}:{self.proxy_port}")
+        
+        # Test direct connection without proxy
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://api.binance.com/api/v3/ping") as resp:
+                    logger.info("Direct connection test (no proxy): SUCCESS")
+        except Exception as e:
+            logger.warning(f"Direct connection failed: {str(e)}")
+        
+        # Test proxy connection
+        try:
+            success = await self._test_proxy_connection()
+            if success:
+                logger.info("Proxy connection test: SUCCESS")
+            else:
+                logger.error("Proxy connection test: FAILED")
+        except Exception as e:
+            logger.error(f"Proxy test error: {str(e)}")
+        
+        logger.info(f"Available proxy ports: {self.proxy_list}")
+        logger.info("=== End Proxy Test ===")
+
     @rate_limit(max_calls=10, period=1.0)
     async def get_historical_data(self, symbol: str, interval: str, limit: int) -> List[Dict]:
         """Fetch historical market data (OHLCV) from Binance."""
         try:
-            # Use the synchronous Binance client with proxies
+            logger.debug(f"Fetching {limit} {interval} candles for {symbol}")
+            
             klines = self.client.get_klines(
                 symbol=symbol,
                 interval=interval,
                 limit=limit
             )
             
-            # Format the data into a standardized dictionary format
             formatted_data = []
-            for kline in klines:
+            for k in klines:
                 try:
                     formatted_data.append({
-                        'timestamp': int(kline[0]),
-                        'open': float(kline[1]),
-                        'high': float(kline[2]),
-                        'low': float(kline[3]),
-                        'close': float(kline[4]),
-                        'volume': float(kline[5]),
-                        'close_time': int(kline[6]),
-                        'quote_volume': float(kline[7]),
-                        'trades': int(kline[8]),
-                        'taker_buy_base': float(kline[9]),
-                        'taker_buy_quote': float(kline[10])
+                        'timestamp': int(k[0]),
+                        'open': float(k[1]),
+                        'high': float(k[2]),
+                        'low': float(k[3]),
+                        'close': float(k[4]),
+                        'volume': float(k[5]),
+                        'close_time': int(k[6]),
+                        'quote_volume': float(k[7]),
+                        'trades': int(k[8]),
+                        'taker_buy_base': float(k[9]),
+                        'taker_buy_quote': float(k[10])
                     })
                 except (IndexError, ValueError) as e:
-                    logger.warning(f"Malformed kline data: {kline}. Error: {e}")
+                    logger.warning(f"Malformed kline data: {k}. Error: {str(e)}")
                     continue
             
             if not formatted_data:
                 logger.warning(f"No valid data points received for {symbol}")
                 return []
             
-            logger.debug(f"Retrieved {len(formatted_data)} data points for {symbol}")
+            logger.debug(f"Retrieved {len(formatted_data)} valid data points for {symbol}")
             return formatted_data
             
         except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e}")
+            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
             await self._handle_connection_error()
             return []
         except Exception as e:
-            logger.error(f"Unexpected error fetching data for {symbol}: {e}")
+            logger.error(f"Unexpected error fetching data for {symbol}: {str(e)}")
             return []
 
     def _should_rotate_proxy(self) -> bool:
@@ -261,13 +285,28 @@ class ExchangeClient:
             await asyncio.sleep(self.health_check_interval)
 
     async def initialize(self):
-        """Initialize the exchange client."""
+        """Initialize the exchange client and verify API keys."""
         try:
+            logger.info("Initializing exchange client...")
+            
+            # Test API key validity
+            try:
+                account_info = self.client.get_account()
+                if 'balances' not in account_info:
+                    raise ValueError("Invalid API response - check key permissions")
+                logger.info("API keys validated successfully")
+                logger.debug(f"Account permissions: {account_info.get('permissions', 'N/A')}")
+            except BinanceAPIException as e:
+                logger.error(f"API Key Error: {e.status_code} - {e.message}")
+                if e.status_code == 401:
+                    logger.error("Invalid API keys - please check your .env file")
+                raise
+            
             self.session = aiohttp.ClientSession()
             self.health_check_task = asyncio.create_task(self._health_check_loop())
             logger.info("Exchange client initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize exchange client: {e}")
+            logger.error(f"Failed to initialize exchange client: {str(e)}")
             raise
 
     async def close(self):

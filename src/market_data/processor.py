@@ -1,3 +1,4 @@
+# File: src/market_data/processor.py
 from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
@@ -12,68 +13,49 @@ class MarketDataProcessor:
         self.window_sizes = window_sizes
         self.data_cache = {}  # symbol -> DataFrame
         
-    def process_orderbook(self, orderbook: Dict, depth: int = 10) -> Dict:
-        """Process orderbook data into useful metrics."""
+    def update_ohlcv(self, symbol: str, data: List[Dict]) -> bool:
+        """Process and store OHLCV data with validation."""
+        if not data:
+            logger.error(f"No data provided for {symbol}")
+            return False
+            
+        # Validate first data point
+        sample = data[0]
+        required_keys = {'timestamp', 'open', 'high', 'low', 'close', 'volume'}
+        missing_keys = required_keys - set(sample.keys())
+        if missing_keys:
+            logger.error(f"Invalid data format for {symbol}. Missing keys: {missing_keys}")
+            logger.debug(f"Sample data received: {sample}")
+            return False
+            
+        # Convert to DataFrame
         try:
-            bids = pd.DataFrame(orderbook['bids'], columns=['price', 'quantity'], dtype=float)
-            asks = pd.DataFrame(orderbook['asks'], columns=['price', 'quantity'], dtype=float)
+            df = pd.DataFrame(data)
+            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]  # Ensure correct columns
             
-            # Calculate order book metrics
-            bid_volume = bids['quantity'].sum()
-            ask_volume = asks['quantity'].sum()
+            # Initialize cache if needed
+            if symbol not in self.data_cache:
+                self.data_cache[symbol] = df
+            else:
+                # Concatenate new data
+                self.data_cache[symbol] = pd.concat([self.data_cache[symbol], df]).drop_duplicates('timestamp')
             
-            # Calculate weighted average prices
-            bid_wap = (bids['price'] * bids['quantity']).sum() / bid_volume
-            ask_wap = (asks['price'] * asks['quantity']).sum() / ask_volume
+            # Keep only necessary data
+            max_window = max(self.window_sizes)
+            if len(self.data_cache[symbol]) > max_window * 2:
+                self.data_cache[symbol] = self.data_cache[symbol].tail(max_window * 2)
+                
+            logger.debug(f"Processed {len(df)} new data points for {symbol}. Total: {len(self.data_cache[symbol])}")
+            return True
             
-            # Calculate spread
-            spread = ask_wap - bid_wap
-            spread_pct = spread / bid_wap * 100
-            
-            # Calculate order book imbalance
-            imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume)
-            
-            return {
-                'bid_volume': bid_volume,
-                'ask_volume': ask_volume,
-                'bid_wap': bid_wap,
-                'ask_wap': ask_wap,
-                'spread': spread,
-                'spread_pct': spread_pct,
-                'imbalance': imbalance,
-                'timestamp': orderbook['timestamp']
-            }
         except Exception as e:
-            logger.error(f"Error processing orderbook: {e}")
-            return {}
-            
-    def update_ohlcv(self, symbol: str, candle: Dict):
-        """Update OHLCV data for a symbol."""
-        if symbol not in self.data_cache:
-            self.data_cache[symbol] = pd.DataFrame(columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 'volume'
-            ])
-            
-        df = self.data_cache[symbol]
-        new_row = pd.DataFrame([{
-            'timestamp': candle['timestamp'],
-            'open': candle['open'],
-            'high': candle['high'],
-            'low': candle['low'],
-            'close': candle['close'],
-            'volume': candle['volume']
-        }])
-        
-        self.data_cache[symbol] = pd.concat([df, new_row], ignore_index=True)
-        
-        # Keep only necessary data
-        max_window = max(self.window_sizes)
-        if len(self.data_cache[symbol]) > max_window * 2:
-            self.data_cache[symbol] = self.data_cache[symbol].tail(max_window * 2)
+            logger.error(f"Error processing data for {symbol}: {str(e)}")
+            return False
             
     def calculate_indicators(self, symbol: str) -> Dict:
         """Calculate technical indicators for a symbol."""
         if symbol not in self.data_cache or len(self.data_cache[symbol]) < max(self.window_sizes):
+            logger.warning(f"Insufficient data for {symbol} to calculate indicators")
             return {}
             
         df = self.data_cache[symbol]
@@ -87,8 +69,8 @@ class MarketDataProcessor:
                 indicators[f'sma_{window}'] = ta.trend.sma_indicator(df['close'], window=window).iloc[-1]
                 indicators[f'ema_{window}'] = ta.trend.ema_indicator(df['close'], window=window).iloc[-1]
                 
-                # MACD
-                if window == 20:  # Only calculate MACD for one window
+                # MACD (only calculate for smallest window)
+                if window == min(self.window_sizes):
                     macd = ta.trend.MACD(df['close'])
                     indicators['macd'] = macd.macd().iloc[-1]
                     indicators['macd_signal'] = macd.macd_signal().iloc[-1]
@@ -104,9 +86,10 @@ class MarketDataProcessor:
             ).stoch_signal().iloc[-1]
             
             # Volatility Indicators
-            indicators['bb_high'] = ta.volatility.BollingerBands(df['close']).bollinger_hband().iloc[-1]
-            indicators['bb_low'] = ta.volatility.BollingerBands(df['close']).bollinger_lband().iloc[-1]
-            indicators['bb_mid'] = ta.volatility.BollingerBands(df['close']).bollinger_mavg().iloc[-1]
+            bb = ta.volatility.BollingerBands(df['close'])
+            indicators['bb_high'] = bb.bollinger_hband().iloc[-1]
+            indicators['bb_low'] = bb.bollinger_lband().iloc[-1]
+            indicators['bb_mid'] = bb.bollinger_mavg().iloc[-1]
             indicators['atr'] = ta.volatility.AverageTrueRange(
                 df['high'], df['low'], df['close']
             ).average_true_range().iloc[-1]
@@ -117,15 +100,17 @@ class MarketDataProcessor:
                 df['high'], df['low'], df['close'], df['volume']
             ).iloc[-1]
             
+            logger.debug(f"Calculated indicators for {symbol}")
             return indicators
             
         except Exception as e:
-            logger.error(f"Error calculating indicators for {symbol}: {e}")
+            logger.error(f"Error calculating indicators for {symbol}: {str(e)}")
             return {}
             
     def get_market_state(self, symbol: str) -> Dict:
         """Get current market state including all indicators."""
-        if symbol not in self.data_cache:
+        if symbol not in self.data_cache or self.data_cache[symbol].empty:
+            logger.error(f"No data available for {symbol}")
             return {}
             
         indicators = self.calculate_indicators(symbol)
@@ -135,9 +120,20 @@ class MarketDataProcessor:
         # Get latest price data
         latest = self.data_cache[symbol].iloc[-1]
         
-        return {
-            'price': latest['close'],
-            'volume': latest['volume'],
-            'timestamp': latest['timestamp'],
+        market_state = {
+            'symbol': symbol,
+            'timestamp': int(latest['timestamp']),
+            'price': float(latest['close']),
+            'open': float(latest['open']),
+            'high': float(latest['high']),
+            'low': float(latest['low']),
+            'volume': float(latest['volume']),
             'indicators': indicators
-        } 
+        }
+        
+        logger.debug(f"Market state for {symbol} at {market_state['timestamp']}")
+        return market_state
+
+    def get_raw_data(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Get raw data for debugging."""
+        return self.data_cache.get(symbol)
