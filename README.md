@@ -1,6 +1,6 @@
 # Crypto Trading Bot
 
-A sophisticated cryptocurrency trading bot that implements various technical analysis strategies with risk management.
+A sophisticated cryptocurrency trading bot that implements various technical analysis strategies with risk management and proxy support.
 
 ## Features
 
@@ -11,6 +11,10 @@ A sophisticated cryptocurrency trading bot that implements various technical ana
 - Database integration for trade history
 - Configurable trading strategies
 - Logging and monitoring
+- Proxy support with failover
+- Machine learning integration
+- Debug mode for development
+- Comprehensive API integration
 
 ## Setup
 
@@ -66,6 +70,14 @@ BB_STD_DEV=2.0
 # Market Data
 INDICATOR_WINDOWS=20,50,200
 ORDERBOOK_DEPTH=10
+
+# Proxy Configuration
+PROXY_HOST=your_proxy_host
+PROXY_PORT=your_proxy_port
+PROXY_USER=your_proxy_user
+PROXY_PASS=your_proxy_pass
+PROXY_LIST=port1,port2,port3
+FAILOVER_PORTS=port1,port2,port3,port4
 ```
 
 ## Configuration
@@ -97,14 +109,26 @@ The bot's configuration is managed through environment variables and the `config
 - Orderbook depth
 - Update intervals
 
+### Proxy Configuration
+- Proxy host and port
+- Authentication credentials
+- Proxy list for rotation
+- Failover ports
+- Health check settings
+
 ## Usage
 
 1. Start the trading bot:
 ```bash
-python src/main.py
+python run_bot.py
 ```
 
-2. Monitor the logs in `trading_bot.log`
+2. For debug mode:
+```bash
+python debug.py
+```
+
+3. Monitor the logs in `trading_bot.log`
 
 ## Project Structure
 
@@ -115,26 +139,48 @@ crypto-trading-bot/
 │   ├── main.py
 │   ├── config.py
 │   ├── trading_bot.py
-│   ├── exchange/
+│   ├── api/
 │   │   ├── __init__.py
-│   │   └── client.py
+│   │   └── endpoints.py
 │   ├── market_data/
 │   │   ├── __init__.py
+│   │   ├── exchange_client.py
 │   │   └── processor.py
-│   ├── strategies/
+│   ├── signals/
 │   │   ├── __init__.py
 │   │   └── signal_engine.py
-│   └── risk/
+│   ├── risk/
+│   │   ├── __init__.py
+│   │   └── manager.py
+│   ├── database/
+│   │   ├── __init__.py
+│   │   └── models.py
+│   ├── ml/
+│   │   ├── __init__.py
+│   │   └── predictor.py
+│   └── utils/
 │       ├── __init__.py
-│       └── manager.py
+│       └── helpers.py
 ├── tests/
 │   ├── __init__.py
+│   ├── conftest.py
 │   ├── test_trading_bot.py
-│   ├── test_exchange.py
+│   ├── test_exchange_client.py
 │   ├── test_market_data.py
-│   ├── test_strategies.py
+│   ├── test_signals.py
 │   └── test_risk.py
+├── scripts/
+│   ├── setup.sh
+│   └── deploy.sh
+├── docs/
+│   ├── api.md
+│   └── development.md
+├── config/
+│   ├── default.yaml
+│   └── production.yaml
 ├── requirements.txt
+├── run_bot.py
+├── debug.py
 ├── .env
 └── README.md
 ```
@@ -144,6 +190,11 @@ crypto-trading-bot/
 Run the test suite:
 ```bash
 pytest tests/
+```
+
+For specific test files:
+```bash
+pytest tests/test_exchange_client.py -v
 ```
 
 ## Contributing
