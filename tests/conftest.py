@@ -25,34 +25,26 @@ def mock_env_vars(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def mock_aiohttp_session(monkeypatch):
-    """Mock aiohttp.ClientSession with async context manager support."""
+    """Properly mock aiohttp.ClientSession as async context manager."""
     # Mock HTTP response
     mock_response = AsyncMock()
     mock_response.status = 200
-    mock_response.text.return_value = "OK"
+    mock_response.text = AsyncMock(return_value="OK")
 
     # Mock WebSocket
     mock_ws = AsyncMock()
     mock_ws.__aiter__.return_value = iter([])
 
-    # Mock session methods
+    # Mock aiohttp session instance with async context manager
     mock_session = AsyncMock()
-    mock_session.get.return_value = AsyncMock()
     mock_session.get.return_value.__aenter__.return_value = mock_response
     mock_session.get.return_value.__aexit__.return_value = None
-
-    mock_session.ws_connect.return_value = AsyncMock()
     mock_session.ws_connect.return_value.__aenter__.return_value = mock_ws
     mock_session.ws_connect.return_value.__aexit__.return_value = None
-
     mock_session.close = AsyncMock()
 
-    # Patch aiohttp.ClientSession to return the mocked session
-    mock_client_session = MagicMock()
-    mock_client_session.return_value.__aenter__.return_value = mock_session
-    mock_client_session.return_value.__aexit__.return_value = None
-
-    monkeypatch.setattr("aiohttp.ClientSession", mock_client_session)
+    # ✅ Fix: return mock_session directly on aiohttp.ClientSession() call
+    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: mock_session)
 
 @pytest_asyncio.fixture
 async def exchange_client():
