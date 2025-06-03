@@ -33,10 +33,8 @@ async def exchange_client(mock_env_vars):
         testnet=True
     )
     
-    # Initialize the client
-    await client.initialize()
-    
-    yield client
-    
-    # Cleanup
-    await client.close() 
+    try:
+        await client.initialize()
+        yield client
+    finally:
+        await client.close() 
