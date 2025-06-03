@@ -3,6 +3,7 @@ import asyncio
 import logging
 from datetime import datetime
 import aiohttp
+from aiohttp import BasicAuth
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from binance.streams import BinanceSocketManager
@@ -55,6 +56,7 @@ class ExchangeClient:
         self._setup_proxy()
         self._init_client(api_key, api_secret)
         self._setup_websocket()
+        self.market_data = {}  # Initialize market data dictionary
         
     def _setup_proxy(self):
         """Set up proxy configuration."""
@@ -112,19 +114,23 @@ class ExchangeClient:
     async def _test_connection(self):
         """Test the connection to the exchange."""
         try:
-            # Test REST API
+            # Test REST API via requests
             self.client.ping()
-            
-            # Test WebSocket
+
+            # Test WebSocket connectivity using aiohttp with proxy auth
+            proxy_auth = BasicAuth(self.proxy_user, self.proxy_pass)
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     self.ws_url,
-                    proxy=self.proxies['http']
+                    proxy=f"http://{self.proxy_host}:{self.proxy_port}",
+                    proxy_auth=proxy_auth
                 ) as response:
                     if response.status != 200:
                         raise ConnectionError("WebSocket connection test failed")
-                        
+
             logger.info("Connection test successful")
+
         except Exception as e:
             logger.error(f"Connection test failed: {e}")
             await self._handle_connection_error()
@@ -139,7 +145,11 @@ class ExchangeClient:
             
             # Update proxy configuration
             self._setup_proxy()
-            self._init_client(self.client.api_key, self.client.api_secret)
+            
+            # Reinitialize client with fresh API credentials
+            api_key = os.getenv("BINANCE_API_KEY")
+            api_secret = os.getenv("BINANCE_API_SECRET")
+            self._init_client(api_key, api_secret)
             
             logger.info(f"Switched to failover port: {self.proxy_port}")
         else:
