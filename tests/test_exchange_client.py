@@ -186,4 +186,4 @@ async def test_proxy_connection_failure(exchange_client, mock_binance_client):
             assert metrics.last_error is not None
 
 if __name__ == '__main__':
-    pytest.main(['-v', 'test_exchange_client.py']) 
+    pytest.main(['-v', 'test_exchange_client.py'])
