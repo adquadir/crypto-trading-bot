@@ -7,17 +7,14 @@ from src.market_data.exchange_client import ExchangeClient
 async def exchange_client():
     """Create a fully mocked ExchangeClient instance."""
     with patch("aiohttp.ClientSession") as MockSession:
-        # Create proper async mocks
         mock_session_instance = AsyncMock()
         mock_session_instance.close = AsyncMock()
         
-        # Mock the get method
         mock_response = AsyncMock()
         mock_response.__aenter__.return_value.status = 200
         mock_response.__aexit__.return_value = None
         mock_session_instance.get.return_value = mock_response
         
-        # Mock websocket connect
         mock_ws = AsyncMock()
         mock_ws.close = AsyncMock()
         mock_session_instance.ws_connect.return_value.__aenter__.return_value = mock_ws
