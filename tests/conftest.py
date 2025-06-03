@@ -1,68 +1,50 @@
-import os
 import pytest
-import pytest_asyncio
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
+
 from src.market_data.exchange_client import ExchangeClient
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-@pytest.fixture(autouse=True)
-def mock_env_vars(monkeypatch):
-    """Mock environment variables."""
-    monkeypatch.setenv('BINANCE_API_KEY', 'test_api_key')
-    monkeypatch.setenv('BINANCE_API_SECRET', 'test_api_secret')
-    monkeypatch.setenv('PROXY_HOST', 'test.proxy.com')
-    monkeypatch.setenv('PROXY_PORT', '10001')
-    monkeypatch.setenv('PROXY_USER', 'test_user')
-    monkeypatch.setenv('PROXY_PASS', 'test_pass')
-    monkeypatch.setenv('USE_TESTNET', 'True')
-
-@pytest.fixture(autouse=True)
-def mock_aiohttp_session(monkeypatch):
-    """Properly mock aiohttp.ClientSession as async context manager."""
-    # Mock HTTP response
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.text = AsyncMock(return_value="OK")
-
-    # Mock WebSocket
-    mock_ws = AsyncMock()
-    mock_ws.__aiter__.return_value = iter([])
-
-    # Mock aiohttp session instance with async context manager
-    mock_session = AsyncMock()
-    mock_session.get.return_value.__aenter__.return_value = mock_response
-    mock_session.get.return_value.__aexit__.return_value = None
-    mock_session.ws_connect.return_value.__aenter__.return_value = mock_ws
-    mock_session.ws_connect.return_value.__aexit__.return_value = None
-    mock_session.close = AsyncMock()
-
-    # ✅ Fix: return mock_session directly on aiohttp.ClientSession() call
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: mock_session)
-
-@pytest_asyncio.fixture
+@pytest.fixture(scope="function")
 async def exchange_client():
-    """Create an ExchangeClient instance for testing."""
-    # ✅ Patch the Binance Client to prevent real network calls
-    with patch('src.market_data.exchange_client.Client') as mock_client_class:
-        mock_client_instance = MagicMock()
-        mock_client_instance.ping.return_value = {}
-        mock_client_instance.get_order_book.return_value = {'bids': [], 'asks': []}
-        mock_client_class.return_value = mock_client_instance
+    # Patch aiohttp.ClientSession to mock async context managers
+    with patch("aiohttp.ClientSession") as mock_session_class:
+        # Mock instance of aiohttp.ClientSession
+        mock_session = MagicMock()
+        mock_session.__aenter__.return_value = mock_session
+        mock_session.__aexit__.return_value = AsyncMock()
 
-        client = ExchangeClient(
-            api_key='test_api_key',
-            api_secret='test_api_secret',
-            symbol_set={'BTCUSDT'},
-            testnet=True
-        )
+        # Mock session.get return value
+        mock_response = MagicMock()
+        mock_response.__aenter__.return_value = mock_response
+        mock_response.__aexit__.return_value = AsyncMock()
+        mock_response.status = 200
+        mock_response.text = AsyncMock(return_value='pong')
+        mock_session.get.return_value = mock_response
+        mock_session.ws_connect.return_value = mock_response
 
+        # Set the patched class to return the mock_session as async context manager
+        mock_session_class.return_value.__aenter__.return_value = mock_session
+        mock_session_class.return_value.__aexit__.return_value = AsyncMock()
+        mock_session_class.return_value.get.return_value = mock_response
+        mock_session_class.return_value.ws_connect.return_value = mock_response
+
+        # Instantiate the client
+        client = ExchangeClient()
+
+        # Skip actual proxy testing
+        client._test_proxy_connection = AsyncMock()
+        client._check_proxy_health = AsyncMock()
+        client._start_health_check_loop = AsyncMock()
+        client._score_proxies = AsyncMock()
+        client._rotate_proxy = AsyncMock()
+
+        # Prevent real REST ping call
+        client.client = MagicMock()
+        client.client.ping.return_value = True
+
+        # Initialize with mocked methods
         await client.initialize()
+
         yield client
-        await client.close() 
+
+        await client.shutdown()
