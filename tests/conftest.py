@@ -1,16 +1,23 @@
+import os
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, AsyncMock, MagicMock
 from src.market_data.exchange_client import ExchangeClient
 
 @pytest_asyncio.fixture
 async def exchange_client():
+    """Create a fully mocked ExchangeClient instance."""
     with patch("aiohttp.ClientSession") as MockSession:
-        mock_session_instance = AsyncMock()
-        mock_session_instance.get.return_value.__aenter__.return_value.status = 200
-        MockSession.return_value = mock_session_instance
+        mock_response = AsyncMock()
+        mock_response.__aenter__.return_value.status = 200
+        mock_response.__aexit__.return_value = None
 
-        with patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock) as mock_ws_connect:
-            mock_ws_connect.return_value.__aenter__.return_value = AsyncMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.get.return_value = mock_response
+        MockSession.return_value.__aenter__.return_value = mock_session_instance
+
+        with patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock) as mock_ws:
+            mock_ws.return_value.__aenter__.return_value = AsyncMock()
+            mock_ws.return_value.__aexit__.return_value = None
 
             with patch("src.market_data.exchange_client.Client") as mock_binance:
                 mock_binance.return_value.ping.return_value = {}
@@ -33,7 +40,6 @@ async def exchange_client():
                     }
                 )
 
-                await client.setup()
+                await client.initialize()
                 yield client
-                client.session = None  # Prevent MagicMock await error
                 await client.close()
