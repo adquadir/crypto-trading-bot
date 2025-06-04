@@ -4,56 +4,44 @@ import {
   AppBar,
   Box,
   CssBaseline,
+  Divider,
   Drawer,
   IconButton,
   List,
   ListItem,
+  ListItemButton,
   ListItemIcon,
   ListItemText,
   Toolbar,
   Typography,
-  Avatar,
-  Menu,
-  MenuItem,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
-  ShowChart as TradingIcon,
+  SignalCellularAlt as SignalsIcon,
+  AccountBalance as PositionsIcon,
+  Psychology as StrategiesIcon,
   Settings as SettingsIcon,
-  AccountCircle,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
 
-function Layout({ children, onLogout }) {
+const menuItems = [
+  { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
+  { text: 'Signals', icon: <SignalsIcon />, path: '/signals' },
+  { text: 'Positions', icon: <PositionsIcon />, path: '/positions' },
+  { text: 'Strategies', icon: <StrategiesIcon />, path: '/strategies' },
+  { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
+];
+
+function DashboardLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [anchorEl, setAnchorEl] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
-
-  const handleMenu = (event) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleLogout = () => {
-    handleClose();
-    onLogout();
-  };
-
-  const menuItems = [
-    { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
-    { text: 'Trading', icon: <TradingIcon />, path: '/trading' },
-    { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
-  ];
 
   const drawer = (
     <div>
@@ -62,16 +50,17 @@ function Layout({ children, onLogout }) {
           Trading Bot
         </Typography>
       </Toolbar>
+      <Divider />
       <List>
         {menuItems.map((item) => (
-          <ListItem
-            button
-            key={item.text}
-            onClick={() => navigate(item.path)}
-            selected={location.pathname === item.path}
-          >
-            <ListItemIcon>{item.icon}</ListItemIcon>
-            <ListItemText primary={item.text} />
+          <ListItem key={item.text} disablePadding>
+            <ListItemButton
+              selected={location.pathname === item.path}
+              onClick={() => navigate(item.path)}
+            >
+              <ListItemIcon>{item.icon}</ListItemIcon>
+              <ListItemText primary={item.text} />
+            </ListItemButton>
           </ListItem>
         ))}
       </List>
@@ -98,38 +87,9 @@ function Layout({ children, onLogout }) {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
+          <Typography variant="h6" noWrap component="div">
             {menuItems.find((item) => item.path === location.pathname)?.text || 'Dashboard'}
           </Typography>
-          <div>
-            <IconButton
-              size="large"
-              aria-label="account of current user"
-              aria-controls="menu-appbar"
-              aria-haspopup="true"
-              onClick={handleMenu}
-              color="inherit"
-            >
-              <AccountCircle />
-            </IconButton>
-            <Menu
-              id="menu-appbar"
-              anchorEl={anchorEl}
-              anchorOrigin={{
-                vertical: 'top',
-                horizontal: 'right',
-              }}
-              keepMounted
-              transformOrigin={{
-                vertical: 'top',
-                horizontal: 'right',
-              }}
-              open={Boolean(anchorEl)}
-              onClose={handleClose}
-            >
-              <MenuItem onClick={handleLogout}>Logout</MenuItem>
-            </Menu>
-          </div>
         </Toolbar>
       </AppBar>
       <Box
@@ -145,10 +105,7 @@ function Layout({ children, onLogout }) {
           }}
           sx={{
             display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': {
-              boxSizing: 'border-box',
-              width: drawerWidth,
-            },
+            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
           }}
         >
           {drawer}
@@ -157,10 +114,7 @@ function Layout({ children, onLogout }) {
           variant="permanent"
           sx={{
             display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': {
-              boxSizing: 'border-box',
-              width: drawerWidth,
-            },
+            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
           }}
           open
         >
@@ -182,4 +136,4 @@ function Layout({ children, onLogout }) {
   );
 }
 
-export default Layout; 
+export default DashboardLayout; 

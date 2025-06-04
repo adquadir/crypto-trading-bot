@@ -1,100 +1,140 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordRequestForm
-from datetime import timedelta
-import asyncio
+from typing import List, Dict
 import json
-from typing import List
-
-from .models import Token, User
-from .auth import (
-    authenticate_user,
-    create_access_token,
-    get_current_user,
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    fake_users_db
-)
-from .websocket import manager
-from .routes import router as trading_router
+import asyncio
+from datetime import datetime
 
 app = FastAPI(title="Crypto Trading Bot API")
 
-# Configure CORS
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React frontend
+    allow_origins=["http://localhost:3000"],  # React dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include trading routes
-app.include_router(trading_router)
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
 
-@app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: OAuth2RequestForm = Depends()):
-    user = authenticate_user(fake_users_db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
 
-@app.get("/users/me", response_model=User)
-async def read_users_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
 
-@app.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    await manager.connect(websocket, client_id)
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+# WebSocket endpoint for live signals
+@app.websocket("/ws/signals")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
     try:
         while True:
-            data = await websocket.receive_text()
-            # Handle incoming messages if needed
-            await manager.send_personal_message({"message": "Message received"}, client_id)
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, client_id)
-
-# Mock data generation for testing
-async def generate_mock_data():
-    """Generate mock data for testing WebSocket functionality."""
-    while True:
-        # Generate mock trading signal
-        signal = {
-            "symbol": "BTCUSDT",
-            "type": "BUY",
-            "price": 50000.0,
-            "timestamp": "2024-02-20T12:00:00Z"
-        }
-        await manager.broadcast_trading_signal(signal)
-
-        # Generate mock PnL update
-        pnl = {
-            "total_pnl": 1000.0,
-            "daily_pnl": 100.0,
-            "positions": [
-                {
-                    "symbol": "BTCUSDT",
-                    "pnl": 500.0,
-                    "position_size": 0.1
+            # Simulate live signal updates
+            signal = {
+                "timestamp": datetime.now().isoformat(),
+                "symbol": "BTCUSDT",
+                "signal": "BUY",
+                "confidence": 0.85,
+                "indicators": {
+                    "macd": {"value": 0.5, "signal": 0.3},
+                    "rsi": 65,
+                    "bb": {"upper": 50000, "middle": 48000, "lower": 46000}
                 }
-            ]
-        }
-        await manager.broadcast_pnl_update(pnl)
+            }
+            await websocket.send_json(signal)
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
-        # Wait for 5 seconds before next update
-        await asyncio.sleep(5)
+# REST endpoints
+@app.get("/api/trading/signals")
+async def get_signals():
+    return {
+        "signals": [
+            {
+                "timestamp": datetime.now().isoformat(),
+                "symbol": "BTCUSDT",
+                "signal": "BUY",
+                "confidence": 0.85,
+                "indicators": {
+                    "macd": {"value": 0.5, "signal": 0.3},
+                    "rsi": 65,
+                    "bb": {"upper": 50000, "middle": 48000, "lower": 46000}
+                }
+            }
+        ]
+    }
 
-@app.on_event("startup")
-async def startup_event():
-    """Start the mock data generation task."""
-    asyncio.create_task(generate_mock_data())
+@app.get("/api/trading/pnl")
+async def get_pnl():
+    return {
+        "total_pnl": 1234.56,
+        "daily_pnl": 234.56,
+        "win_rate": 0.65,
+        "trades": [
+            {
+                "symbol": "BTCUSDT",
+                "entry_price": 48000,
+                "exit_price": 49000,
+                "pnl": 1000,
+                "timestamp": datetime.now().isoformat()
+            }
+        ]
+    }
+
+@app.get("/api/trading/stats")
+async def get_stats():
+    return {
+        "total_trades": 100,
+        "win_rate": 0.65,
+        "avg_win": 234.56,
+        "avg_loss": -123.45,
+        "profit_factor": 1.89,
+        "max_drawdown": 0.15,
+        "sharpe_ratio": 1.5
+    }
+
+@app.get("/api/trading/positions")
+async def get_positions():
+    return {
+        "positions": [
+            {
+                "symbol": "BTCUSDT",
+                "size": 0.1,
+                "entry_price": 48000,
+                "current_price": 49000,
+                "pnl": 100,
+                "leverage": 3
+            }
+        ]
+    }
+
+@app.get("/api/trading/strategies")
+async def get_strategies():
+    return {
+        "strategies": [
+            {
+                "name": "MACD Crossover",
+                "active": True,
+                "performance": {
+                    "win_rate": 0.65,
+                    "profit_factor": 1.89,
+                    "sharpe_ratio": 1.5
+                }
+            }
+        ]
+    }
 
 if __name__ == "__main__":
     import uvicorn
