@@ -6,6 +6,9 @@ import {
   Box,
   Card,
   CardContent,
+  Alert,
+  Snackbar,
+  CircularProgress,
 } from '@mui/material';
 import {
   LineChart,
@@ -18,31 +21,72 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import axios from 'axios';
+import { API_CONFIG } from '../config';
 
 function Dashboard() {
   const [stats, setStats] = useState(null);
   const [pnl, setPnl] = useState(null);
   const [positions, setPositions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [lastSuccessfulFetch, setLastSuccessfulFetch] = useState(null);
+
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 5000; // 5 seconds
+
+  const handleError = (error, endpoint) => {
+    console.error(`Error fetching ${endpoint}:`, error);
+    
+    let errorMessage = 'Failed to fetch data';
+    if (error.code === 'ECONNREFUSED') {
+      errorMessage = 'Cannot connect to server. Please check if the server is running.';
+    } else if (error.code === 'ETIMEDOUT') {
+      errorMessage = 'Connection timed out. Please check your internet connection.';
+    } else if (error.response) {
+      errorMessage = `Server error: ${error.response.status} - ${error.response.statusText}`;
+    } else if (error.request) {
+      errorMessage = 'No response from server. Please check your connection.';
+    }
+
+    setError({
+      message: errorMessage,
+      endpoint,
+      timestamp: new Date().toISOString()
+    });
+  };
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [statsRes, pnlRes, positionsRes] = await Promise.all([
+        axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.STATS}`),
+        axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.PNL}`),
+        axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.POSITIONS}`),
+      ]);
+
+      setStats(statsRes.data);
+      setPnl(pnlRes.data);
+      setPositions(positionsRes.data.positions);
+      setError(null);
+      setRetryCount(0);
+      setLastSuccessfulFetch(new Date());
+    } catch (error) {
+      handleError(error, 'dashboard data');
+      
+      // Implement retry logic
+      if (retryCount < MAX_RETRIES) {
+        setRetryCount(prev => prev + 1);
+        setTimeout(fetchData, RETRY_DELAY);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [statsRes, pnlRes, positionsRes] = await Promise.all([
-          axios.get('http://localhost:8000/api/trading/stats'),
-          axios.get('http://localhost:8000/api/trading/pnl'),
-          axios.get('http://localhost:8000/api/trading/positions'),
-        ]);
-
-        setStats(statsRes.data);
-        setPnl(pnlRes.data);
-        setPositions(positionsRes.data.positions);
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      }
-    };
-
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Refresh every 5 seconds
+    const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -64,8 +108,34 @@ function Dashboard() {
     </Card>
   );
 
+  if (loading && !stats && !pnl && !positions.length) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   return (
     <Box>
+      {/* Error Alert */}
+      <Snackbar
+        open={!!error}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="error" sx={{ width: '100%' }}>
+          {error?.message}
+          {retryCount > 0 && ` (Retry ${retryCount}/${MAX_RETRIES})`}
+        </Alert>
+      </Snackbar>
+
+      {/* Last Update Time */}
+      {lastSuccessfulFetch && (
+        <Typography variant="caption" color="textSecondary" sx={{ mb: 2, display: 'block' }}>
+          Last updated: {new Date(lastSuccessfulFetch).toLocaleTimeString()}
+        </Typography>
+      )}
+
       <Grid container spacing={3}>
         {/* Performance Stats */}
         <Grid item xs={12} md={3}>
