@@ -35,6 +35,15 @@ check_bot() {
     return 1
 }
 
+# Function to check if web interface is running
+check_web_interface() {
+    if check_process "src/api/main.py"; then
+        echo "Web interface is already running"
+        return 0
+    fi
+    return 1
+}
+
 # Function to start the bot
 start_bot() {
     echo "Starting trading bot..."
@@ -45,11 +54,21 @@ start_bot() {
     cd frontend  # Return to frontend directory
 }
 
+# Function to start the web interface
+start_web_interface() {
+    echo "Starting web interface..."
+    cd ..  # Go back to project root
+    python src/api/main.py > logs/web_interface.log 2>&1 &
+    WEB_PID=$!
+    echo "Web interface started with PID: $WEB_PID"
+    cd frontend  # Return to frontend directory
+}
+
 # Function to create systemd service
 create_systemd_service() {
     echo "Creating systemd service for trading bot..."
     
-    # Create the service file
+    # Create the trading bot service file
     sudo tee /etc/systemd/system/crypto-trading-bot.service << EOF
 [Unit]
 Description=Crypto Trading Bot
@@ -68,36 +87,57 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
+    # Create the web interface service file
+    sudo tee /etc/systemd/system/crypto-trading-bot-web.service << EOF
+[Unit]
+Description=Crypto Trading Bot Web Interface
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$(pwd)
+Environment=PYTHONPATH=$(pwd)
+ExecStart=$(which python) src/api/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     # Reload systemd
     sudo systemctl daemon-reload
     
-    # Enable and start the service
+    # Enable and start the services
     sudo systemctl enable crypto-trading-bot.service
+    sudo systemctl enable crypto-trading-bot-web.service
     sudo systemctl start crypto-trading-bot.service
+    sudo systemctl start crypto-trading-bot-web.service
     
-    echo "Systemd service created and started"
+    echo "Systemd services created and started"
 }
 
 # Function to check if backend is accessible
 check_backend() {
     echo "Checking backend connection..."
-    echo "Testing connection to http://50.31.0.105:8000"
+    echo "Testing connection to http://localhost:8000"
     
     # Try different connection methods
     echo "1. Testing basic connectivity..."
-    if ! ping -c 1 50.31.0.105 > /dev/null 2>&1; then
-        echo "Error: Cannot ping the server. Check if the IP is correct and the server is online."
+    if ! ping -c 1 localhost > /dev/null 2>&1; then
+        echo "Error: Cannot connect to localhost"
         return 1
     fi
     
     echo "2. Testing port 8000..."
-    if ! nc -z -w5 50.31.0.105 8000 > /dev/null 2>&1; then
-        echo "Error: Port 8000 is not accessible. The service might not be running or the port might be blocked."
+    if ! nc -z -w5 localhost 8000 > /dev/null 2>&1; then
+        echo "Error: Port 8000 is not accessible. The web interface might not be running."
         return 1
     fi
     
     echo "3. Testing API endpoint..."
-    if ! curl -s -m 5 http://50.31.0.105:8000/api/trading/stats > /dev/null; then
+    if ! curl -s -m 5 http://localhost:8000/api/trading/stats > /dev/null; then
         echo "Error: API endpoint is not responding. The service might be running but not responding correctly."
         return 1
     fi
@@ -130,23 +170,33 @@ if ! check_bot; then
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         start_bot
-        
-        # Ask about systemd setup
-        read -p "Do you want to set up the bot to start automatically with systemd? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            create_systemd_service
-        fi
+    fi
+fi
+
+# Check if web interface is running
+if ! check_web_interface; then
+    read -p "Web interface is not running. Do you want to start it? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        start_web_interface
+    fi
+fi
+
+# If either service was started, ask about systemd setup
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    read -p "Do you want to set up the services to start automatically with systemd? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        create_systemd_service
     fi
 fi
 
 # Verify backend connection
 if ! check_backend; then
     echo "Backend connection failed. Please check:"
-    echo "1. Is the VPS running? (50.31.0.105)"
-    echo "2. Is the backend service running? (sudo systemctl status crypto-trading-bot.service)"
-    echo "3. Is port 8000 open? (sudo ufw status)"
-    echo "4. Is the service listening on port 8000? (sudo netstat -tulpn | grep 8000)"
+    echo "1. Is the web interface running? (check logs/web_interface.log)"
+    echo "2. Is port 8000 open? (sudo ufw status)"
+    echo "3. Is the service listening on port 8000? (sudo netstat -tulpn | grep 8000)"
     exit 1
 fi
 
@@ -164,7 +214,7 @@ fi
 
 # Start the application
 echo "Starting the application..."
-echo "Backend is running on VPS (50.31.0.105:8000)"
+echo "Backend is running on http://localhost:8000"
 echo "Frontend will run on http://localhost:3000"
 
 # Start frontend
@@ -177,6 +227,9 @@ cleanup() {
     echo "Shutting down services..."
     if [ ! -z "$BOT_PID" ]; then
         kill $BOT_PID 2>/dev/null || true
+    fi
+    if [ ! -z "$WEB_PID" ]; then
+        kill $WEB_PID 2>/dev/null || true
     fi
     if [ ! -z "$FRONTEND_PID" ]; then
         kill $FRONTEND_PID 2>/dev/null || true
