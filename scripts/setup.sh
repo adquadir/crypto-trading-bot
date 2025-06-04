@@ -4,6 +4,9 @@
 set -e
 trap 'echo "Error occurred. Exiting..."; exit 1' ERR
 
+# Get the absolute path of the project root
+PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
 # Function to check if a process is running
 check_process() {
     pgrep -f "$1" > /dev/null
@@ -44,10 +47,18 @@ check_web_interface() {
     return 1
 }
 
+# Function to stop existing processes
+stop_existing_processes() {
+    echo "Stopping existing processes..."
+    pkill -f "src/main.py" || true
+    pkill -f "src/api/main.py" || true
+    sleep 2  # Give them time to shut down
+}
+
 # Function to start the bot
 start_bot() {
     echo "Starting trading bot..."
-    cd ..  # Go back to project root
+    cd "$PROJECT_ROOT"  # Go to project root
     python src/main.py > logs/trading_bot.log 2>&1 &
     BOT_PID=$!
     echo "Trading bot started with PID: $BOT_PID"
@@ -57,7 +68,7 @@ start_bot() {
 # Function to start the web interface
 start_web_interface() {
     echo "Starting web interface..."
-    cd ..  # Go back to project root
+    cd "$PROJECT_ROOT"  # Go to project root
     python src/api/main.py > logs/web_interface.log 2>&1 &
     WEB_PID=$!
     echo "Web interface started with PID: $WEB_PID"
@@ -77,9 +88,9 @@ After=network.target
 [Service]
 Type=simple
 User=$USER
-WorkingDirectory=$(pwd)
-Environment=PYTHONPATH=$(pwd)
-ExecStart=$(which python) src/main.py
+WorkingDirectory=$PROJECT_ROOT
+Environment=PYTHONPATH=$PROJECT_ROOT
+ExecStart=$PROJECT_ROOT/venv/bin/python $PROJECT_ROOT/src/main.py
 Restart=always
 RestartSec=10
 
@@ -96,9 +107,9 @@ After=network.target
 [Service]
 Type=simple
 User=$USER
-WorkingDirectory=$(pwd)
-Environment=PYTHONPATH=$(pwd)
-ExecStart=$(which python) src/api/main.py
+WorkingDirectory=$PROJECT_ROOT
+Environment=PYTHONPATH=$PROJECT_ROOT
+ExecStart=$PROJECT_ROOT/venv/bin/python $PROJECT_ROOT/src/api/main.py
 Restart=always
 RestartSec=10
 
@@ -147,22 +158,25 @@ check_backend() {
 }
 
 # Create logs directory if it doesn't exist
-mkdir -p logs
+mkdir -p "$PROJECT_ROOT/logs"
 
 # Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
+if [ ! -d "$PROJECT_ROOT/venv" ]; then
     echo "Creating virtual environment..."
-    python -m venv venv || { echo "Failed to create virtual environment"; exit 1; }
+    python -m venv "$PROJECT_ROOT/venv" || { echo "Failed to create virtual environment"; exit 1; }
 fi
 
 # Activate virtual environment
 echo "Activating virtual environment..."
-source venv/bin/activate || { echo "Failed to activate virtual environment"; exit 1; }
+source "$PROJECT_ROOT/venv/bin/activate" || { echo "Failed to activate virtual environment"; exit 1; }
 
 # Install frontend dependencies
 echo "Installing frontend dependencies..."
-cd frontend || { echo "Failed to change to frontend directory"; exit 1; }
+cd "$PROJECT_ROOT/frontend" || { echo "Failed to change to frontend directory"; exit 1; }
 npm install || { echo "Failed to install frontend dependencies"; exit 1; }
+
+# Stop any existing processes before starting new ones
+stop_existing_processes
 
 # Check if bot is running
 if ! check_bot; then
@@ -225,12 +239,7 @@ echo "Frontend started with PID: $FRONTEND_PID"
 # Handle script termination
 cleanup() {
     echo "Shutting down services..."
-    if [ ! -z "$BOT_PID" ]; then
-        kill $BOT_PID 2>/dev/null || true
-    fi
-    if [ ! -z "$WEB_PID" ]; then
-        kill $WEB_PID 2>/dev/null || true
-    fi
+    stop_existing_processes
     if [ ! -z "$FRONTEND_PID" ]; then
         kill $FRONTEND_PID 2>/dev/null || true
     fi
