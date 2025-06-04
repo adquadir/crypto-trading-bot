@@ -1,11 +1,18 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from typing import List, Dict
 import json
 import asyncio
 from datetime import datetime
 
-app = FastAPI(title="Crypto Trading Bot API")
+app = FastAPI(
+    title="Crypto Trading Bot API",
+    description="API for the Crypto Trading Bot Dashboard",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
 # Enable CORS
 app.add_middleware(
@@ -15,6 +22,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Root endpoint
+@app.get("/")
+async def root():
+    return JSONResponse({
+        "status": "online",
+        "message": "Crypto Trading Bot API is running",
+        "version": "1.0.0",
+        "endpoints": {
+            "api": "/api/trading/*",
+            "websocket": "/ws/signals",
+            "documentation": "/docs"
+        }
+    })
 
 # WebSocket connection manager
 class ConnectionManager:
