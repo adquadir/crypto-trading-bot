@@ -26,20 +26,88 @@ stop_frontend() {
     sleep 2  # Give it time to shut down
 }
 
+# Function to check if bot is running
+check_bot() {
+    if check_process "src/main.py"; then
+        echo "Trading bot is already running"
+        return 0
+    fi
+    return 1
+}
+
+# Function to start the bot
+start_bot() {
+    echo "Starting trading bot..."
+    cd ..  # Go back to project root
+    python src/main.py > logs/trading_bot.log 2>&1 &
+    BOT_PID=$!
+    echo "Trading bot started with PID: $BOT_PID"
+    cd frontend  # Return to frontend directory
+}
+
+# Function to create systemd service
+create_systemd_service() {
+    echo "Creating systemd service for trading bot..."
+    
+    # Create the service file
+    sudo tee /etc/systemd/system/crypto-trading-bot.service << EOF
+[Unit]
+Description=Crypto Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$(pwd)
+Environment=PYTHONPATH=$(pwd)
+ExecStart=$(which python) src/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Reload systemd
+    sudo systemctl daemon-reload
+    
+    # Enable and start the service
+    sudo systemctl enable crypto-trading-bot.service
+    sudo systemctl start crypto-trading-bot.service
+    
+    echo "Systemd service created and started"
+}
+
 # Function to check if backend is accessible
 check_backend() {
     echo "Checking backend connection..."
+    echo "Testing connection to http://50.31.0.105:8000"
     
-    # Try to connect to the backend API
-    if ! curl -s http://50.31.0.105:8000/api/trading/stats > /dev/null; then
-        echo "Error: Cannot connect to backend API"
-        echo "Please ensure your VPS backend is running and accessible"
-        echo "You may need to set up port forwarding or update the API URL in the frontend"
-        exit 1
+    # Try different connection methods
+    echo "1. Testing basic connectivity..."
+    if ! ping -c 1 50.31.0.105 > /dev/null 2>&1; then
+        echo "Error: Cannot ping the server. Check if the IP is correct and the server is online."
+        return 1
+    fi
+    
+    echo "2. Testing port 8000..."
+    if ! nc -z -w5 50.31.0.105 8000 > /dev/null 2>&1; then
+        echo "Error: Port 8000 is not accessible. The service might not be running or the port might be blocked."
+        return 1
+    fi
+    
+    echo "3. Testing API endpoint..."
+    if ! curl -s -m 5 http://50.31.0.105:8000/api/trading/stats > /dev/null; then
+        echo "Error: API endpoint is not responding. The service might be running but not responding correctly."
+        return 1
     fi
     
     echo "Backend connection successful"
+    return 0
 }
+
+# Create logs directory if it doesn't exist
+mkdir -p logs
 
 # Create virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
@@ -56,8 +124,31 @@ echo "Installing frontend dependencies..."
 cd frontend || { echo "Failed to change to frontend directory"; exit 1; }
 npm install || { echo "Failed to install frontend dependencies"; exit 1; }
 
+# Check if bot is running
+if ! check_bot; then
+    read -p "Trading bot is not running. Do you want to start it? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        start_bot
+        
+        # Ask about systemd setup
+        read -p "Do you want to set up the bot to start automatically with systemd? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            create_systemd_service
+        fi
+    fi
+fi
+
 # Verify backend connection
-check_backend
+if ! check_backend; then
+    echo "Backend connection failed. Please check:"
+    echo "1. Is the VPS running? (50.31.0.105)"
+    echo "2. Is the backend service running? (sudo systemctl status crypto-trading-bot.service)"
+    echo "3. Is port 8000 open? (sudo ufw status)"
+    echo "4. Is the service listening on port 8000? (sudo netstat -tulpn | grep 8000)"
+    exit 1
+fi
 
 # Check if frontend is already running
 if check_frontend; then
@@ -83,7 +174,10 @@ echo "Frontend started with PID: $FRONTEND_PID"
 
 # Handle script termination
 cleanup() {
-    echo "Shutting down frontend..."
+    echo "Shutting down services..."
+    if [ ! -z "$BOT_PID" ]; then
+        kill $BOT_PID 2>/dev/null || true
+    fi
     if [ ! -z "$FRONTEND_PID" ]; then
         kill $FRONTEND_PID 2>/dev/null || true
     fi
