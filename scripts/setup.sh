@@ -4,6 +4,10 @@
 set -e
 trap 'echo "Error occurred. Exiting..."; exit 1' ERR
 
+# VPS Configuration
+VPS_IP="50.31.0.105"
+VPS_PORT="8000"
+
 # Get the absolute path of the project root
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
@@ -132,23 +136,23 @@ EOF
 # Function to check if backend is accessible
 check_backend() {
     echo "Checking backend connection..."
-    echo "Testing connection to http://localhost:8000"
+    echo "Testing connection to http://$VPS_IP:$VPS_PORT"
     
     # Try different connection methods
     echo "1. Testing basic connectivity..."
-    if ! ping -c 1 localhost > /dev/null 2>&1; then
-        echo "Error: Cannot connect to localhost"
+    if ! ping -c 1 $VPS_IP > /dev/null 2>&1; then
+        echo "Error: Cannot ping the VPS. Check if the IP is correct and the server is online."
         return 1
     fi
     
-    echo "2. Testing port 8000..."
-    if ! nc -z -w5 localhost 8000 > /dev/null 2>&1; then
-        echo "Error: Port 8000 is not accessible. The web interface might not be running."
+    echo "2. Testing port $VPS_PORT..."
+    if ! nc -z -w5 $VPS_IP $VPS_PORT > /dev/null 2>&1; then
+        echo "Error: Port $VPS_PORT is not accessible. The service might not be running or the port might be blocked."
         return 1
     fi
     
     echo "3. Testing API endpoint..."
-    if ! curl -s -m 5 http://localhost:8000/api/trading/stats > /dev/null; then
+    if ! curl -s -m 5 http://$VPS_IP:$VPS_PORT/api/trading/stats > /dev/null; then
         echo "Error: API endpoint is not responding. The service might be running but not responding correctly."
         return 1
     fi
@@ -208,9 +212,10 @@ fi
 # Verify backend connection
 if ! check_backend; then
     echo "Backend connection failed. Please check:"
-    echo "1. Is the web interface running? (check logs/web_interface.log)"
-    echo "2. Is port 8000 open? (sudo ufw status)"
-    echo "3. Is the service listening on port 8000? (sudo netstat -tulpn | grep 8000)"
+    echo "1. Is the VPS running? ($VPS_IP)"
+    echo "2. Is the backend service running? (sudo systemctl status crypto-trading-bot-web.service)"
+    echo "3. Is port $VPS_PORT open? (sudo ufw status)"
+    echo "4. Is the service listening on port $VPS_PORT? (sudo netstat -tulpn | grep $VPS_PORT)"
     exit 1
 fi
 
@@ -228,7 +233,7 @@ fi
 
 # Start the application
 echo "Starting the application..."
-echo "Backend is running on http://localhost:8000"
+echo "Backend is running on http://$VPS_IP:$VPS_PORT"
 echo "Frontend will run on http://localhost:3000"
 
 # Start frontend
