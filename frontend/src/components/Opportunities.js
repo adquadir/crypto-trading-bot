@@ -32,8 +32,8 @@ const Opportunities = () => {
   const fetchOpportunities = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/opportunities');
-      setOpportunities(response.data);
+      const response = await axios.get('/api/trading/opportunities');
+      setOpportunities(response.data.opportunities);
       setError(null);
     } catch (err) {
       setError('Failed to fetch opportunities');

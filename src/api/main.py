@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
 import asyncio
 from datetime import datetime
@@ -11,6 +11,8 @@ import os
 from dotenv import load_dotenv
 from src.market_data.exchange_client import ExchangeClient
 from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
+from src.signals.signal_generator import SignalGenerator
+from src.config import EXCHANGE_CONFIG, TRADING_SYMBOLS
 
 # Load environment variables
 load_dotenv()
@@ -49,139 +51,190 @@ exchange_client = ExchangeClient(
 # Initialize symbol discovery
 symbol_discovery = SymbolDiscovery(exchange_client)
 
+# Initialize signal generator
+signal_generator = SignalGenerator()
+
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.heartbeat_interval = 30  # seconds
-        self._lock = asyncio.Lock()  # Add lock for thread safety
-
-    async def connect(self, websocket: WebSocket):
-        try:
-            await websocket.accept()
-            async with self._lock:
-                self.active_connections.append(websocket)
-            logger.info(f"New WebSocket connection established. Total connections: {len(self.active_connections)}")
-            # Send initial connection success message
-            await websocket.send_json({
-                "type": "connection_status",
-                "status": "connected",
-                "message": "WebSocket connection established"
-            })
-        except Exception as e:
-            logger.error(f"Error accepting WebSocket connection: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise
-
-    async def disconnect(self, websocket: WebSocket):
-        try:
-            async with self._lock:
-                if websocket in self.active_connections:
-                    self.active_connections.remove(websocket)
-                    logger.info(f"WebSocket disconnected. Remaining connections: {len(self.active_connections)}")
-        except Exception as e:
-            logger.error(f"Error during WebSocket disconnect: {str(e)}")
-            logger.error(traceback.format_exc())
-
-    async def broadcast(self, message: dict):
-        disconnected = []
-        async with self._lock:
-            connections = self.active_connections.copy()
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.connection_tasks: Dict[str, asyncio.Task] = {}
         
-        for connection in connections:
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"Error broadcasting message: {str(e)}")
-                logger.error(traceback.format_exc())
-                disconnected.append(connection)
-
-        # Clean up disconnected clients
-        for connection in disconnected:
-            self.disconnect(connection)
-
-    async def handle_heartbeat(self, websocket: WebSocket, data: dict):
-        try:
-            # Echo back the timestamp for latency calculation
-            await websocket.send_json({
-                "type": "pong",
-                "timestamp": data.get("timestamp")
-            })
-            logger.debug("Heartbeat response sent")
-        except Exception as e:
-            logger.error(f"Error handling heartbeat: {str(e)}")
-            logger.error(traceback.format_exc())
-            self.disconnect(websocket)
+    async def connect(self, websocket: WebSocket, client_id: str):
+        await websocket.accept()
+        if client_id not in self.active_connections:
+            self.active_connections[client_id] = []
+        self.active_connections[client_id].append(websocket)
+        logger.info(f"Client {client_id} connected. Total connections: {len(self.active_connections[client_id])}")
+        
+    async def disconnect(self, websocket: WebSocket, client_id: str):
+        if client_id in self.active_connections:
+            if websocket in self.active_connections[client_id]:
+                self.active_connections[client_id].remove(websocket)
+                logger.info(f"Client {client_id} disconnected. Remaining connections: {len(self.active_connections[client_id])}")
+            
+            # Clean up empty client lists
+            if not self.active_connections[client_id]:
+                del self.active_connections[client_id]
+                if client_id in self.connection_tasks:
+                    self.connection_tasks[client_id].cancel()
+                    try:
+                        await self.connection_tasks[client_id]
+                    except asyncio.CancelledError:
+                        pass
+                    del self.connection_tasks[client_id]
+                    
+    async def broadcast(self, message: dict, client_id: str):
+        if client_id in self.active_connections:
+            disconnected = []
+            for connection in self.active_connections[client_id]:
+                try:
+                    if connection.client_state.CONNECTED:  # Check if still connected
+                        await connection.send_json(message)
+                    else:
+                        disconnected.append(connection)
+                except Exception as e:
+                    logger.error(f"Error broadcasting to client {client_id}: {e}")
+                    disconnected.append(connection)
+                    
+            # Clean up disconnected websockets
+            for connection in disconnected:
+                await self.disconnect(connection, client_id)
 
 manager = ConnectionManager()
 
-# WebSocket endpoint for live signals
-@app.websocket("/ws/signals")
-async def websocket_endpoint(websocket: WebSocket):
+@app.on_event("startup")
+async def startup_event():
+    await exchange_client.initialize()
+    logger.info("API server started")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Cancel all connection tasks
+    for task in manager.connection_tasks.values():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    
+    # Close all websocket connections
+    for client_id, connections in list(manager.active_connections.items()):
+        for connection in connections:
+            try:
+                await connection.close()
+            except Exception as e:
+                logger.error(f"Error closing websocket for client {client_id}: {e}")
+    
+    # Clear all connection data
+    manager.active_connections.clear()
+    manager.connection_tasks.clear()
+    
+    # Close exchange client
+    await exchange_client.close()
+    logger.info("API server shutdown complete")
+
+async def market_data_stream(client_id: str):
+    """Stream market data to connected clients."""
     try:
-        await manager.connect(websocket)
+        while True:
+            for symbol in TRADING_SYMBOLS:
+                try:
+                    # Get market data
+                    market_data = await exchange_client.get_market_data(symbol)
+                    if not market_data:
+                        continue
+                        
+                    # Generate signals
+                    signal = signal_generator.generate_signals(market_data)
+                    
+                    # Prepare message
+                    message = {
+                        'timestamp': datetime.now().isoformat(),
+                        'symbol': symbol,
+                        'market_data': market_data,
+                        'signal': signal
+                    }
+                    
+                    # Broadcast to client
+                    await manager.broadcast(message, client_id)
+                    
+                    # Rate limiting
+                    await asyncio.sleep(1.0)  # 1 second delay between symbols
+                    
+                except Exception as e:
+                    logger.error(f"Error processing {symbol}: {e}")
+                    continue
+                    
+            # Wait before next update cycle
+            await asyncio.sleep(5.0)  # 5 second delay between cycles
+            
+    except asyncio.CancelledError:
+        logger.info(f"Market data stream cancelled for client {client_id}")
+    except Exception as e:
+        logger.error(f"Market data stream error for client {client_id}: {e}")
+    finally:
+        # Clean up any remaining connections for this client
+        if client_id in manager.active_connections:
+            for connection in manager.active_connections[client_id]:
+                try:
+                    await connection.close()
+                except Exception as e:
+                    logger.error(f"Error closing websocket for client {client_id}: {e}")
+            del manager.active_connections[client_id]
+
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    try:
+        await manager.connect(websocket, client_id)
         
+        # Start market data stream if not already running
+        if client_id not in manager.connection_tasks:
+            manager.connection_tasks[client_id] = asyncio.create_task(
+                market_data_stream(client_id)
+            )
+        
+        # Keep connection alive and handle client messages
         while True:
             try:
-                # Check if connection is still active
-                if websocket.client_state.DISCONNECTED:
-                    logger.info("WebSocket disconnected, breaking message loop")
-                    break
-
-                # Wait for messages from client with timeout
-                try:
-                    data = await asyncio.wait_for(
-                        websocket.receive_json(),
-                        timeout=manager.heartbeat_interval
-                    )
-                except asyncio.TimeoutError:
-                    # No message received within timeout, continue loop
-                    continue
-                
-                # Handle heartbeat messages
-                if data.get("type") == "ping":
-                    await manager.handle_heartbeat(websocket, data)
-                    continue
-
-                # Handle other message types here
-                logger.debug(f"Received message: {data}")
-
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON received: {str(e)}")
-                try:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Invalid message format"
-                    })
-                except Exception:
-                    break
-                continue
+                data = await websocket.receive_text()
+                # Handle any client messages here if needed
             except WebSocketDisconnect:
-                logger.info("WebSocket disconnected normally")
+                await manager.disconnect(websocket, client_id)
                 break
             except Exception as e:
-                logger.error(f"Error processing message: {str(e)}")
-                logger.error(traceback.format_exc())
-                try:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Internal server error"
-                    })
-                except Exception:
-                    break
-                continue
-
-    except WebSocketDisconnect:
-        logger.info("WebSocket disconnected normally")
+                logger.error(f"WebSocket error for client {client_id}: {e}")
+                await manager.disconnect(websocket, client_id)
+                break
+                
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}")
-        logger.error(traceback.format_exc())
-    finally:
-        manager.disconnect(websocket)
-        try:
-            await websocket.close(code=1000, reason="Connection closed")
-        except Exception as e:
-            logger.error(f"Error closing WebSocket: {str(e)}")
+        logger.error(f"Error in websocket endpoint for client {client_id}: {e}")
+        await manager.disconnect(websocket, client_id)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@app.get("/symbols")
+async def get_symbols():
+    """Get list of available trading symbols."""
+    return {"symbols": TRADING_SYMBOLS}
+
+@app.get("/market-data/{symbol}")
+async def get_market_data(symbol: str):
+    """Get current market data for a symbol."""
+    if symbol not in TRADING_SYMBOLS:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+        
+    try:
+        market_data = await exchange_client.get_market_data(symbol)
+        if not market_data:
+            raise HTTPException(status_code=404, detail="Market data not available")
+        return market_data
+    except Exception as e:
+        logger.error(f"Error fetching market data for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # REST endpoints
 @app.get("/api/trading/signals")
@@ -328,7 +381,7 @@ async def get_opportunities(
                 "total": len(filtered),
                 "timestamp": datetime.now().timestamp()
             }
-        })
+        }, "all")
         
         return {
             "opportunities": [

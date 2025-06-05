@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from collections import deque
 import json
 from pathlib import Path
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -114,25 +115,28 @@ def retry_with_backoff(max_retries: int = 3, base_delay: float = 1.0):
         return wrapper
     return decorator
 
-def rate_limit(max_calls: int, period: float):
-    min_interval = period / max_calls
+def rate_limit(limit: int = 10, period: float = 1.0):
+    """Rate limiting decorator."""
     last_reset = time.time()
     calls = 0
-
+    
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
             nonlocal last_reset, calls
+            
             current_time = time.time()
             if current_time - last_reset >= period:
-                calls = 0
                 last_reset = current_time
-            if calls >= max_calls:
-                sleep_time = min_interval - (current_time - last_reset)
+                calls = 0
+                
+            if calls >= limit:
+                sleep_time = period - (current_time - last_reset)
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
-                calls = 0
                 last_reset = time.time()
+                calls = 0
+                
             calls += 1
             return await func(*args, **kwargs)
         return wrapper
@@ -235,7 +239,7 @@ class ExchangeClient:
             logger.debug("Fetching exchange information")
             
             # Get exchange info from Binance
-            exchange_info = self.client.get_exchange_info()
+            exchange_info = await asyncio.to_thread(self.client.get_exchange_info)
             
             # Filter for perpetual futures only
             futures_symbols = [
@@ -258,9 +262,30 @@ class ExchangeClient:
             return result
             
         except BinanceAPIException as e:
-            logger.error(f"Binance API error: {e.status_code} - {e.message}")
-            await self._handle_connection_error()
-            return {'symbols': [], 'timezone': 'UTC', 'serverTime': int(time.time() * 1000)}
+            logger.error(f"Binance API error: {e}")
+            # Try with different proxy
+            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
+            exchange_info = await asyncio.to_thread(self.client.get_exchange_info)
+            
+            # Filter for perpetual futures only
+            futures_symbols = [
+                symbol for symbol in exchange_info['symbols']
+                if symbol['status'] == 'TRADING' and 
+                symbol.get('contractType') == 'PERPETUAL' and
+                symbol.get('isSpotTradingAllowed', False) is False
+            ]
+            
+            result = {
+                'symbols': futures_symbols,
+                'timezone': exchange_info.get('timezone', 'UTC'),
+                'serverTime': exchange_info.get('serverTime', int(time.time() * 1000))
+            }
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=3600)
+            
+            logger.info(f"Found {len(futures_symbols)} active perpetual futures pairs")
+            return result
         except Exception as e:
             logger.error(f"Unexpected error fetching exchange info: {str(e)}")
             return {'symbols': [], 'timezone': 'UTC', 'serverTime': int(time.time() * 1000)}
@@ -280,7 +305,7 @@ class ExchangeClient:
             logger.debug(f"Fetching 24h ticker for {symbol}")
             
             # Get 24h ticker from Binance
-            ticker = self.client.futures_ticker(symbol=symbol)
+            ticker = await asyncio.to_thread(self.client.futures_ticker, symbol=symbol)
             
             if not ticker:
                 logger.warning(f"No ticker data for {symbol}")
@@ -311,9 +336,38 @@ class ExchangeClient:
             return result
             
         except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
-            await self._handle_connection_error()
-            return {}
+            logger.error(f"Binance API error for {symbol}: {e}")
+            # Try with different proxy
+            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
+            ticker = await asyncio.to_thread(self.client.futures_ticker, symbol=symbol)
+            
+            if not ticker:
+                logger.warning(f"No ticker data for {symbol}")
+                return {}
+                
+            result = {
+                'symbol': ticker['symbol'],
+                'priceChange': float(ticker['priceChange']),
+                'priceChangePercent': float(ticker['priceChangePercent']),
+                'weightedAvgPrice': float(ticker['weightedAvgPrice']),
+                'lastPrice': float(ticker['lastPrice']),
+                'lastQty': float(ticker['lastQty']),
+                'openPrice': float(ticker['openPrice']),
+                'highPrice': float(ticker['highPrice']),
+                'lowPrice': float(ticker['lowPrice']),
+                'volume': float(ticker['volume']),
+                'quoteVolume': float(ticker['quoteVolume']),
+                'openTime': int(ticker['openTime']),
+                'closeTime': int(ticker['closeTime']),
+                'firstId': int(ticker['firstId']),
+                'lastId': int(ticker['lastId']),
+                'count': int(ticker['count'])
+            }
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=60)
+            
+            return result
         except Exception as e:
             logger.error(f"Unexpected error fetching ticker for {symbol}: {str(e)}")
             return {}
@@ -333,7 +387,7 @@ class ExchangeClient:
             logger.debug(f"Fetching orderbook for {symbol} (limit: {limit})")
             
             # Get orderbook from Binance
-            depth = self.client.futures_order_book(symbol=symbol, limit=limit)
+            depth = await asyncio.to_thread(self.client.futures_order_book, symbol=symbol, limit=limit)
             
             if not depth:
                 logger.warning(f"No orderbook data for {symbol}")
@@ -351,9 +405,25 @@ class ExchangeClient:
             return result
             
         except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
-            await self._handle_connection_error()
-            return {'bids': [], 'asks': []}
+            logger.error(f"Binance API error for {symbol}: {e}")
+            # Try with different proxy
+            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
+            depth = await asyncio.to_thread(self.client.futures_order_book, symbol=symbol, limit=limit)
+            
+            if not depth:
+                logger.warning(f"No orderbook data for {symbol}")
+                return {'bids': [], 'asks': []}
+                
+            result = {
+                'bids': [[float(price), float(qty)] for price, qty in depth['bids']],
+                'asks': [[float(price), float(qty)] for price, qty in depth['asks']],
+                'lastUpdateId': depth['lastUpdateId']
+            }
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=5)
+            
+            return result
         except Exception as e:
             logger.error(f"Unexpected error fetching orderbook for {symbol}: {str(e)}")
             return {'bids': [], 'asks': []}
@@ -373,7 +443,7 @@ class ExchangeClient:
             logger.debug(f"Fetching funding rate for {symbol}")
             
             # Get funding rate from Binance
-            funding_rate = self.client.futures_funding_rate(symbol=symbol, limit=1)
+            funding_rate = await asyncio.to_thread(self.client.futures_funding_rate, symbol=symbol)
             
             if not funding_rate:
                 logger.warning(f"No funding rate data for {symbol}")
@@ -387,9 +457,21 @@ class ExchangeClient:
             return result
             
         except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
-            await self._handle_connection_error()
-            return 0.0
+            logger.error(f"Binance API error for {symbol}: {e}")
+            # Try with different proxy
+            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
+            funding_rate = await asyncio.to_thread(self.client.futures_funding_rate, symbol=symbol)
+            
+            if not funding_rate:
+                logger.warning(f"No funding rate data for {symbol}")
+                return 0.0
+                
+            result = float(funding_rate[0]['fundingRate'])
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=300)
+            
+            return result
         except Exception as e:
             logger.error(f"Unexpected error fetching funding rate for {symbol}: {str(e)}")
             return 0.0
@@ -409,7 +491,7 @@ class ExchangeClient:
             logger.debug(f"Fetching open interest for {symbol}")
             
             # Get open interest from Binance
-            open_interest = self.client.futures_open_interest(symbol=symbol)
+            open_interest = await asyncio.to_thread(self.client.futures_open_interest, symbol=symbol)
             
             if not open_interest:
                 logger.warning(f"No open interest data for {symbol}")
@@ -423,9 +505,21 @@ class ExchangeClient:
             return result
             
         except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
-            await self._handle_connection_error()
-            return 0.0
+            logger.error(f"Binance API error for {symbol}: {e}")
+            # Try with different proxy
+            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
+            open_interest = await asyncio.to_thread(self.client.futures_open_interest, symbol=symbol)
+            
+            if not open_interest:
+                logger.warning(f"No open interest data for {symbol}")
+                return 0.0
+                
+            result = float(open_interest['openInterest'])
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=60)
+            
+            return result
         except Exception as e:
             logger.error(f"Unexpected error fetching open interest for {symbol}: {str(e)}")
             return 0.0
@@ -444,7 +538,8 @@ class ExchangeClient:
 
             logger.debug(f"Fetching {limit} {interval} candles for {symbol}")
             
-            klines = self.client.get_klines(
+            klines = await asyncio.to_thread(
+                self.client.futures_klines,
                 symbol=symbol,
                 interval=interval,
                 limit=limit
@@ -481,9 +576,45 @@ class ExchangeClient:
             return formatted_data
             
         except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
-            await self._handle_connection_error()
-            return []
+            logger.error(f"Binance API error for {symbol}: {e}")
+            # Try with different proxy
+            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
+            klines = await asyncio.to_thread(
+                self.client.futures_klines,
+                symbol=symbol,
+                interval=interval,
+                limit=limit
+            )
+            
+            formatted_data = []
+            for k in klines:
+                try:
+                    formatted_data.append({
+                        'timestamp': int(k[0]),
+                        'open': float(k[1]),
+                        'high': float(k[2]),
+                        'low': float(k[3]),
+                        'close': float(k[4]),
+                        'volume': float(k[5]),
+                        'close_time': int(k[6]),
+                        'quote_volume': float(k[7]),
+                        'trades': int(k[8]),
+                        'taker_buy_base': float(k[9]),
+                        'taker_buy_quote': float(k[10])
+                    })
+                except (IndexError, ValueError) as e:
+                    logger.warning(f"Malformed kline data: {k}. Error: {str(e)}")
+                    continue
+            
+            if not formatted_data:
+                logger.warning(f"No valid data points received for {symbol}")
+                return []
+            
+            # Cache the result
+            self.cache.set(cache_key, formatted_data, max_age=60)
+            
+            logger.debug(f"Retrieved {len(formatted_data)} valid data points for {symbol}")
+            return formatted_data
         except Exception as e:
             logger.error(f"Unexpected error fetching data for {symbol}: {str(e)}")
             return []
@@ -638,3 +769,9 @@ class ExchangeClient:
             except Exception as e:
                 logger.error(f"Error closing websocket for {symbol}: {e}")
         logger.info("Exchange client shutdown complete")
+
+    def _get_next_proxy(self) -> str:
+        """Get next proxy in rotation."""
+        proxy = self.proxy_list[self.current_port_index]
+        self.current_port_index = (self.current_port_index + 1) % len(self.proxy_list)
+        return proxy

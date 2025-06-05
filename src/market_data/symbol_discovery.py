@@ -10,6 +10,8 @@ import os
 from functools import lru_cache
 import json
 from pathlib import Path
+import pandas as pd
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +180,9 @@ class SymbolDiscovery:
             # Calculate volume trend
             volume_trend = self._check_volume_trend(ohlcv)
             
+            # Calculate technical indicators
+            indicators = self._calculate_indicators(ohlcv)
+            
             return {
                 'symbol': symbol,
                 'ohlcv': ohlcv,
@@ -195,7 +200,8 @@ class SymbolDiscovery:
                 'last_price': float(ticker_24h['lastPrice']),
                 'high_24h': float(ticker_24h['highPrice']),
                 'low_24h': float(ticker_24h['lowPrice']),
-                'quote_volume': float(ticker_24h['quoteVolume'])
+                'quote_volume': float(ticker_24h['quoteVolume']),
+                'indicators': indicators
             }
         except Exception as e:
             logger.error(f"Error fetching market data for {symbol}: {e}")
@@ -772,3 +778,183 @@ class SymbolDiscovery:
             except Exception as e:
                 logger.error(f"Error updating opportunities: {e}")
                 await asyncio.sleep(5)  # Wait before retrying 
+
+    def _calculate_indicators(self, ohlcv: List[Dict]) -> Dict:
+        """Calculate technical indicators from OHLCV data."""
+        try:
+            # Extract price and volume data
+            closes = np.array([float(candle['close']) for candle in ohlcv])
+            highs = np.array([float(candle['high']) for candle in ohlcv])
+            lows = np.array([float(candle['low']) for candle in ohlcv])
+            volumes = np.array([float(candle['volume']) for candle in ohlcv])
+            
+            # Calculate MACD
+            ema12 = self._calculate_ema(closes, 12)
+            ema26 = self._calculate_ema(closes, 26)
+            macd_line = ema12 - ema26
+            signal_line = self._calculate_ema(macd_line, 9)
+            macd_histogram = macd_line - signal_line
+            
+            # Calculate RSI
+            rsi = self._calculate_rsi(closes)
+            
+            # Calculate Bollinger Bands
+            bb_middle = self._calculate_sma(closes, 20)
+            bb_std = np.std(closes[-20:])
+            bb_upper = bb_middle + (2 * bb_std)
+            bb_lower = bb_middle - (2 * bb_std)
+            
+            # Calculate Stochastic Oscillator
+            stoch_k = self._calculate_stochastic(highs, lows, closes)
+            stoch_d = self._calculate_sma(stoch_k, 3)
+            
+            # Calculate ATR
+            atr = self._calculate_atr(highs, lows, closes)
+            
+            # Calculate OBV (On-Balance Volume)
+            obv = self._calculate_obv(closes, volumes)
+            
+            # Calculate VWAP
+            vwap = self._calculate_vwap(ohlcv)
+            
+            # Calculate ADX
+            adx, di_plus, di_minus = self._calculate_adx(highs, lows, closes)
+            
+            # Calculate CCI
+            cci = self._calculate_cci(highs, lows, closes)
+            
+            return {
+                'macd': {
+                    'value': float(macd_line[-1]),
+                    'signal': float(signal_line[-1]),
+                    'histogram': float(macd_histogram[-1])
+                },
+                'rsi': float(rsi[-1]),
+                'bollinger_bands': {
+                    'upper': float(bb_upper[-1]),
+                    'middle': float(bb_middle[-1]),
+                    'lower': float(bb_lower[-1])
+                },
+                'stochastic': {
+                    'k': float(stoch_k[-1]),
+                    'd': float(stoch_d[-1])
+                },
+                'atr': float(atr[-1]),
+                'obv': {
+                    'value': float(obv[-1]),
+                    'trend': 'up' if obv[-1] > obv[-2] else 'down'
+                },
+                'vwap': {
+                    'value': float(vwap[-1]),
+                    'price': float(closes[-1])
+                },
+                'adx': float(adx[-1]),
+                'di_plus': float(di_plus[-1]),
+                'di_minus': float(di_minus[-1]),
+                'cci': float(cci[-1]),
+                'volatility': float(np.std(closes[-20:]) / np.mean(closes[-20:]))
+            }
+        except Exception as e:
+            logger.error(f"Error calculating indicators: {e}")
+            return {}
+            
+    def _calculate_ema(self, data: np.ndarray, period: int) -> np.ndarray:
+        """Calculate Exponential Moving Average."""
+        return np.array(pd.Series(data).ewm(span=period, adjust=False).mean())
+        
+    def _calculate_sma(self, data: np.ndarray, period: int) -> np.ndarray:
+        """Calculate Simple Moving Average."""
+        return np.array(pd.Series(data).rolling(window=period).mean())
+        
+    def _calculate_rsi(self, data: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate Relative Strength Index."""
+        delta = np.diff(data)
+        gain = (delta > 0) * delta
+        loss = (delta < 0) * -delta
+        
+        avg_gain = self._calculate_sma(gain, period)
+        avg_loss = self._calculate_sma(loss, period)
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return np.concatenate(([np.nan], rsi))
+        
+    def _calculate_stochastic(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate Stochastic Oscillator."""
+        lowest_low = self._calculate_sma(lows, period)
+        highest_high = self._calculate_sma(highs, period)
+        
+        k = 100 * ((closes - lowest_low) / (highest_high - lowest_low))
+        return k
+        
+    def _calculate_atr(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate Average True Range."""
+        tr1 = np.abs(highs[1:] - lows[1:])
+        tr2 = np.abs(highs[1:] - closes[:-1])
+        tr3 = np.abs(lows[1:] - closes[:-1])
+        
+        tr = np.maximum(np.maximum(tr1, tr2), tr3)
+        atr = self._calculate_sma(tr, period)
+        return np.concatenate(([np.nan], atr))
+        
+    def _calculate_obv(self, closes: np.ndarray, volumes: np.ndarray) -> np.ndarray:
+        """Calculate On-Balance Volume."""
+        obv = np.zeros_like(closes)
+        obv[0] = volumes[0]
+        
+        for i in range(1, len(closes)):
+            if closes[i] > closes[i-1]:
+                obv[i] = obv[i-1] + volumes[i]
+            elif closes[i] < closes[i-1]:
+                obv[i] = obv[i-1] - volumes[i]
+            else:
+                obv[i] = obv[i-1]
+                
+        return obv
+        
+    def _calculate_vwap(self, ohlcv: List[Dict]) -> np.ndarray:
+        """Calculate Volume Weighted Average Price."""
+        typical_prices = np.array([
+            (float(candle['high']) + float(candle['low']) + float(candle['close'])) / 3
+            for candle in ohlcv
+        ])
+        volumes = np.array([float(candle['volume']) for candle in ohlcv])
+        
+        vwap = np.cumsum(typical_prices * volumes) / np.cumsum(volumes)
+        return vwap
+        
+    def _calculate_adx(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Calculate Average Directional Index."""
+        # Calculate True Range
+        tr1 = np.abs(highs[1:] - lows[1:])
+        tr2 = np.abs(highs[1:] - closes[:-1])
+        tr3 = np.abs(lows[1:] - closes[:-1])
+        tr = np.maximum(np.maximum(tr1, tr2), tr3)
+        
+        # Calculate Directional Movement
+        up_move = highs[1:] - highs[:-1]
+        down_move = lows[:-1] - lows[1:]
+        
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+        
+        # Calculate smoothed values
+        tr_smoothed = self._calculate_sma(tr, period)
+        plus_di = 100 * self._calculate_sma(plus_dm, period) / tr_smoothed
+        minus_di = 100 * self._calculate_sma(minus_dm, period) / tr_smoothed
+        
+        # Calculate ADX
+        dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+        adx = self._calculate_sma(dx, period)
+        
+        return adx, plus_di, minus_di
+        
+    def _calculate_cci(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 20) -> np.ndarray:
+        """Calculate Commodity Channel Index."""
+        typical_price = (highs + lows + closes) / 3
+        sma = self._calculate_sma(typical_price, period)
+        mean_deviation = np.abs(typical_price - sma)
+        mean_deviation_sma = self._calculate_sma(mean_deviation, period)
+        
+        cci = (typical_price - sma) / (0.015 * mean_deviation_sma)
+        return cci 
