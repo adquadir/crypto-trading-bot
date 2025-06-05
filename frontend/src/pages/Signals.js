@@ -316,6 +316,19 @@ const Signals = () => {
         try {
           const data = JSON.parse(event.data);
           
+          // Handle connection status message
+          if (data.type === 'connection_status') {
+            console.log('Connection status:', data.status, data.message);
+            return;
+          }
+          
+          // Handle error messages from server
+          if (data.type === 'error') {
+            console.error('Server error:', data.message);
+            setError(data.message);
+            return;
+          }
+          
           // Handle heartbeat response
           if (data.type === 'pong') {
             missedHeartbeatsRef.current = 0;
@@ -336,11 +349,13 @@ const Signals = () => {
           setLastUpdated(new Date());
         } catch (err) {
           console.error('Error parsing WebSocket message:', err);
+          setError('Error processing server message');
         }
       };
 
       ws.onerror = (event) => {
         clearTimeout(connectionTimeout);
+        console.error('WebSocket Error:', event);
         handleWebSocketError(event);
       };
 
