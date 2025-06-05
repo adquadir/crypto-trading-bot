@@ -54,9 +54,28 @@ DATABASE_CONFIG = {
 EXCHANGE_CONFIG = {
     'api_key': os.getenv('BINANCE_API_KEY'),
     'api_secret': os.getenv('BINANCE_API_SECRET'),
-    'testnet': os.getenv('USE_TESTNET', 'False').lower() == 'true',
-    'symbols': os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(','),
-    'timeframe': os.getenv('TIMEFRAME', '1m')
+    'testnet': os.getenv('BINANCE_TESTNET', 'true').lower() == 'true',
+    'symbols': os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(','),  # Default fallback symbols
+    'timeframe': os.getenv('TIMEFRAME', '1m'),
+    'discovery': {
+        'mode': os.getenv('SYMBOL_DISCOVERY_MODE', 'static'),  # 'static' or 'dynamic'
+        'min_volume_24h': float(os.getenv('MIN_24H_VOLUME', '1000000')),
+        'min_market_cap': float(os.getenv('MIN_MARKET_CAP', '100000000')),
+        'max_spread': float(os.getenv('MAX_SPREAD', '0.002')),
+        'min_liquidity': float(os.getenv('MIN_LIQUIDITY', '500000')),
+        'max_correlation': float(os.getenv('MAX_CORRELATION', '0.7')),
+        'min_volatility': float(os.getenv('MIN_VOLATILITY', '0.01')),
+        'max_volatility': float(os.getenv('MAX_VOLATILITY', '0.05')),
+        'min_funding_rate': float(os.getenv('MIN_FUNDING_RATE', '-0.0001')),
+        'max_funding_rate': float(os.getenv('MAX_FUNDING_RATE', '0.0001')),
+        'min_open_interest': float(os.getenv('MIN_OPEN_INTEREST', '1000000')),
+        'update_interval': int(os.getenv('SYMBOL_UPDATE_INTERVAL', '3600')),
+        'max_symbols': int(os.getenv('MAX_SYMBOLS', '50')),
+        'fallback_symbols': os.getenv('FALLBACK_SYMBOLS', 'BTCUSDT,ETHUSDT,BNBUSDT').split(','),
+        'cache_duration': int(os.getenv('SYMBOL_CACHE_DURATION', '3600')),
+        'retry_attempts': int(os.getenv('SYMBOL_RETRY_ATTEMPTS', '3')),
+        'retry_delay': int(os.getenv('SYMBOL_RETRY_DELAY', '60'))
+    }
 }
 
 # Risk management configuration

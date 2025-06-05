@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -6,6 +6,10 @@ import numpy as np
 from dataclasses import dataclass
 from src.market_data.exchange_client import ExchangeClient
 from src.signals.signal_generator import SignalGenerator
+import os
+from functools import lru_cache
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -25,37 +29,116 @@ class TradingOpportunity:
     indicators: Dict
     reasoning: List[str]
 
+@dataclass
+class SignalValidationResult:
+    is_valid: bool
+    errors: List[str]
+    warnings: List[str]
+
+@dataclass
+class CachedSignal:
+    signal: Dict
+    timestamp: datetime
+    expires_at: datetime
+
 class SymbolDiscovery:
     def __init__(self, exchange_client: ExchangeClient):
         self.exchange_client = exchange_client
         self.signal_generator = SignalGenerator()
-        self.min_volume_24h = 1000000  # Minimum 24h volume in USDT
-        self.min_confidence = 0.7  # Minimum signal confidence
-        self.min_risk_reward = 2.0  # Minimum risk-reward ratio
-        self.max_leverage = 20.0  # Maximum leverage
         self.opportunities: Dict[str, TradingOpportunity] = {}
+        self.last_update = datetime.now()
+        self.update_interval = int(os.getenv('SYMBOL_UPDATE_INTERVAL', '3600'))  # Default 1 hour
+        self._update_task = None
+        
+        # Load configuration from environment
+        self.min_volume_24h = float(os.getenv('MIN_24H_VOLUME', '1000000'))
+        self.min_confidence = float(os.getenv('MIN_CONFIDENCE', '0.7'))
+        self.min_risk_reward = float(os.getenv('MIN_RISK_REWARD', '2.0'))
+        self.max_leverage = float(os.getenv('MAX_LEVERAGE', '20.0'))
         
         # Advanced filtering parameters
-        self.min_market_cap = 100000000  # Minimum market cap in USDT
-        self.max_spread = 0.002  # Maximum spread (0.2%)
-        self.min_liquidity = 500000  # Minimum liquidity in USDT
-        self.max_correlation = 0.7  # Maximum correlation with existing positions
-        self.min_volatility = 0.01  # Minimum volatility (1%)
-        self.max_volatility = 0.05  # Maximum volatility (5%)
+        self.min_market_cap = float(os.getenv('MIN_MARKET_CAP', '100000000'))
+        self.max_spread = float(os.getenv('MAX_SPREAD', '0.002'))
+        self.min_liquidity = float(os.getenv('MIN_LIQUIDITY', '500000'))
+        self.max_correlation = float(os.getenv('MAX_CORRELATION', '0.7'))
+        self.min_volatility = float(os.getenv('MIN_VOLATILITY', '0.01'))
+        self.max_volatility = float(os.getenv('MAX_VOLATILITY', '0.05'))
+        self.min_funding_rate = float(os.getenv('MIN_FUNDING_RATE', '-0.0001'))
+        self.max_funding_rate = float(os.getenv('MAX_FUNDING_RATE', '0.0001'))
+        self.min_open_interest = float(os.getenv('MIN_OPEN_INTEREST', '1000000'))
+        self.max_symbols = int(os.getenv('MAX_SYMBOLS', '50'))
         
+        # Cache configuration
+        self.cache_dir = Path('cache/signals')
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.signal_cache: Dict[str, CachedSignal] = {}
+        self.cache_duration = int(os.getenv('SIGNAL_CACHE_DURATION', '300'))  # 5 minutes default
+        
+    async def start(self):
+        """Start the symbol discovery process."""
+        self._update_task = asyncio.create_task(self._update_loop())
+        logger.info("Symbol discovery started")
+        
+    async def stop(self):
+        """Stop the symbol discovery process."""
+        if self._update_task:
+            self._update_task.cancel()
+            try:
+                await self._update_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Symbol discovery stopped")
+        
+    async def _update_loop(self):
+        """Periodic update loop for symbol discovery."""
+        while True:
+            try:
+                await self.discover_symbols()
+                self.last_update = datetime.now()
+                logger.info(f"Symbol list updated at {self.last_update}")
+                await asyncio.sleep(self.update_interval)
+            except Exception as e:
+                logger.error(f"Error in symbol update loop: {e}")
+                await asyncio.sleep(60)  # Wait a minute before retrying
+                
     async def discover_symbols(self) -> List[str]:
-        """Fetch all available futures trading pairs from Binance."""
+        """Fetch available futures trading pairs based on configuration mode."""
         try:
-            exchange_info = await self.exchange_client.get_exchange_info()
-            futures_symbols = [
-                symbol['symbol'] for symbol in exchange_info['symbols']
-                if symbol['status'] == 'TRADING' and symbol['contractType'] == 'PERPETUAL'
-            ]
-            logger.info(f"Discovered {len(futures_symbols)} trading pairs")
-            return futures_symbols
+            discovery_mode = os.getenv('SYMBOL_DISCOVERY_MODE', 'static')
+            
+            if discovery_mode == 'static':
+                # Use symbols from configuration
+                symbols = os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
+                logger.info(f"Using {len(symbols)} static symbols from configuration")
+                return symbols
+            else:
+                # Dynamic discovery from exchange
+                exchange_info = await self.exchange_client.get_exchange_info()
+                futures_symbols = [
+                    symbol['symbol'] for symbol in exchange_info['symbols']
+                    if symbol['status'] == 'TRADING' and symbol['contractType'] == 'PERPETUAL'
+                ]
+                
+                # Apply filters
+                filtered_symbols = []
+                for symbol in futures_symbols:
+                    market_data = await self.get_market_data(symbol)
+                    if market_data and self._apply_advanced_filters(market_data):
+                        filtered_symbols.append(symbol)
+                        
+                # Limit number of symbols if configured
+                if len(filtered_symbols) > self.max_symbols:
+                    filtered_symbols = filtered_symbols[:self.max_symbols]
+                    
+                logger.info(f"Discovered {len(filtered_symbols)} trading pairs after filtering")
+                return filtered_symbols
+                
         except Exception as e:
             logger.error(f"Error discovering symbols: {e}")
-            return []
+            # Fallback to static symbols on error
+            symbols = os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
+            logger.warning(f"Falling back to {len(symbols)} static symbols due to error")
+            return symbols
 
     async def get_market_data(self, symbol: str) -> Optional[Dict]:
         """Fetch comprehensive market data for a symbol."""
@@ -74,17 +157,85 @@ class SymbolDiscovery:
             # Get order book
             orderbook = await self.exchange_client.get_orderbook(symbol, limit=10)
             
+            # Calculate spread from orderbook
+            spread = self._calculate_spread(orderbook)
+            
+            # Calculate liquidity from orderbook
+            liquidity = self._calculate_liquidity(orderbook)
+            
+            # Calculate market cap (approximate)
+            market_cap = self._calculate_market_cap(ticker_24h)
+            
+            # Calculate open interest
+            open_interest = await self.exchange_client.get_open_interest(symbol)
+            
+            # Calculate volatility
+            volatility = self.calculate_volatility(ohlcv)
+            
+            # Calculate price stability
+            price_stability = self._check_price_stability(ohlcv)
+            
+            # Calculate volume trend
+            volume_trend = self._check_volume_trend(ohlcv)
+            
             return {
                 'symbol': symbol,
                 'ohlcv': ohlcv,
                 'funding_rate': funding_rate,
                 'volume_24h': float(ticker_24h['volume']),
                 'price_change_24h': float(ticker_24h['priceChangePercent']),
-                'orderbook': orderbook
+                'orderbook': orderbook,
+                'spread': spread,
+                'liquidity': liquidity,
+                'market_cap': market_cap,
+                'open_interest': open_interest,
+                'volatility': volatility,
+                'price_stability': price_stability,
+                'volume_trend': volume_trend,
+                'last_price': float(ticker_24h['lastPrice']),
+                'high_24h': float(ticker_24h['highPrice']),
+                'low_24h': float(ticker_24h['lowPrice']),
+                'quote_volume': float(ticker_24h['quoteVolume'])
             }
         except Exception as e:
             logger.error(f"Error fetching market data for {symbol}: {e}")
             return None
+            
+    def _calculate_spread(self, orderbook: Dict) -> float:
+        """Calculate the current spread from orderbook."""
+        try:
+            if not orderbook['bids'] or not orderbook['asks']:
+                return float('inf')
+                
+            best_bid = float(orderbook['bids'][0][0])
+            best_ask = float(orderbook['asks'][0][0])
+            
+            return (best_ask - best_bid) / best_bid
+        except Exception as e:
+            logger.error(f"Error calculating spread: {e}")
+            return float('inf')
+            
+    def _calculate_liquidity(self, orderbook: Dict) -> float:
+        """Calculate the current liquidity from orderbook."""
+        try:
+            # Calculate liquidity as the sum of (price * quantity) for top 10 levels
+            bid_liquidity = sum(float(bid[0]) * float(bid[1]) for bid in orderbook['bids'][:10])
+            ask_liquidity = sum(float(ask[0]) * float(ask[1]) for ask in orderbook['asks'][:10])
+            
+            return (bid_liquidity + ask_liquidity) / 2
+        except Exception as e:
+            logger.error(f"Error calculating liquidity: {e}")
+            return 0.0
+            
+    def _calculate_market_cap(self, ticker_24h: Dict) -> float:
+        """Calculate approximate market cap from 24h data."""
+        try:
+            # For futures, we'll use 24h quote volume as a proxy for market cap
+            # This is an approximation since we don't have circulating supply
+            return float(ticker_24h['quoteVolume'])
+        except Exception as e:
+            logger.error(f"Error calculating market cap: {e}")
+            return 0.0
 
     def calculate_volatility(self, ohlcv: List[Dict]) -> float:
         """Calculate price volatility."""
@@ -256,23 +407,32 @@ class SymbolDiscovery:
             # Get all available symbols
             symbols = await self.discover_symbols()
             
-            # Constants for rate limiting
-            BATCH_SIZE = 10  # Number of symbols to process in parallel
+            # Constants for rate limiting and concurrency control
+            BATCH_SIZE = 5  # Number of symbols to process in parallel
             RATE_LIMIT_DELAY = 1.0  # Delay between batches in seconds
             MAX_RETRIES = 3  # Maximum number of retries for failed requests
+            MAX_CONCURRENT_TASKS = 10  # Maximum number of concurrent tasks
             
             opportunities = []
             total_symbols = len(symbols)
+            
+            # Create a semaphore to limit concurrent tasks
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+            
+            async def process_with_semaphore(symbol: str) -> Optional[TradingOpportunity]:
+                """Process a symbol with semaphore control."""
+                async with semaphore:
+                    return await self._process_symbol_with_retry(symbol, risk_per_trade, MAX_RETRIES)
             
             # Process symbols in batches
             for i in range(0, total_symbols, BATCH_SIZE):
                 batch_symbols = symbols[i:i + BATCH_SIZE]
                 logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(total_symbols + BATCH_SIZE - 1)//BATCH_SIZE}")
                 
-                # Create tasks for the current batch
+                # Create tasks for the current batch with semaphore control
                 tasks = []
                 for symbol in batch_symbols:
-                    task = self._process_symbol_with_retry(symbol, risk_per_trade, MAX_RETRIES)
+                    task = asyncio.create_task(process_with_semaphore(symbol))
                     tasks.append(task)
                 
                 # Process batch concurrently
@@ -289,6 +449,11 @@ class SymbolDiscovery:
                 # Add delay between batches to respect rate limits
                 if i + BATCH_SIZE < total_symbols:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
+                    
+                    # Check if we need to pause for rate limiting
+                    if len(opportunities) > 0 and len(opportunities) % 50 == 0:
+                        logger.info("Rate limit pause: waiting 5 seconds...")
+                        await asyncio.sleep(5)  # Additional pause every 50 opportunities
             
             # Sort opportunities by score
             opportunities.sort(key=lambda x: x.score, reverse=True)
@@ -303,93 +468,181 @@ class SymbolDiscovery:
             logger.error(f"Error scanning opportunities: {e}")
             return []
             
+    def _validate_signal(self, signal: Dict) -> SignalValidationResult:
+        """Validate a trading signal."""
+        errors = []
+        warnings = []
+        
+        # Required fields
+        required_fields = ['symbol', 'direction', 'price', 'confidence', 'indicators']
+        for field in required_fields:
+            if field not in signal:
+                errors.append(f"Missing required field: {field}")
+                
+        if errors:
+            return SignalValidationResult(False, errors, warnings)
+            
+        # Validate field types and values
+        try:
+            if not isinstance(signal['symbol'], str):
+                errors.append("Symbol must be a string")
+                
+            if signal['direction'] not in ['LONG', 'SHORT']:
+                errors.append("Direction must be 'LONG' or 'SHORT'")
+                
+            if not isinstance(signal['price'], (int, float)) or signal['price'] <= 0:
+                errors.append("Price must be a positive number")
+                
+            if not isinstance(signal['confidence'], (int, float)) or not 0 <= signal['confidence'] <= 1:
+                errors.append("Confidence must be a number between 0 and 1")
+                
+            if not isinstance(signal['indicators'], dict):
+                errors.append("Indicators must be a dictionary")
+                
+            # Validate indicators
+            if 'rsi' in signal['indicators']:
+                rsi = signal['indicators']['rsi']
+                if not isinstance(rsi, (int, float)) or not 0 <= rsi <= 100:
+                    warnings.append("RSI value out of normal range (0-100)")
+                    
+            if 'macd' in signal['indicators']:
+                macd = signal['indicators']['macd']
+                if not isinstance(macd, dict) or 'value' not in macd or 'signal' not in macd:
+                    warnings.append("MACD indicator missing required fields")
+                    
+            # Check for extreme values
+            if signal['confidence'] > 0.9:
+                warnings.append("Unusually high confidence value")
+                
+            if 'volatility' in signal['indicators']:
+                vol = signal['indicators']['volatility']
+                if vol > 0.1:  # 10% volatility
+                    warnings.append("High volatility detected")
+                    
+        except Exception as e:
+            errors.append(f"Error validating signal: {str(e)}")
+            
+        return SignalValidationResult(len(errors) == 0, errors, warnings)
+        
+    def _get_cached_signal(self, symbol: str) -> Optional[Dict]:
+        """Get a cached signal if it exists and is still valid."""
+        if symbol in self.signal_cache:
+            cached = self.signal_cache[symbol]
+            if datetime.now() < cached.expires_at:
+                return cached.signal
+            del self.signal_cache[symbol]
+        return None
+        
+    def _cache_signal(self, symbol: str, signal: Dict):
+        """Cache a signal with expiration."""
+        expires_at = datetime.now() + timedelta(seconds=self.cache_duration)
+        self.signal_cache[symbol] = CachedSignal(signal, datetime.now(), expires_at)
+        
+        # Also save to disk for persistence
+        try:
+            cache_file = self.cache_dir / f"{symbol}.json"
+            with open(cache_file, 'w') as f:
+                json.dump({
+                    'signal': signal,
+                    'timestamp': datetime.now().isoformat(),
+                    'expires_at': expires_at.isoformat()
+                }, f)
+        except Exception as e:
+            logger.error(f"Error saving signal to cache file: {e}")
+            
     async def _process_symbol_with_retry(self, symbol: str, risk_per_trade: float, max_retries: int) -> Optional[TradingOpportunity]:
         """Process a single symbol with retry logic."""
         for attempt in range(max_retries):
             try:
-                # Get market data
-                market_data = await self.get_market_data(symbol)
-                if not market_data:
-                    return None
+                # Check cache first
+                cached_signal = self._get_cached_signal(symbol)
+                if cached_signal:
+                    logger.debug(f"Using cached signal for {symbol}")
+                    signal = cached_signal
+                else:
+                    # Get market data
+                    market_data = await self.get_market_data(symbol)
+                    if not market_data:
+                        return None
+                        
+                    # Apply advanced filters
+                    if not self._apply_advanced_filters(market_data):
+                        return None
                     
-                # Apply advanced filters
-                if not self._apply_advanced_filters(market_data):
-                    return None
+                    # Format market data for signal generation
+                    formatted_market_data = {
+                        'price': float(market_data['ohlcv'][-1]['close']),
+                        'funding_rate': float(market_data['funding_rate']),
+                        'open_interest': float(market_data.get('open_interest', 0)),
+                        'symbol': market_data['symbol'],
+                        'volume_24h': float(market_data['volume_24h']),
+                        'indicators': market_data.get('indicators', {})
+                    }
+                    
+                    # Generate signal
+                    signal = self.signal_generator.generate_signals(
+                        formatted_market_data,
+                        market_data.get('indicators', {})
+                    )
+                    
+                    if signal:
+                        # Validate signal
+                        validation = self._validate_signal(signal)
+                        if not validation.is_valid:
+                            logger.error(f"Invalid signal for {symbol}: {validation.errors}")
+                            return None
+                            
+                        if validation.warnings:
+                            logger.warning(f"Signal warnings for {symbol}: {validation.warnings}")
+                            
+                        # Cache valid signal
+                        self._cache_signal(symbol, signal)
                 
-                # Format market data for signal generation
-                formatted_market_data = {
-                    'price': float(market_data['ohlcv'][-1]['close']),
-                    'funding_rate': float(market_data['funding_rate']),
-                    'open_interest': float(market_data.get('open_interest', 0)),
-                    'symbol': market_data['symbol'],
-                    'volume_24h': float(market_data['volume_24h']),
-                    'indicators': market_data.get('indicators', {})
-                }
-                
-                # Generate signals
-                signals = self.signal_generator.generate_signals(
-                    formatted_market_data,
-                    market_data.get('indicators', {})
-                )
-                
-                if not signals:
+                if not signal or signal['confidence'] < self.min_confidence:
                     return None
                 
                 # Calculate volatility
                 volatility = self.calculate_volatility(market_data['ohlcv'])
                 
-                # Process each signal
-                best_opportunity = None
-                best_score = 0.0
+                # Calculate position parameters
+                entry_price = float(signal['price'])
+                direction = signal['direction']
                 
-                for signal in signals:
-                    if signal['confidence'] < self.min_confidence:
-                        continue
-                    
-                    # Calculate position parameters
-                    entry_price = float(signal['price'])
-                    direction = signal['direction']
-                    
-                    # Calculate stop loss and take profit
-                    atr = volatility * entry_price  # Using volatility as ATR proxy
-                    stop_loss = entry_price - (2 * atr) if direction == 'LONG' else entry_price + (2 * atr)
-                    take_profit = entry_price + (4 * atr) if direction == 'LONG' else entry_price - (4 * atr)
-                    
-                    # Calculate leverage based on risk
-                    risk_amount = abs(entry_price - stop_loss)
-                    leverage = min(risk_per_trade / risk_amount, self.max_leverage)
-                    
-                    # Calculate risk-reward ratio
-                    risk_reward = abs(take_profit - entry_price) / abs(entry_price - stop_loss)
-                    
-                    if risk_reward < self.min_risk_reward:
-                        continue
-                    
-                    opportunity = TradingOpportunity(
-                        symbol=market_data['symbol'],
-                        direction=direction,
-                        entry_price=entry_price,
-                        take_profit=take_profit,
-                        stop_loss=stop_loss,
-                        confidence=signal['confidence'],
-                        leverage=leverage,
-                        risk_reward=risk_reward,
-                        volume_24h=market_data['volume_24h'],
-                        volatility=volatility,
-                        score=0.0,  # Will be calculated below
-                        indicators=signal.get('indicators', {}),
-                        reasoning=signal.get('reasoning', [])
-                    )
-                    
-                    # Calculate final score
-                    opportunity.score = self.calculate_opportunity_score(opportunity)
-                    
-                    # Keep track of best opportunity for this symbol
-                    if opportunity.score > best_score:
-                        best_score = opportunity.score
-                        best_opportunity = opportunity
+                # Calculate stop loss and take profit
+                atr = volatility * entry_price  # Using volatility as ATR proxy
+                stop_loss = entry_price - (2 * atr) if direction == 'LONG' else entry_price + (2 * atr)
+                take_profit = entry_price + (4 * atr) if direction == 'LONG' else entry_price - (4 * atr)
                 
-                return best_opportunity
+                # Calculate leverage based on risk
+                risk_amount = abs(entry_price - stop_loss)
+                leverage = min(risk_per_trade / risk_amount, self.max_leverage)
+                
+                # Calculate risk-reward ratio
+                risk_reward = abs(take_profit - entry_price) / abs(entry_price - stop_loss)
+                
+                if risk_reward < self.min_risk_reward:
+                    return None
+                
+                opportunity = TradingOpportunity(
+                    symbol=market_data['symbol'],
+                    direction=direction,
+                    entry_price=entry_price,
+                    take_profit=take_profit,
+                    stop_loss=stop_loss,
+                    confidence=signal['confidence'],
+                    leverage=leverage,
+                    risk_reward=risk_reward,
+                    volume_24h=market_data['volume_24h'],
+                    volatility=volatility,
+                    score=0.0,  # Will be calculated below
+                    indicators=signal.get('indicators', {}),
+                    reasoning=signal.get('reasoning', [])
+                )
+                
+                # Calculate final score
+                opportunity.score = self.calculate_opportunity_score(opportunity)
+                
+                return opportunity
                 
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -406,29 +659,102 @@ class SymbolDiscovery:
         try:
             # Volume filter
             if market_data['volume_24h'] < self.min_volume_24h:
+                logger.debug(f"{market_data['symbol']} rejected: Low volume")
                 return False
                 
             # Spread filter
             if market_data.get('spread', 0) > self.max_spread:
+                logger.debug(f"{market_data['symbol']} rejected: High spread")
                 return False
                 
             # Liquidity filter
             if market_data.get('liquidity', 0) < self.min_liquidity:
+                logger.debug(f"{market_data['symbol']} rejected: Low liquidity")
                 return False
                 
             # Volatility filter
             volatility = self.calculate_volatility(market_data['ohlcv'])
             if not (self.min_volatility <= volatility <= self.max_volatility):
+                logger.debug(f"{market_data['symbol']} rejected: Volatility out of range")
                 return False
                 
             # Market cap filter
             if market_data.get('market_cap', 0) < self.min_market_cap:
+                logger.debug(f"{market_data['symbol']} rejected: Low market cap")
+                return False
+                
+            # Funding rate filter
+            funding_rate = market_data.get('funding_rate', 0)
+            if not (self.min_funding_rate <= funding_rate <= self.max_funding_rate):
+                logger.debug(f"{market_data['symbol']} rejected: Funding rate out of range")
+                return False
+                
+            # Open interest filter
+            if market_data.get('open_interest', 0) < self.min_open_interest:
+                logger.debug(f"{market_data['symbol']} rejected: Low open interest")
+                return False
+                
+            # Price stability filter
+            if not self._check_price_stability(market_data['ohlcv']):
+                logger.debug(f"{market_data['symbol']} rejected: Unstable price")
+                return False
+                
+            # Volume trend filter
+            if not self._check_volume_trend(market_data['ohlcv']):
+                logger.debug(f"{market_data['symbol']} rejected: Declining volume")
                 return False
                 
             return True
             
         except Exception as e:
             logger.error(f"Error applying advanced filters: {e}")
+            return False
+            
+    def _check_price_stability(self, ohlcv: List[Dict]) -> bool:
+        """Check if price is stable enough for trading."""
+        try:
+            closes = [float(candle['close']) for candle in ohlcv]
+            returns = np.diff(closes) / closes[:-1]
+            
+            # Check for price gaps
+            max_gap = 0.05  # 5% maximum price gap
+            if np.max(np.abs(returns)) > max_gap:
+                return False
+                
+            # Check for price stability
+            rolling_std = np.std(returns[-20:])  # Last 20 periods
+            if rolling_std > 0.02:  # 2% maximum standard deviation
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking price stability: {e}")
+            return False
+            
+    def _check_volume_trend(self, ohlcv: List[Dict]) -> bool:
+        """Check if volume trend is healthy."""
+        try:
+            volumes = [float(candle['volume']) for candle in ohlcv]
+            
+            # Calculate volume moving averages
+            vol_ma5 = np.mean(volumes[-5:])
+            vol_ma20 = np.mean(volumes[-20:])
+            
+            # Volume should be increasing or stable
+            if vol_ma5 < vol_ma20 * 0.8:  # 20% decline threshold
+                return False
+                
+            # Check for volume consistency
+            vol_std = np.std(volumes[-20:])
+            vol_mean = np.mean(volumes[-20:])
+            if vol_std / vol_mean > 0.5:  # 50% coefficient of variation threshold
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking volume trend: {e}")
             return False
 
     def get_top_opportunities(self, count: int = 5) -> List[TradingOpportunity]:

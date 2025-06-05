@@ -13,8 +13,16 @@ import os
 import statistics
 from dataclasses import dataclass
 from collections import deque
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class CacheEntry:
+    data: any
+    timestamp: datetime
+    expires_at: datetime
 
 @dataclass
 class ProxyMetrics:
@@ -24,6 +32,87 @@ class ProxyMetrics:
     last_success: Optional[datetime] = None
     total_requests: int = 0
     successful_requests: int = 0
+
+class CacheManager:
+    def __init__(self, cache_dir: str = "cache"):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(exist_ok=True)
+        self.memory_cache: Dict[str, CacheEntry] = {}
+        
+    def get(self, key: str, max_age: int = 300) -> Optional[any]:
+        """Get data from cache if not expired."""
+        # Check memory cache first
+        if key in self.memory_cache:
+            entry = self.memory_cache[key]
+            if datetime.now() < entry.expires_at:
+                return entry.data
+            del self.memory_cache[key]
+            
+        # Check disk cache
+        cache_file = self.cache_dir / f"{key}.json"
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r') as f:
+                    data = json.load(f)
+                    timestamp = datetime.fromisoformat(data['timestamp'])
+                    if datetime.now() - timestamp < timedelta(seconds=max_age):
+                        # Update memory cache
+                        self.memory_cache[key] = CacheEntry(
+                            data=data['data'],
+                            timestamp=timestamp,
+                            expires_at=timestamp + timedelta(seconds=max_age)
+                        )
+                        return data['data']
+            except Exception as e:
+                logger.error(f"Error reading cache file {key}: {e}")
+        return None
+        
+    def set(self, key: str, data: any, max_age: int = 300):
+        """Store data in both memory and disk cache."""
+        expires_at = datetime.now() + timedelta(seconds=max_age)
+        entry = CacheEntry(data=data, timestamp=datetime.now(), expires_at=expires_at)
+        
+        # Update memory cache
+        self.memory_cache[key] = entry
+        
+        # Update disk cache
+        try:
+            cache_file = self.cache_dir / f"{key}.json"
+            with open(cache_file, 'w') as f:
+                json.dump({
+                    'data': data,
+                    'timestamp': entry.timestamp.isoformat()
+                }, f)
+        except Exception as e:
+            logger.error(f"Error writing cache file {key}: {e}")
+
+def retry_with_backoff(max_retries: int = 3, base_delay: float = 1.0):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except BinanceAPIException as e:
+                    last_exception = e
+                    if e.status_code in [429, 418]:  # Rate limit or IP ban
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"Rate limit hit, retrying in {delay}s")
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"Error in {func.__name__}, retrying in {delay}s: {e}")
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+            raise last_exception
+        return wrapper
+    return decorator
 
 def rate_limit(max_calls: int, period: float):
     min_interval = period / max_calls
@@ -69,6 +158,7 @@ class ExchangeClient:
         self.session = None
         self.health_check_task = None
         self.ws_connections = {}
+        self.cache = CacheManager()
 
         self.proxy_list = proxy_list or ['10001', '10002', '10003']
         self.failover_ports = failover_ports or ['10001', '10002', '10003']
@@ -130,10 +220,228 @@ class ExchangeClient:
         logger.info(f"Available proxy ports: {self.proxy_list}")
         logger.info("=== End Proxy Test ===")
 
+    @retry_with_backoff(max_retries=3)
+    @rate_limit(max_calls=10, period=1.0)
+    async def get_exchange_info(self) -> Dict:
+        """Fetch exchange information including all available trading pairs."""
+        try:
+            # Check cache first
+            cache_key = 'exchange_info'
+            cached_data = self.cache.get(cache_key, max_age=3600)  # Cache for 1 hour
+            if cached_data:
+                logger.debug("Using cached exchange info")
+                return cached_data
+
+            logger.debug("Fetching exchange information")
+            
+            # Get exchange info from Binance
+            exchange_info = self.client.get_exchange_info()
+            
+            # Filter for perpetual futures only
+            futures_symbols = [
+                symbol for symbol in exchange_info['symbols']
+                if symbol['status'] == 'TRADING' and 
+                symbol.get('contractType') == 'PERPETUAL' and
+                symbol.get('isSpotTradingAllowed', False) is False
+            ]
+            
+            result = {
+                'symbols': futures_symbols,
+                'timezone': exchange_info.get('timezone', 'UTC'),
+                'serverTime': exchange_info.get('serverTime', int(time.time() * 1000))
+            }
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=3600)
+            
+            logger.info(f"Found {len(futures_symbols)} active perpetual futures pairs")
+            return result
+            
+        except BinanceAPIException as e:
+            logger.error(f"Binance API error: {e.status_code} - {e.message}")
+            await self._handle_connection_error()
+            return {'symbols': [], 'timezone': 'UTC', 'serverTime': int(time.time() * 1000)}
+        except Exception as e:
+            logger.error(f"Unexpected error fetching exchange info: {str(e)}")
+            return {'symbols': [], 'timezone': 'UTC', 'serverTime': int(time.time() * 1000)}
+
+    @retry_with_backoff(max_retries=3)
+    @rate_limit(max_calls=10, period=1.0)
+    async def get_ticker_24h(self, symbol: str) -> Dict:
+        """Fetch 24-hour ticker statistics for a symbol."""
+        try:
+            # Check cache first
+            cache_key = f'ticker_24h_{symbol}'
+            cached_data = self.cache.get(cache_key, max_age=60)  # Cache for 1 minute
+            if cached_data:
+                logger.debug(f"Using cached 24h ticker for {symbol}")
+                return cached_data
+
+            logger.debug(f"Fetching 24h ticker for {symbol}")
+            
+            # Get 24h ticker from Binance
+            ticker = self.client.futures_ticker(symbol=symbol)
+            
+            if not ticker:
+                logger.warning(f"No ticker data for {symbol}")
+                return {}
+                
+            result = {
+                'symbol': ticker['symbol'],
+                'priceChange': float(ticker['priceChange']),
+                'priceChangePercent': float(ticker['priceChangePercent']),
+                'weightedAvgPrice': float(ticker['weightedAvgPrice']),
+                'lastPrice': float(ticker['lastPrice']),
+                'lastQty': float(ticker['lastQty']),
+                'openPrice': float(ticker['openPrice']),
+                'highPrice': float(ticker['highPrice']),
+                'lowPrice': float(ticker['lowPrice']),
+                'volume': float(ticker['volume']),
+                'quoteVolume': float(ticker['quoteVolume']),
+                'openTime': int(ticker['openTime']),
+                'closeTime': int(ticker['closeTime']),
+                'firstId': int(ticker['firstId']),
+                'lastId': int(ticker['lastId']),
+                'count': int(ticker['count'])
+            }
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=60)
+            
+            return result
+            
+        except BinanceAPIException as e:
+            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
+            await self._handle_connection_error()
+            return {}
+        except Exception as e:
+            logger.error(f"Unexpected error fetching ticker for {symbol}: {str(e)}")
+            return {}
+
+    @retry_with_backoff(max_retries=3)
+    @rate_limit(max_calls=10, period=1.0)
+    async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
+        """Fetch order book data for a symbol."""
+        try:
+            # Check cache first
+            cache_key = f'orderbook_{symbol}_{limit}'
+            cached_data = self.cache.get(cache_key, max_age=5)  # Cache for 5 seconds
+            if cached_data:
+                logger.debug(f"Using cached orderbook for {symbol}")
+                return cached_data
+
+            logger.debug(f"Fetching orderbook for {symbol} (limit: {limit})")
+            
+            # Get orderbook from Binance
+            depth = self.client.futures_order_book(symbol=symbol, limit=limit)
+            
+            if not depth:
+                logger.warning(f"No orderbook data for {symbol}")
+                return {'bids': [], 'asks': []}
+                
+            result = {
+                'bids': [[float(price), float(qty)] for price, qty in depth['bids']],
+                'asks': [[float(price), float(qty)] for price, qty in depth['asks']],
+                'lastUpdateId': depth['lastUpdateId']
+            }
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=5)
+            
+            return result
+            
+        except BinanceAPIException as e:
+            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
+            await self._handle_connection_error()
+            return {'bids': [], 'asks': []}
+        except Exception as e:
+            logger.error(f"Unexpected error fetching orderbook for {symbol}: {str(e)}")
+            return {'bids': [], 'asks': []}
+
+    @retry_with_backoff(max_retries=3)
+    @rate_limit(max_calls=10, period=1.0)
+    async def get_funding_rate(self, symbol: str) -> float:
+        """Fetch current funding rate for a symbol."""
+        try:
+            # Check cache first
+            cache_key = f'funding_rate_{symbol}'
+            cached_data = self.cache.get(cache_key, max_age=300)  # Cache for 5 minutes
+            if cached_data is not None:
+                logger.debug(f"Using cached funding rate for {symbol}")
+                return cached_data
+
+            logger.debug(f"Fetching funding rate for {symbol}")
+            
+            # Get funding rate from Binance
+            funding_rate = self.client.futures_funding_rate(symbol=symbol, limit=1)
+            
+            if not funding_rate:
+                logger.warning(f"No funding rate data for {symbol}")
+                return 0.0
+                
+            result = float(funding_rate[0]['fundingRate'])
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=300)
+            
+            return result
+            
+        except BinanceAPIException as e:
+            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
+            await self._handle_connection_error()
+            return 0.0
+        except Exception as e:
+            logger.error(f"Unexpected error fetching funding rate for {symbol}: {str(e)}")
+            return 0.0
+
+    @retry_with_backoff(max_retries=3)
+    @rate_limit(max_calls=10, period=1.0)
+    async def get_open_interest(self, symbol: str) -> float:
+        """Fetch open interest for a symbol."""
+        try:
+            # Check cache first
+            cache_key = f'open_interest_{symbol}'
+            cached_data = self.cache.get(cache_key, max_age=60)  # Cache for 1 minute
+            if cached_data is not None:
+                logger.debug(f"Using cached open interest for {symbol}")
+                return cached_data
+
+            logger.debug(f"Fetching open interest for {symbol}")
+            
+            # Get open interest from Binance
+            open_interest = self.client.futures_open_interest(symbol=symbol)
+            
+            if not open_interest:
+                logger.warning(f"No open interest data for {symbol}")
+                return 0.0
+                
+            result = float(open_interest['openInterest'])
+            
+            # Cache the result
+            self.cache.set(cache_key, result, max_age=60)
+            
+            return result
+            
+        except BinanceAPIException as e:
+            logger.error(f"Binance API error for {symbol}: {e.status_code} - {e.message}")
+            await self._handle_connection_error()
+            return 0.0
+        except Exception as e:
+            logger.error(f"Unexpected error fetching open interest for {symbol}: {str(e)}")
+            return 0.0
+
+    @retry_with_backoff(max_retries=3)
     @rate_limit(max_calls=10, period=1.0)
     async def get_historical_data(self, symbol: str, interval: str, limit: int) -> List[Dict]:
         """Fetch historical market data (OHLCV) from Binance."""
         try:
+            # Check cache first
+            cache_key = f'historical_{symbol}_{interval}_{limit}'
+            cached_data = self.cache.get(cache_key, max_age=60)  # Cache for 1 minute
+            if cached_data:
+                logger.debug(f"Using cached historical data for {symbol}")
+                return cached_data
+
             logger.debug(f"Fetching {limit} {interval} candles for {symbol}")
             
             klines = self.client.get_klines(
@@ -165,6 +473,9 @@ class ExchangeClient:
             if not formatted_data:
                 logger.warning(f"No valid data points received for {symbol}")
                 return []
+            
+            # Cache the result
+            self.cache.set(cache_key, formatted_data, max_age=60)
             
             logger.debug(f"Retrieved {len(formatted_data)} valid data points for {symbol}")
             return formatted_data
