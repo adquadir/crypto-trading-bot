@@ -7,7 +7,13 @@ import asyncio
 from datetime import datetime
 import logging
 import traceback
+import os
+from dotenv import load_dotenv
+from src.market_data.exchange_client import ExchangeClient
 from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -33,19 +39,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Root endpoint
-@app.get("/")
-async def root():
-    return JSONResponse({
-        "status": "online",
-        "message": "Crypto Trading Bot API is running",
-        "version": "1.0.0",
-        "endpoints": {
-            "api": "/api/trading/*",
-            "websocket": "/ws/signals",
-            "documentation": "/docs"
-        }
-    })
+# Initialize exchange client
+exchange_client = ExchangeClient(
+    api_key=os.getenv('BINANCE_API_KEY'),
+    api_secret=os.getenv('BINANCE_API_SECRET'),
+    testnet=os.getenv('USE_TESTNET', 'False').lower() == 'true'
+)
+
+# Initialize symbol discovery
+symbol_discovery = SymbolDiscovery(exchange_client)
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -277,9 +279,6 @@ async def get_settings():
 async def update_settings(settings: dict):
     # In a real implementation, you would save these settings
     return {"status": "success", "message": "Settings updated"}
-
-# Initialize symbol discovery
-symbol_discovery = SymbolDiscovery(exchange_client)
 
 @app.get("/api/trading/opportunities")
 async def get_opportunities(

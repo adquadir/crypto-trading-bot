@@ -22,12 +22,14 @@ import {
   AccountBalance as PositionsIcon,
   Psychology as StrategiesIcon,
   Settings as SettingsIcon,
+  TrendingUp as OpportunitiesIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
+  { text: 'Opportunities', icon: <OpportunitiesIcon />, path: '/opportunities' },
   { text: 'Signals', icon: <SignalsIcon />, path: '/signals' },
   { text: 'Positions', icon: <PositionsIcon />, path: '/positions' },
   { text: 'Strategies', icon: <StrategiesIcon />, path: '/strategies' },

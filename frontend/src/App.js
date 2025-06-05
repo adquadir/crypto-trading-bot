@@ -13,6 +13,7 @@ import Signals from './pages/Signals';
 import Positions from './pages/Positions';
 import Strategies from './pages/Strategies';
 import Settings from './pages/Settings';
+import Opportunities from './pages/Opportunities';
 
 // Create theme
 const theme = createTheme({
@@ -40,6 +41,7 @@ function App() {
           <DashboardLayout>
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/opportunities" element={<Opportunities />} />
               <Route path="/signals" element={<Signals />} />
               <Route path="/positions" element={<Positions />} />
               <Route path="/strategies" element={<Strategies />} />

@@ -1,68 +1,99 @@
 # Crypto Trading Bot
 
-A sophisticated cryptocurrency trading bot with a modern web interface for monitoring and control.
+A sophisticated cryptocurrency trading bot with a modern web interface for monitoring and control. The bot automatically scans all available futures pairs on Binance, identifies high-probability trading opportunities, and executes trades with advanced risk management.
 
-## Architecture
+## Key Features
+
+### Dynamic Symbol Discovery
+- Automatically discovers and monitors all available futures pairs
+- Real-time scanning of market data
+- Intelligent opportunity scoring based on multiple factors
+- No manual symbol configuration required
+
+### Advanced Technical Analysis
+- Multiple technical indicators:
+  - Trend: MACD, EMA
+  - Momentum: RSI, Stochastic
+  - Volatility: Bollinger Bands, ATR
+  - Volume: OBV, VWAP
+  - Support/Resistance levels
+- Sophisticated opportunity scoring:
+  - Signal confidence (30%)
+  - Technical indicators (25%)
+  - Volume (15%)
+  - Risk-reward ratio (15%)
+  - Volatility (10%)
+  - Leverage (5%)
+
+### Risk Management
+- Fixed risk per trade ($50 by default)
+- Dynamic position sizing
+- Maximum leverage limits
+- Correlation monitoring
+- Drawdown protection
+- Stop-loss and take-profit calculation
+
+### Real-time Monitoring
+- Live WebSocket updates
+- Modern React-based dashboard
+- Real-time opportunity display
+- Performance metrics
+- Position management
+
+### Advanced Filtering
+- Minimum market cap ($100M)
+- Maximum spread (0.2%)
+- Minimum liquidity ($500K)
+- Volatility range (1-5%)
+- Volume requirements
+- Correlation limits
+
+## System Architecture
 
 The system consists of three main components:
 
 1. **Trading Bot (Internal Service)**
-   - Handles all trading logic and risk management
-   - Runs internally on the VPS
-   - Communicates with the exchange directly
+   - Manages trading logic and risk management
+   - Operates on a VPS
+   - Communicates with exchanges
+   - Processes market data
+   - Generates trading signals
 
 2. **Web Interface (Backend API)**
-   - FastAPI-based REST API and WebSocket server
+   - FastAPI-based REST API
+   - WebSocket server for real-time updates
    - Runs on port 8000
-   - Provides endpoints for frontend communication
-   - Available at `http://50.31.0.105:8000`
+   - Handles frontend communication
 
 3. **Frontend (React Dashboard)**
-   - Modern React-based web interface
+   - React-based interface
    - Runs on port 3000
    - Real-time updates via WebSocket
-   - Available at `http://localhost:3000`
+   - Modern, responsive design
 
-## Features
+## Setup Instructions
 
-- Real-time market data processing
-- Multiple technical indicators (MACD, RSI, Bollinger Bands)
-- Risk management system
-- Position sizing and stop-loss calculation
-- Database integration for trade history
-- Configurable trading strategies
-- Logging and monitoring
-- Proxy support with failover
-- Machine learning integration
-- Debug mode for development
-- Modern web dashboard
-- Real-time trading signals
-- Performance metrics and charts
-- Position management
-- Strategy configuration
-
-## Setup
-
-1. Clone the repository:
+1. **Clone the Repository**
 ```bash
 git clone https://github.com/yourusername/crypto-trading-bot.git
 cd crypto-trading-bot
 ```
 
-2. Run the setup script:
+2. **Install Dependencies**
 ```bash
-./scripts/setup.sh
+# Backend
+pip install -r requirements.txt
+
+# Frontend
+cd frontend
+npm install
 ```
 
-This will:
-- Create a virtual environment
-- Install backend dependencies
-- Install frontend dependencies
-- Start the trading bot
-- Start the web interface
-- Start the frontend
+3. **Configure Environment**
+The bot supports two configuration methods:
 
-3. Create a `.env` file in the root directory with the following variables:
+A. **Environment Variables (Recommended)**
+Create a `.env` file in the root directory:
 ```env
 # Exchange API Keys
 BINANCE_API_KEY=your_api_key_here
@@ -75,22 +106,15 @@ DB_POOL_SIZE=5
 DB_MAX_OVERFLOW=10
 DB_ECHO=False
 
-# Trading Configuration
-TRADING_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT
-TIMEFRAME=1m
-UPDATE_INTERVAL=1.0
-
 # Risk Management
-MAX_POSITION_SIZE=0.1
-MAX_LEVERAGE=3.0
-RISK_PER_TRADE=0.02
+RISK_PER_TRADE=50.0
 MAX_OPEN_TRADES=5
-MAX_CORRELATION=0.7
+MAX_LEVERAGE=20.0
 MIN_RISK_REWARD=2.0
 MAX_DAILY_LOSS=0.05
 MAX_DRAWDOWN=0.15
 
-# Strategy Parameters
+# Technical Analysis
 MACD_FAST_PERIOD=12
 MACD_SLOW_PERIOD=26
 MACD_SIGNAL_PERIOD=9
@@ -101,136 +125,128 @@ BB_STD_DEV=2.0
 # Market Data
 INDICATOR_WINDOWS=20,50,200
 ORDERBOOK_DEPTH=10
-
-# Proxy Configuration
-PROXY_HOST=your_proxy_host
-PROXY_PORT=your_proxy_port
-PROXY_USER=your_proxy_user
-PROXY_PASS=your_proxy_pass
-PROXY_LIST=port1,port2,port3
-FAILOVER_PORTS=port1,port2,port3,port4
 ```
 
-## Services
+B. **YAML Configuration (Alternative)**
+Create configuration files in the `config/` directory:
+- `config/default.yaml` - Default settings
+- `config/production.yaml` - Production-specific settings
 
-### Trading Bot Service
-- Status: `sudo systemctl status crypto-trading-bot.service`
-- Logs: `sudo journalctl -u crypto-trading-bot.service -f`
-- Restart: `sudo systemctl restart crypto-trading-bot.service`
+4. **Initialize Database**
+```bash
+python scripts/init_db.py
+```
 
-### Web Interface Service
-- Status: `sudo systemctl status crypto-trading-bot-web.service`
-- Logs: `sudo journalctl -u crypto-trading-bot-web.service -f`
-- Restart: `sudo systemctl restart crypto-trading-bot-web.service`
+5. **Setup Services**
+Choose one of the following methods:
 
-### Frontend
-- Status: `ps aux | grep "node.*react-scripts start"`
-- Logs: `journalctl -f | grep "react-scripts"`
+A. **Quick Setup (Development)**
+```bash
+./scripts/setup.sh
+```
 
-## API Endpoints
+B. **Service Setup (Production)**
+```bash
+sudo ./scripts/setup_service.sh
+```
 
-The web interface provides the following endpoints:
+6. **Start the Services**
+```bash
+# Start the trading bot
+python run_bot.py
 
-- `GET /` - API status and documentation
-- `GET /docs` - Swagger UI documentation
-- `GET /redoc` - ReDoc documentation
-- `GET /api/trading/signals` - Get trading signals
-- `GET /api/trading/pnl` - Get profit and loss data
-- `GET /api/trading/stats` - Get trading statistics
-- `GET /api/trading/positions` - Get current positions
-- `GET /api/trading/strategies` - Get strategy information
-- `WS /ws/signals` - WebSocket for real-time signals
+# Start the web interface
+cd frontend
+npm start
+```
 
 ## Project Structure
 
 ```
 crypto-trading-bot/
-├── src/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── config.py
-│   ├── trading_bot.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── main.py
-│   ├── market_data/
-│   │   ├── __init__.py
-│   │   ├── exchange_client.py
-│   │   └── processor.py
-│   ├── signals/
-│   │   ├── __init__.py
-│   │   └── signal_engine.py
-│   ├── risk/
-│   │   ├── __init__.py
-│   │   └── manager.py
-│   ├── database/
-│   │   ├── __init__.py
-│   │   └── models.py
-│   ├── ml/
-│   │   ├── __init__.py
-│   │   └── predictor.py
-│   └── utils/
-│       ├── __init__.py
-│       └── helpers.py
-├── frontend/
-│   ├── public/
-│   │   ├── index.html
-│   │   └── manifest.json
-│   ├── src/
-│   │   ├── App.js
-│   │   ├── index.js
-│   │   ├── index.css
-│   │   ├── components/
-│   │   └── pages/
-│   └── package.json
-├── tests/
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── test_trading_bot.py
-│   ├── test_exchange_client.py
-│   ├── test_market_data.py
-│   ├── test_signals.py
-│   └── test_risk.py
-├── scripts/
-│   ├── setup.sh
-│   └── deploy.sh
-├── docs/
-│   ├── api.md
-│   └── development.md
-├── config/
-│   ├── default.yaml
-│   └── production.yaml
-├── requirements.txt
-├── run_bot.py
-├── debug.py
-├── .env
-└── README.md
+├── src/                      # Core trading bot source code
+│   ├── api/                  # FastAPI backend and WebSocket server
+│   ├── market_data/          # Market data fetching and processing
+│   ├── signals/              # Trading signal generation
+│   ├── risk/                 # Risk management system
+│   ├── database/             # Database models and operations
+│   ├── utils/                # Utility functions and helpers
+│   └── ml/                   # Machine learning components
+├── frontend/                 # React-based web dashboard
+│   └── src/
+│       ├── components/       # Reusable React components
+│       └── pages/           # Main application pages
+├── web/                      # Static web assets
+├── docs/                     # Project documentation
+├── config/                   # YAML configuration files
+├── tests/                    # Test suite
+├── scripts/                  # Setup and utility scripts
+│   ├── setup.sh             # Development setup script
+│   ├── setup_service.sh     # Production service setup
+│   ├── crypto-trading-bot.service  # Systemd service file
+│   └── init_db.py           # Database initialization
+├── requirements.txt          # Python dependencies
+├── run_bot.py               # Main bot entry point
+├── debug.py                 # Development debugging tools
+└── README.md                # Project documentation
 ```
 
-## Testing
+### Directory Purposes
 
-Run the test suite:
-```bash
-pytest tests/
-```
+#### `src/`
+- **api/**: Contains the FastAPI backend server and WebSocket implementation for real-time updates
+- **market_data/**: Handles all exchange interactions, market data processing, and symbol discovery
+- **signals/**: Implements technical analysis and trading signal generation
+- **risk/**: Manages position sizing, risk limits, and portfolio management
+- **database/**: Database models and operations for storing trade history and settings
+- **utils/**: Common utility functions used across the project
+- **ml/**: Machine learning components for advanced signal generation
 
-For specific test files:
-```bash
-pytest tests/test_exchange_client.py -v
-```
+#### `frontend/`
+- **components/**: Reusable React components for the dashboard
+- **pages/**: Main application pages and routing logic
 
-## Contributing
+#### `web/`
+- Static web assets and legacy web interface (if any)
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+#### `docs/`
+- API documentation
+- Development guides
+- Architecture documentation
 
-## License
+#### `config/`
+- YAML configuration files for different environments
+- Default and production settings
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+#### `tests/`
+- Unit tests
+- Integration tests
+- Test fixtures and utilities
 
-## Disclaimer
+#### `scripts/`
+- **setup.sh**: Development environment setup script
+- **setup_service.sh**: Production service installation script
+- **crypto-trading-bot.service**: Systemd service configuration
+- **init_db.py**: Database initialization and migration script
 
-This trading bot is for educational purposes only. Use at your own risk. Cryptocurrency trading involves significant risk and can result in the loss of your invested capital. You should not invest more than you can afford to lose. 
+## API Endpoints
+
+### REST Endpoints
+- `GET /api/trading/opportunities` - Get top trading opportunities
+- `GET /api/trading/opportunities/{symbol}` - Get detailed opportunity for a symbol
+- `GET /api/trading/opportunities/stats` - Get opportunity statistics
+- `GET /api/trading/signals` - Get trading signals
+- `GET /api/trading/pnl` - Get profit and loss data
+- `GET /api/trading/stats` - Get trading statistics
+- `GET /api/trading/positions` - Get current positions
+- `GET /api/trading/strategies` - Get strategy information
+- `GET /api/trading/settings` - Get current settings
+
+### WebSocket Endpoints
+- `WS /ws/signals` - Real-time trading signals
+- `WS /ws/opportunities` - Real-time opportunity updates
+
+## Services
+
+### Trading Bot Service
+- Status: `

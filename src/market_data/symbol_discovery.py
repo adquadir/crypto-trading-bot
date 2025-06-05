@@ -129,11 +129,13 @@ class SymbolDiscovery:
         try:
             score = 0.0
             weights = {
-                'trend': 0.3,
-                'momentum': 0.25,
-                'volatility': 0.2,
-                'volume': 0.15,
-                'support_resistance': 0.1
+                'trend': 0.25,      # Reduced from 0.3 to accommodate new indicators
+                'momentum': 0.20,   # Reduced from 0.25
+                'volatility': 0.15, # Reduced from 0.2
+                'volume': 0.10,     # Reduced from 0.15
+                'support_resistance': 0.10,
+                'trend_strength': 0.10,  # New weight for ADX
+                'oscillators': 0.10      # New weight for CCI and other oscillators
             }
             
             # Trend indicators
@@ -149,6 +151,27 @@ class SymbolDiscovery:
                 if ema['fast'] > ema['slow']:
                     score += weights['trend'] * 0.5
                     
+            # Ichimoku Cloud
+            if 'ichimoku' in indicators:
+                ichimoku = indicators['ichimoku']
+                price = ichimoku['price']
+                tenkan = ichimoku['tenkan']
+                kijun = ichimoku['kijun']
+                senkou_a = ichimoku['senkou_a']
+                senkou_b = ichimoku['senkou_b']
+                
+                # Strong bullish signal
+                if (price > tenkan > kijun and 
+                    price > senkou_a > senkou_b):
+                    score += weights['trend'] * 1.0
+                # Strong bearish signal
+                elif (price < tenkan < kijun and 
+                      price < senkou_a < senkou_b):
+                    score += weights['trend'] * 1.0
+                # Moderate signal
+                elif (price > tenkan and price > kijun) or (price < tenkan and price < kijun):
+                    score += weights['trend'] * 0.5
+                    
             # Momentum indicators
             if 'rsi' in indicators:
                 rsi = indicators['rsi']
@@ -161,6 +184,34 @@ class SymbolDiscovery:
                 stoch = indicators['stoch']
                 if stoch['k'] < 20 or stoch['k'] > 80:
                     score += weights['momentum'] * 0.5
+                    
+            # CCI (Commodity Channel Index)
+            if 'cci' in indicators:
+                cci = indicators['cci']
+                if cci > 100:  # Overbought
+                    score += weights['oscillators'] * 1.0
+                elif cci < -100:  # Oversold
+                    score += weights['oscillators'] * 1.0
+                elif abs(cci) < 50:  # Neutral
+                    score += weights['oscillators'] * 0.3
+                    
+            # ADX (Average Directional Index)
+            if 'adx' in indicators:
+                adx = indicators['adx']
+                di_plus = indicators.get('di_plus', 0)
+                di_minus = indicators.get('di_minus', 0)
+                
+                # Strong trend
+                if adx > 25:
+                    score += weights['trend_strength'] * 1.0
+                    # Direction confirmation
+                    if di_plus > di_minus:
+                        score += weights['trend'] * 0.5
+                    elif di_minus > di_plus:
+                        score += weights['trend'] * 0.5
+                # Moderate trend
+                elif adx > 20:
+                    score += weights['trend_strength'] * 0.5
                     
             # Volatility indicators
             if 'bb' in indicators:
@@ -200,37 +251,97 @@ class SymbolDiscovery:
             return 0.0
             
     async def scan_opportunities(self, risk_per_trade: float = 50.0) -> List[TradingOpportunity]:
-        """Scan all symbols for trading opportunities."""
+        """Scan all symbols for trading opportunities with rate limiting and batch processing."""
         try:
             # Get all available symbols
             symbols = await self.discover_symbols()
             
-            # Process symbols in parallel
-            tasks = [self.get_market_data(symbol) for symbol in symbols]
-            market_data_list = await asyncio.gather(*tasks)
+            # Constants for rate limiting
+            BATCH_SIZE = 10  # Number of symbols to process in parallel
+            RATE_LIMIT_DELAY = 1.0  # Delay between batches in seconds
+            MAX_RETRIES = 3  # Maximum number of retries for failed requests
             
             opportunities = []
-            for market_data in market_data_list:
+            total_symbols = len(symbols)
+            
+            # Process symbols in batches
+            for i in range(0, total_symbols, BATCH_SIZE):
+                batch_symbols = symbols[i:i + BATCH_SIZE]
+                logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(total_symbols + BATCH_SIZE - 1)//BATCH_SIZE}")
+                
+                # Create tasks for the current batch
+                tasks = []
+                for symbol in batch_symbols:
+                    task = self._process_symbol_with_retry(symbol, risk_per_trade, MAX_RETRIES)
+                    tasks.append(task)
+                
+                # Process batch concurrently
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Filter out exceptions and add valid opportunities
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        logger.error(f"Error processing symbol: {result}")
+                        continue
+                    if result:
+                        opportunities.append(result)
+                
+                # Add delay between batches to respect rate limits
+                if i + BATCH_SIZE < total_symbols:
+                    await asyncio.sleep(RATE_LIMIT_DELAY)
+            
+            # Sort opportunities by score
+            opportunities.sort(key=lambda x: x.score, reverse=True)
+            
+            # Update opportunities dictionary
+            self.opportunities = {opp.symbol: opp for opp in opportunities}
+            
+            logger.info(f"Found {len(opportunities)} opportunities out of {total_symbols} symbols")
+            return opportunities
+            
+        except Exception as e:
+            logger.error(f"Error scanning opportunities: {e}")
+            return []
+            
+    async def _process_symbol_with_retry(self, symbol: str, risk_per_trade: float, max_retries: int) -> Optional[TradingOpportunity]:
+        """Process a single symbol with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                # Get market data
+                market_data = await self.get_market_data(symbol)
                 if not market_data:
-                    continue
+                    return None
                     
                 # Apply advanced filters
                 if not self._apply_advanced_filters(market_data):
-                    continue
+                    return None
+                
+                # Format market data for signal generation
+                formatted_market_data = {
+                    'price': float(market_data['ohlcv'][-1]['close']),
+                    'funding_rate': float(market_data['funding_rate']),
+                    'open_interest': float(market_data.get('open_interest', 0)),
+                    'symbol': market_data['symbol'],
+                    'volume_24h': float(market_data['volume_24h']),
+                    'indicators': market_data.get('indicators', {})
+                }
                 
                 # Generate signals
                 signals = self.signal_generator.generate_signals(
-                    market_data['ohlcv'],
-                    market_data['funding_rate']
+                    formatted_market_data,
+                    market_data.get('indicators', {})
                 )
                 
                 if not signals:
-                    continue
+                    return None
                 
                 # Calculate volatility
                 volatility = self.calculate_volatility(market_data['ohlcv'])
                 
                 # Process each signal
+                best_opportunity = None
+                best_score = 0.0
+                
                 for signal in signals:
                     if signal['confidence'] < self.min_confidence:
                         continue
@@ -272,20 +383,24 @@ class SymbolDiscovery:
                     
                     # Calculate final score
                     opportunity.score = self.calculate_opportunity_score(opportunity)
-                    opportunities.append(opportunity)
-            
-            # Sort opportunities by score
-            opportunities.sort(key=lambda x: x.score, reverse=True)
-            
-            # Update opportunities dictionary
-            self.opportunities = {opp.symbol: opp for opp in opportunities}
-            
-            return opportunities
-            
-        except Exception as e:
-            logger.error(f"Error scanning opportunities: {e}")
-            return []
-            
+                    
+                    # Keep track of best opportunity for this symbol
+                    if opportunity.score > best_score:
+                        best_score = opportunity.score
+                        best_opportunity = opportunity
+                
+                return best_opportunity
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Retry {attempt + 1}/{max_retries} for {symbol}: {e}")
+                    await asyncio.sleep(1.0 * (attempt + 1))  # Exponential backoff
+                else:
+                    logger.error(f"Failed to process {symbol} after {max_retries} attempts: {e}")
+                    return None
+                    
+        return None
+
     def _apply_advanced_filters(self, market_data: Dict) -> bool:
         """Apply advanced filters to market data."""
         try:
