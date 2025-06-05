@@ -124,12 +124,21 @@ def validate_config() -> bool:
         'DATABASE_URL'
     ]
     
+    # Check required variables
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     
     if missing_vars:
         logging.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         return False
-        
+    
+    # Check proxy configuration if proxy is enabled
+    if os.getenv('USE_PROXY', 'false').lower() == 'true':
+        proxy_vars = ['PROXY_HOST', 'PROXY_PORT', 'PROXY_USER', 'PROXY_PASS']
+        missing_proxy = [var for var in proxy_vars if not os.getenv(var)]
+        if missing_proxy:
+            logging.error(f"Missing required proxy configuration: {', '.join(missing_proxy)}")
+            return False
+            
     return True
 
 def get_config() -> Dict[str, Any]:

@@ -164,24 +164,38 @@ class ExchangeClient:
         self.ws_connections = {}
         self.cache = CacheManager()
 
-        self.proxy_list = proxy_list or ['10001', '10002', '10003']
-        self.failover_ports = failover_ports or ['10001', '10002', '10003']
+        # Load proxy configuration from environment variables
+        self.proxy_list = proxy_list or os.getenv('PROXY_PORTS', '10001,10002,10003').split(',')
+        self.failover_ports = failover_ports or os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(',')
         self.current_port_index = 0
         self.proxy_config = proxy_config or {
-            "host": os.getenv('PROXY_HOST', 'isp.decodo.com'),
-            "port": os.getenv('PROXY_PORT', '10001'),
-            "user": os.getenv('PROXY_USER', 'sp6qilmhb3'),
-            "pass": os.getenv('PROXY_PASS', 'y2ok7Y3FEygM~rs7de')
+            "host": os.getenv('PROXY_HOST'),
+            "port": os.getenv('PROXY_PORT'),
+            "user": os.getenv('PROXY_USER'),
+            "pass": os.getenv('PROXY_PASS')
         }
 
-        self._setup_proxy()
+        # Validate proxy configuration
+        if not all([self.proxy_config["host"], self.proxy_config["port"], 
+                   self.proxy_config["user"], self.proxy_config["pass"]]):
+            logger.warning("Incomplete proxy configuration. Some proxy settings are missing.")
+            self.proxy_config = None
+        else:
+            self._setup_proxy()
+            
         self._init_client(api_key, api_secret)
 
     def _setup_proxy(self):
+        """Setup proxy configuration."""
+        if not self.proxy_config:
+            logger.warning("No proxy configuration available")
+            return
+
         host = self.proxy_config["host"]
         port = self.proxy_config["port"]
         user = self.proxy_config["user"]
         passwd = self.proxy_config["pass"]
+        
         self.proxy_host = host
         self.proxy_port = port
         self.proxy_user = user

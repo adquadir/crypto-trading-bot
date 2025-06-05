@@ -198,9 +198,9 @@ crypto-trading-bot/
 - **market_data/**: Handles all exchange interactions, market data processing, and symbol discovery
 - **signals/**: Implements technical analysis and trading signal generation
 - **risk/**: Manages position sizing, risk limits, and portfolio management
-- **database/**: Database models and operations for storing trade history and settings
-- **utils/**: Common utility functions used across the project
-- **ml/**: Machine learning components for advanced signal generation
+- **database/**: Database models, migrations, and query operations
+- **utils/**: Helper functions and utility classes
+- **ml/**: Machine learning models for market prediction
 
 #### `frontend/`
 - **components/**: Reusable React components for the dashboard
@@ -250,3 +250,592 @@ crypto-trading-bot/
 
 ### Trading Bot Service
 - Status: `
+
+## Testing
+
+### Backend Tests
+```bash
+# Run all tests
+pytest
+
+# Run with coverage report
+pytest --cov=src tests/
+
+# Run specific test file
+pytest tests/test_market_data.py
+
+# Run tests with detailed output
+pytest -v
+```
+
+### Frontend Tests
+```bash
+# Run all tests
+cd frontend
+npm test
+
+# Run tests with coverage
+npm run test:coverage
+
+# Run tests in CI mode
+npm run test:ci
+```
+
+### Test Coverage Requirements
+- Minimum 80% code coverage
+- All critical paths must be tested
+- Integration tests for API endpoints
+- End-to-end tests for critical user flows
+
+## Monitoring and Logging
+
+### Log Files
+- Main log: `trading_bot.log`
+- API log: `api.log`
+- Error log: `error.log`
+
+### Monitoring Dashboard
+Access the monitoring dashboard at `http://localhost:3000/monitoring` to view:
+- System health metrics
+- Trading performance
+- Error rates
+- API response times
+- WebSocket connection status
+
+### Alerting
+The system sends alerts for:
+- Critical errors
+- Risk limit breaches
+- API failures
+- System resource issues
+
+### Page Availability Verification
+The system includes automated health checks for all pages and API endpoints. Run the verification script to ensure all components are responding correctly:
+
+```bash
+# Run health checks
+python scripts/verify_health.py
+
+# Check specific component
+python scripts/verify_health.py --component frontend
+python scripts/verify_health.py --component api
+python scripts/verify_health.py --component websocket
+```
+
+#### Health Check Checklist
+1. **Frontend Pages**
+   - Dashboard (`/`)
+   - Opportunities (`/opportunities`)
+   - Signals (`/signals`)
+   - Positions (`/positions`)
+   - Strategies (`/strategies`)
+   - Settings (`/settings`)
+   - Monitoring (`/monitoring`)
+
+2. **API Endpoints**
+   - Trading opportunities
+   - Trading signals
+   - PnL data
+   - Trading statistics
+   - Current positions
+   - Strategy information
+   - Settings
+
+3. **WebSocket Connections**
+   - Signal updates
+   - Opportunity updates
+   - Connection stability
+   - Message delivery
+
+4. **Database Connectivity**
+   - Connection pool
+   - Query performance
+   - Transaction handling
+
+#### Manual Verification Steps
+1. **Frontend Health**
+   ```bash
+   # Check frontend build
+   cd frontend
+   npm run build
+   
+   # Verify static assets
+   python scripts/verify_assets.py
+   ```
+
+2. **API Health**
+   ```bash
+   # Test API endpoints
+   python scripts/test_endpoints.py
+   
+   # Check API response times
+   python scripts/check_performance.py
+   ```
+
+3. **WebSocket Health**
+   ```bash
+   # Test WebSocket connections
+   python scripts/test_websockets.py
+   
+   # Monitor WebSocket stability
+   python scripts/monitor_websockets.py --duration 3600
+   ```
+
+4. **Database Health**
+   ```bash
+   # Check database connection
+   python scripts/check_db.py
+   
+   # Verify database performance
+   python scripts/benchmark_db.py
+   ```
+
+#### Automated Monitoring
+The system includes automated monitoring that:
+- Checks page availability every 5 minutes
+- Verifies API response times
+- Monitors WebSocket connection stability
+- Tracks database performance
+- Sends alerts for any failures
+
+#### Health Check Dashboard
+Access the health check dashboard at `http://localhost:3000/health` to view:
+- Component status
+- Response times
+- Error rates
+- Connection stability
+- Resource usage
+
+## Troubleshooting
+
+### Common Issues
+
+1. **API Connection Issues**
+   ```bash
+   # Check API connectivity
+   python scripts/test_api.py
+   
+   # Verify API keys
+   python scripts/verify_keys.py
+   ```
+
+2. **Database Connection**
+   ```bash
+   # Test database connection
+   python scripts/test_db.py
+   
+   # Reset database (development only)
+   python scripts/reset_db.py
+   ```
+
+3. **WebSocket Issues**
+   - Check WebSocket connection status in the dashboard
+   - Verify firewall settings
+   - Check proxy configuration if using one
+
+4. **Performance Issues**
+   - Monitor system resources
+   - Check log files for errors
+   - Verify rate limits are not being exceeded
+
+### Debug Mode
+Enable debug mode for detailed logging:
+```bash
+# Set debug environment variable
+export DEBUG=True
+
+# Or modify .env file
+DEBUG=True
+```
+
+## Contributing
+
+### Development Workflow
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new features
+5. Update documentation
+6. Submit a pull request
+
+### Code Style
+- Follow PEP 8 for Python code
+- Use ESLint for JavaScript/TypeScript
+- Write clear, descriptive commit messages
+- Include docstrings for all functions
+
+### Pull Request Process
+1. Update the README.md with details of changes
+2. Update the version numbers in relevant files
+3. Ensure all tests pass
+4. Request review from maintainers
+
+## Security
+
+### API Key Security
+- Never commit API keys to the repository
+- Use environment variables for sensitive data
+- Rotate API keys regularly
+- Use IP restrictions on exchange accounts
+
+### System Security
+- Keep all dependencies updated
+- Use HTTPS for all communications
+- Implement rate limiting
+- Monitor for suspicious activity
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+For support, please:
+1. Check the [documentation](docs/)
+2. Search existing [issues](https://github.com/yourusername/crypto-trading-bot/issues)
+3. Create a new issue if needed
+
+## Acknowledgments
+
+- [Binance API](https://binance-docs.github.io/apidocs/)
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [React](https://reactjs.org/)
+- [Material-UI](https://mui.com/)
+
+## Deployment
+
+### Docker Deployment
+```bash
+# Build the Docker image
+docker build -t crypto-trading-bot .
+
+# Run the container
+docker run -d \
+  --name crypto-trading-bot \
+  -p 8000:8000 \
+  -p 3000:3000 \
+  --env-file .env \
+  crypto-trading-bot
+```
+
+### Cloud Deployment
+
+#### AWS Deployment
+1. **EC2 Setup**
+   ```bash
+   # Launch EC2 instance
+   aws ec2 run-instances \
+     --image-id ami-0c55b159cbfafe1f0 \
+     --instance-type t2.micro \
+     --key-name your-key-pair \
+     --security-group-ids sg-xxxxxxxx
+   ```
+
+2. **Load Balancer Configuration**
+   ```bash
+   # Create Application Load Balancer
+   aws elbv2 create-load-balancer \
+     --name crypto-trading-alb \
+     --subnets subnet-xxxxxxxx subnet-yyyyyyyy \
+     --security-groups sg-xxxxxxxx
+   ```
+
+3. **Auto Scaling Group**
+   ```bash
+   # Create launch configuration
+   aws autoscaling create-launch-configuration \
+     --launch-configuration-name crypto-trading-lc \
+     --image-id ami-0c55b159cbfafe1f0 \
+     --instance-type t2.micro
+   ```
+
+#### GCP Deployment
+1. **Compute Engine Setup**
+   ```bash
+   # Create instance
+   gcloud compute instances create crypto-trading-bot \
+     --machine-type e2-medium \
+     --zone us-central1-a \
+     --image-family ubuntu-2004-lts
+   ```
+
+2. **Load Balancer Setup**
+   ```bash
+   # Create load balancer
+   gcloud compute forwarding-rules create crypto-trading-lb \
+     --target-pool crypto-trading-pool \
+     --ports 80,443
+   ```
+
+### Scaling Considerations
+- Use horizontal scaling for API servers
+- Implement database sharding for large datasets
+- Use Redis for caching and session management
+- Implement rate limiting per instance
+- Use CDN for static assets
+
+## Performance Tuning
+
+### Database Optimization
+1. **Index Optimization**
+   ```sql
+   -- Add indexes for frequently queried columns
+   CREATE INDEX idx_opportunities_symbol ON opportunities(symbol);
+   CREATE INDEX idx_signals_timestamp ON signals(timestamp);
+   ```
+
+2. **Query Optimization**
+   ```sql
+   -- Use materialized views for complex queries
+   CREATE MATERIALIZED VIEW mv_daily_stats AS
+   SELECT date_trunc('day', timestamp) as day,
+          COUNT(*) as total_trades,
+          SUM(profit_loss) as total_pnl
+   FROM trades
+   GROUP BY day;
+   ```
+
+3. **Connection Pooling**
+   ```python
+   # Configure connection pool
+   DB_POOL_SIZE=20
+   DB_MAX_OVERFLOW=10
+   DB_POOL_TIMEOUT=30
+   ```
+
+### API Performance
+1. **Response Caching**
+   ```python
+   # Enable response caching
+   CACHE_TTL=300  # 5 minutes
+   CACHE_TYPE="redis"
+   ```
+
+2. **Rate Limiting**
+   ```python
+   # Configure rate limits
+   RATE_LIMIT_REQUESTS=100
+   RATE_LIMIT_PERIOD=60  # seconds
+   ```
+
+3. **Compression**
+   ```python
+   # Enable response compression
+   COMPRESS_LEVEL=6
+   COMPRESS_MIN_SIZE=500
+   ```
+
+### WebSocket Optimization
+1. **Connection Management**
+   ```python
+   # Configure WebSocket settings
+   WS_MAX_CONNECTIONS=1000
+   WS_PING_INTERVAL=30
+   WS_PING_TIMEOUT=10
+   ```
+
+2. **Message Batching**
+   ```python
+   # Configure message batching
+   BATCH_SIZE=50
+   BATCH_INTERVAL=1  # seconds
+   ```
+
+## Backup and Recovery
+
+### Database Backup
+1. **Automated Backups**
+   ```bash
+   # Create backup script
+   #!/bin/bash
+   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+   pg_dump -U $DB_USER -d $DB_NAME > backup_$TIMESTAMP.sql
+   ```
+
+2. **Backup Schedule**
+   ```bash
+   # Add to crontab
+   0 0 * * * /path/to/backup.sh  # Daily backup
+   0 0 * * 0 /path/to/full_backup.sh  # Weekly full backup
+   ```
+
+### Configuration Backup
+1. **Environment Backup**
+   ```bash
+   # Backup .env file
+   cp .env .env.backup
+   ```
+
+2. **YAML Config Backup**
+   ```bash
+   # Backup config files
+   tar -czf config_backup.tar.gz config/
+   ```
+
+### Disaster Recovery
+1. **Database Recovery**
+   ```bash
+   # Restore from backup
+   psql -U $DB_USER -d $DB_NAME < backup_file.sql
+   ```
+
+2. **Configuration Recovery**
+   ```bash
+   # Restore configuration
+   cp .env.backup .env
+   tar -xzf config_backup.tar.gz
+   ```
+
+## API Documentation
+
+### Authentication
+```http
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "username": "your_username",
+  "password": "your_password"
+}
+```
+
+### Rate Limiting
+- 100 requests per minute per IP
+- 1000 requests per hour per API key
+- Headers:
+  - `X-RateLimit-Limit`
+  - `X-RateLimit-Remaining`
+  - `X-RateLimit-Reset`
+
+### Error Codes
+- 400: Bad Request
+- 401: Unauthorized
+- 403: Forbidden
+- 404: Not Found
+- 429: Too Many Requests
+- 500: Internal Server Error
+
+### Example Requests
+
+#### Get Trading Opportunities
+```http
+GET /api/trading/opportunities
+Authorization: Bearer your_token_here
+
+Response:
+{
+  "opportunities": [
+    {
+      "symbol": "BTCUSDT",
+      "direction": "long",
+      "entry_price": 50000,
+      "stop_loss": 49000,
+      "take_profit": 52000,
+      "score": 0.85
+    }
+  ]
+}
+```
+
+#### Get Trading Signals
+```http
+GET /api/trading/signals
+Authorization: Bearer your_token_here
+
+Response:
+{
+  "signals": [
+    {
+      "symbol": "ETHUSDT",
+      "type": "buy",
+      "price": 3000,
+      "timestamp": "2024-01-20T12:00:00Z",
+      "confidence": 0.9
+    }
+  ]
+}
+```
+
+## Development Guidelines
+
+### Code Review Process
+1. **Pull Request Template**
+   ```markdown
+   ## Description
+   [Describe your changes]
+
+   ## Type of Change
+   - [ ] Bug fix
+   - [ ] New feature
+   - [ ] Breaking change
+   - [ ] Documentation update
+
+   ## Testing
+   - [ ] Unit tests added
+   - [ ] Integration tests added
+   - [ ] Manual testing completed
+
+   ## Documentation
+   - [ ] README updated
+   - [ ] API documentation updated
+   - [ ] Code comments added
+   ```
+
+2. **Review Checklist**
+   - Code follows style guide
+   - Tests are included
+   - Documentation is updated
+   - No security vulnerabilities
+   - Performance impact considered
+
+### Branch Naming Convention
+- Feature: `feature/description`
+- Bugfix: `bugfix/description`
+- Hotfix: `hotfix/description`
+- Release: `release/version`
+
+### Release Process
+1. **Version Management**
+   ```bash
+   # Update version
+   npm version patch  # 0.0.1 -> 0.0.2
+   npm version minor  # 0.1.0 -> 0.2.0
+   npm version major  # 1.0.0 -> 2.0.0
+   ```
+
+2. **Release Steps**
+   ```bash
+   # Create release branch
+   git checkout -b release/v1.0.0
+
+   # Update changelog
+   ./scripts/update_changelog.sh
+
+   # Create release
+   git tag -a v1.0.0 -m "Release v1.0.0"
+   git push origin v1.0.0
+   ```
+
+### Code Style
+1. **Python**
+   ```python
+   # Follow PEP 8
+   # Use type hints
+   def calculate_position_size(
+       account_balance: float,
+       risk_per_trade: float
+   ) -> float:
+       return account_balance * risk_per_trade
+   ```
+
+2. **JavaScript/TypeScript**
+   ```typescript
+   // Use ESLint and Prettier
+   // Follow Airbnb style guide
+   interface TradingSignal {
+     symbol: string;
+     type: 'buy' | 'sell';
+     price: number;
+     timestamp: Date;
+   }
+   ```
