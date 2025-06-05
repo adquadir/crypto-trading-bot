@@ -53,6 +53,7 @@ const Signals = () => {
   const latencyTimeoutRef = useRef(null);
   const maxMissedHeartbeats = 3; // Maximum number of missed heartbeats before reconnecting
   const heartbeatInterval = 30000; // Heartbeat interval in milliseconds (30 seconds)
+  const connectionTimeoutRef = useRef(null);
 
   const handleError = (error) => {
     console.error('Error in signals:', error);
@@ -260,10 +261,17 @@ const Signals = () => {
 
   const reconnectWebSocket = () => {
     if (wsRef.current) {
-      wsRef.current.close();
+      try {
+        wsRef.current.close();
+      } catch (err) {
+        console.error('Error closing WebSocket:', err);
+      }
+      wsRef.current = null;
     }
+    
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
 
     const currentAttempt = connectionDetails.reconnectAttempts + 1;
@@ -283,31 +291,46 @@ const Signals = () => {
         return;
       }
 
-      if (wsRef.current?.readyState !== WebSocket.OPEN) {
-        connectWebSocket();
-      }
+      connectWebSocket();
     }, delay);
   };
 
   const connectWebSocket = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    // Prevent multiple connection attempts
+    if (wsRef.current?.readyState === WebSocket.OPEN || 
+        wsRef.current?.readyState === WebSocket.CONNECTING) {
       return;
     }
 
     try {
-      // Add connection timeout
-      const connectionTimeout = setTimeout(() => {
+      // Clear any existing connection timeout
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
+
+      // Create connection timeout
+      connectionTimeoutRef.current = setTimeout(() => {
         if (wsRef.current?.readyState !== WebSocket.OPEN) {
           console.error('WebSocket connection timeout');
           handleWebSocketError({ code: 1006, reason: 'Connection timeout' });
         }
       }, 10000); // 10 second timeout
 
-      const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+      // Ensure we have valid WebSocket URL
+      const wsUrl = `${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`;
+      if (!wsUrl || wsUrl.includes('undefined')) {
+        throw new Error('Invalid WebSocket URL');
+      }
+
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        clearTimeout(connectionTimeout);
+        if (connectionTimeoutRef.current) {
+          clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = null;
+        }
+        
         console.log('WebSocket Connected');
         updateConnectionStatus('connected', null);
         setError(null);
@@ -369,13 +392,13 @@ const Signals = () => {
       };
 
       ws.onerror = (event) => {
-        clearTimeout(connectionTimeout);
+        clearTimeout(connectionTimeoutRef.current);
         console.error('WebSocket Error:', event);
         handleWebSocketError(event);
       };
 
       ws.onclose = (event) => {
-        clearTimeout(connectionTimeout);
+        clearTimeout(connectionTimeoutRef.current);
         console.log('WebSocket Disconnected:', event.code, event.reason);
         updateConnectionStatus('disconnected', {
           code: event.code,
@@ -403,6 +426,13 @@ const Signals = () => {
         error: err.message
       });
       setError('Failed to establish WebSocket connection');
+      
+      // Attempt reconnection after a delay
+      setTimeout(() => {
+        if (wsRef.current?.readyState !== WebSocket.OPEN) {
+          reconnectWebSocket();
+        }
+      }, 1000);
     }
   };
 
@@ -412,13 +442,24 @@ const Signals = () => {
 
     return () => {
       if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmounting');
+        try {
+          wsRef.current.close(1000, 'Component unmounting');
+        } catch (err) {
+          console.error('Error closing WebSocket:', err);
+        }
+        wsRef.current = null;
       }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
       }
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
       }
     };
   }, []);
