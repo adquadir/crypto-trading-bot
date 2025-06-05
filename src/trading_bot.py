@@ -40,6 +40,11 @@ class TradingBot:
         self.risk_per_trade = float(os.getenv('RISK_PER_TRADE', '50.0'))
         self.max_open_trades = int(os.getenv('MAX_OPEN_TRADES', '5'))
         
+        # Balance tracking
+        self._last_balance_update = 0
+        self._balance_cache = None
+        self._balance_cache_ttl = 300  # 5 minutes cache TTL
+        
         # Start opportunity scanning in background
         self.opportunity_scan_task = None
         
@@ -66,6 +71,64 @@ class TradingBot:
         """Get a new database session."""
         return self.SessionLocal()
         
+    async def _get_account_balance(self) -> float:
+        """Get total account balance with caching and error handling."""
+        current_time = datetime.now().timestamp()
+        
+        # Return cached balance if still valid
+        if (self._balance_cache is not None and 
+            current_time - self._last_balance_update < self._balance_cache_ttl):
+            return self._balance_cache
+            
+        try:
+            # Get account info
+            account_info = await asyncio.to_thread(self.exchange_client.client.get_account)
+            
+            if not account_info or 'balances' not in account_info:
+                raise ValueError("Invalid account info response")
+                
+            # Calculate total balance
+            total_balance = 0
+            asset_balances = {}
+            
+            for balance in account_info['balances']:
+                try:
+                    free = float(balance.get('free', 0))
+                    locked = float(balance.get('locked', 0))
+                    total = free + locked
+                    
+                    if total > 0:
+                        asset = balance.get('asset', 'UNKNOWN')
+                        asset_balances[asset] = total
+                        total_balance += total
+                        
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error processing balance for asset {balance.get('asset', 'UNKNOWN')}: {e}")
+                    continue
+            
+            # Log detailed balance information
+            logger.info(f"Account balance breakdown:")
+            for asset, amount in asset_balances.items():
+                logger.info(f"  {asset}: {amount:.8f}")
+            logger.info(f"Total balance: {total_balance:.8f}")
+            
+            # Update cache
+            self._balance_cache = total_balance
+            self._last_balance_update = current_time
+            
+            return total_balance
+            
+        except Exception as e:
+            logger.error(f"Error getting account balance: {e}")
+            # If we have a cached balance, use it as fallback
+            if self._balance_cache is not None:
+                logger.warning(f"Using cached balance: {self._balance_cache}")
+                return self._balance_cache
+            # If no cache, use a safe default
+            default_balance = float(os.getenv('DEFAULT_ACCOUNT_BALANCE', '1000.0'))
+            logger.warning(f"Using default balance: {default_balance}")
+            return default_balance
+
     async def start(self):
         """Start the trading bot with debug checks."""
         try:
@@ -77,8 +140,7 @@ class TradingBot:
             await self.exchange_client.test_proxy_connection()
             
             # Get account balance and initialize risk manager
-            account_info = await asyncio.to_thread(self.exchange_client.client.get_account)
-            total_balance = sum(float(b['balance']) for b in account_info['balances'] if float(b['balance']) > 0)
+            total_balance = await self._get_account_balance()
             self.risk_manager = RiskManager(account_balance=total_balance)
             self.symbol_discovery = SymbolDiscovery(self.exchange_client)
             
