@@ -87,22 +87,22 @@ const Dashboard = () => {
       const [statsRes, pnlRes, positionsRes] = await Promise.all([
         axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.STATS}`),
         axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.PNL}`),
-        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.POSITIONS}`),
+        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.POSITIONS}`)
       ]);
 
       setStats(statsRes.data);
       setPnl(pnlRes.data);
-      setPositions(positionsRes.data.positions);
+      setPositions(positionsRes.data.positions || []);
       setError(null);
       setRetryCount(0);
       setLastSuccessfulFetch(new Date());
-    } catch (error) {
-      handleError(error, 'dashboard data');
-      
-      // Implement retry logic
+    } catch (err) {
+      console.error('Error fetching dashboard data:', err);
       if (retryCount < maxRetries) {
         setRetryCount(prev => prev + 1);
         setTimeout(fetchData, 5000);
+      } else {
+        setError('Failed to connect to server. Please check your connection.');
       }
     } finally {
       setLoading(false);

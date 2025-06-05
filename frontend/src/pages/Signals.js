@@ -8,52 +8,77 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Alert,
+  Snackbar,
+  Button
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
+import axios from 'axios';
+import config from '../config';
 
-function Signals() {
+const Signals = () => {
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const maxRetries = 3;
+
+  const fetchSignals = async () => {
+    try {
+      const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.SIGNALS}`);
+      setSignals(response.data.signals);
+      setError(null);
+      setRetryCount(0);
+    } catch (err) {
+      console.error('Error fetching signals:', err);
+      if (retryCount < maxRetries) {
+        setRetryCount(prev => prev + 1);
+        setTimeout(fetchSignals, 5000);
+      } else {
+        setError('Failed to connect to server. Please check your connection.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Initial signals fetch
-    const fetchSignals = async () => {
-      try {
-        const response = await fetch('http://localhost:8000/api/trading/signals');
-        const data = await response.json();
-        setSignals(data.signals);
-        setLoading(false);
-      } catch (error) {
-        console.error('Error fetching signals:', error);
-        setLoading(false);
-      }
-    };
-
     fetchSignals();
-
-    // WebSocket connection for real-time updates
-    const ws = new WebSocket('ws://localhost:8000/ws/signals');
+    const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
 
     ws.onopen = () => {
       console.log('WebSocket Connected');
       setWsConnected(true);
+      setError(null);
     };
 
     ws.onmessage = (event) => {
       const signal = JSON.parse(event.data);
-      setSignals((prevSignals) => [signal, ...prevSignals].slice(0, 100)); // Keep last 100 signals
+      setSignals(prev => [signal, ...prev].slice(0, 100)); // Keep last 100 signals
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket Error:', error);
+      setError('WebSocket connection error');
+      setWsConnected(false);
     };
 
     ws.onclose = () => {
       console.log('WebSocket Disconnected');
       setWsConnected(false);
+      // Attempt to reconnect after 5 seconds
+      setTimeout(() => {
+        if (retryCount < maxRetries) {
+          setRetryCount(prev => prev + 1);
+        }
+      }, 5000);
     };
 
     return () => {
       ws.close();
     };
-  }, []);
+  }, [retryCount]);
 
   const columns = [
     { field: 'timestamp', headerName: 'Time', width: 180 },
@@ -109,7 +134,38 @@ function Signals() {
   }
 
   return (
-    <Box>
+    <Box p={3}>
+      <Typography variant="h4" gutterBottom>
+        Trading Signals
+      </Typography>
+
+      {!wsConnected && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          WebSocket disconnected. Attempting to reconnect...
+        </Alert>
+      )}
+      
+      {error && (
+        <Snackbar 
+          open={!!error} 
+          autoHideDuration={6000} 
+          onClose={() => setError(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+          <Alert 
+            severity="error" 
+            onClose={() => setError(null)}
+            action={
+              <Button color="inherit" size="small" onClick={fetchSignals}>
+                Retry
+              </Button>
+            }
+          >
+            {error}
+          </Alert>
+        </Snackbar>
+      )}
+
       <Grid container spacing={3}>
         <Grid item xs={12}>
           <Paper sx={{ p: 2 }}>
@@ -174,6 +230,6 @@ function Signals() {
       </Grid>
     </Box>
   );
-}
+};
 
 export default Signals; 

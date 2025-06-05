@@ -157,6 +157,24 @@ async def get_strategies():
         ]
     }
 
+@app.get("/api/trading/settings")
+async def get_settings():
+    return {
+        "maxPositionSize": 0.1,
+        "maxLeverage": 3.0,
+        "riskPerTrade": 0.02,
+        "maxOpenTrades": 5,
+        "maxCorrelation": 0.7,
+        "minRiskReward": 2.0,
+        "maxDailyLoss": 0.05,
+        "maxDrawdown": 0.15
+    }
+
+@app.post("/api/trading/settings")
+async def update_settings(settings: dict):
+    # In a real implementation, you would save these settings
+    return {"status": "success", "message": "Settings updated"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000) 
