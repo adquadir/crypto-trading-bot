@@ -225,7 +225,7 @@ class ExchangeClient:
         logger.info("=== End Proxy Test ===")
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(max_calls=10, period=1.0)
+    @rate_limit(limit=10, period=1.0)
     async def get_exchange_info(self) -> Dict:
         """Fetch exchange information including all available trading pairs."""
         try:
@@ -291,7 +291,7 @@ class ExchangeClient:
             return {'symbols': [], 'timezone': 'UTC', 'serverTime': int(time.time() * 1000)}
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(max_calls=10, period=1.0)
+    @rate_limit(limit=10, period=1.0)
     async def get_ticker_24h(self, symbol: str) -> Dict:
         """Fetch 24-hour ticker statistics for a symbol."""
         try:
@@ -373,7 +373,7 @@ class ExchangeClient:
             return {}
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(max_calls=10, period=1.0)
+    @rate_limit(limit=10, period=1.0)
     async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
         """Fetch order book data for a symbol."""
         try:
@@ -429,7 +429,7 @@ class ExchangeClient:
             return {'bids': [], 'asks': []}
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(max_calls=10, period=1.0)
+    @rate_limit(limit=10, period=1.0)
     async def get_funding_rate(self, symbol: str) -> float:
         """Fetch current funding rate for a symbol."""
         try:
@@ -477,7 +477,7 @@ class ExchangeClient:
             return 0.0
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(max_calls=10, period=1.0)
+    @rate_limit(limit=10, period=1.0)
     async def get_open_interest(self, symbol: str) -> float:
         """Fetch open interest for a symbol."""
         try:
@@ -525,7 +525,7 @@ class ExchangeClient:
             return 0.0
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(max_calls=10, period=1.0)
+    @rate_limit(limit=10, period=1.0)
     async def get_historical_data(self, symbol: str, interval: str, limit: int) -> List[Dict]:
         """Fetch historical market data (OHLCV) from Binance."""
         try:
