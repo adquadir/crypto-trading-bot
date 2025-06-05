@@ -8,7 +8,10 @@ const config = {
         STRATEGIES: '/api/trading/strategies',
         SETTINGS: '/api/trading/settings',
         SIGNALS: '/api/trading/signals',
-        WS_SIGNALS: '/ws/signals'
+        WS_SIGNALS: '/ws/signals',
+        OPPORTUNITIES: '/api/trading/opportunities',
+        OPPORTUNITY_STATS: '/api/trading/opportunities/stats',
+        SYMBOL_OPPORTUNITY: (symbol) => `/api/trading/opportunities/${symbol}`
     }
 };
 

@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime
 import logging
 import traceback
+from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
 
 # Configure logging
 logging.basicConfig(
@@ -276,6 +277,187 @@ async def get_settings():
 async def update_settings(settings: dict):
     # In a real implementation, you would save these settings
     return {"status": "success", "message": "Settings updated"}
+
+# Initialize symbol discovery
+symbol_discovery = SymbolDiscovery(exchange_client)
+
+@app.get("/api/trading/opportunities")
+async def get_opportunities(
+    min_confidence: float = 0.7,
+    min_risk_reward: float = 2.0,
+    min_volume: float = 1000000,
+    limit: int = 10
+):
+    """Get top trading opportunities."""
+    try:
+        opportunities = await symbol_discovery.scan_opportunities()
+        
+        # Filter opportunities
+        filtered = [
+            opp for opp in opportunities
+            if opp.confidence >= min_confidence
+            and opp.risk_reward >= min_risk_reward
+            and opp.volume_24h >= min_volume
+        ]
+        
+        # Sort by score and limit
+        filtered.sort(key=lambda x: x.score, reverse=True)
+        top_opportunities = filtered[:limit]
+        
+        # Broadcast to WebSocket clients
+        await manager.broadcast({
+            "type": "opportunities_update",
+            "data": {
+                "opportunities": [
+                    {
+                        "symbol": opp.symbol,
+                        "direction": opp.direction,
+                        "entry_price": opp.entry_price,
+                        "take_profit": opp.take_profit,
+                        "stop_loss": opp.stop_loss,
+                        "confidence": opp.confidence,
+                        "leverage": opp.leverage,
+                        "risk_reward": opp.risk_reward,
+                        "volume_24h": opp.volume_24h,
+                        "volatility": opp.volatility,
+                        "score": opp.score,
+                        "indicators": opp.indicators,
+                        "reasoning": opp.reasoning
+                    }
+                    for opp in top_opportunities
+                ],
+                "total": len(filtered),
+                "timestamp": datetime.now().timestamp()
+            }
+        })
+        
+        return {
+            "opportunities": [
+                {
+                    "symbol": opp.symbol,
+                    "direction": opp.direction,
+                    "entry_price": opp.entry_price,
+                    "take_profit": opp.take_profit,
+                    "stop_loss": opp.stop_loss,
+                    "confidence": opp.confidence,
+                    "leverage": opp.leverage,
+                    "risk_reward": opp.risk_reward,
+                    "volume_24h": opp.volume_24h,
+                    "volatility": opp.volatility,
+                    "score": opp.score,
+                    "indicators": opp.indicators,
+                    "reasoning": opp.reasoning
+                }
+                for opp in top_opportunities
+            ],
+            "total": len(filtered),
+            "timestamp": datetime.now().timestamp()
+        }
+    except Exception as e:
+        logger.error(f"Error getting opportunities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/trading/opportunities/{symbol}")
+async def get_symbol_opportunity(symbol: str):
+    """Get detailed opportunity information for a specific symbol."""
+    try:
+        opportunities = await symbol_discovery.scan_opportunities()
+        symbol_opportunities = [
+            opp for opp in opportunities
+            if opp.symbol == symbol
+        ]
+        
+        if not symbol_opportunities:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No opportunities found for {symbol}"
+            )
+            
+        # Get the highest scoring opportunity
+        best_opportunity = max(symbol_opportunities, key=lambda x: x.score)
+        
+        return {
+            "symbol": best_opportunity.symbol,
+            "direction": best_opportunity.direction,
+            "entry_price": best_opportunity.entry_price,
+            "take_profit": best_opportunity.take_profit,
+            "stop_loss": best_opportunity.stop_loss,
+            "confidence": best_opportunity.confidence,
+            "leverage": best_opportunity.leverage,
+            "risk_reward": best_opportunity.risk_reward,
+            "volume_24h": best_opportunity.volume_24h,
+            "volatility": best_opportunity.volatility,
+            "score": best_opportunity.score,
+            "indicators": best_opportunity.indicators,
+            "reasoning": best_opportunity.reasoning,
+            "timestamp": datetime.now().timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting symbol opportunity: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/trading/opportunities/stats")
+async def get_opportunity_stats():
+    """Get statistics about available trading opportunities."""
+    try:
+        opportunities = await symbol_discovery.scan_opportunities()
+        
+        # Calculate statistics
+        total_opportunities = len(opportunities)
+        long_opportunities = len([opp for opp in opportunities if opp.direction == 'LONG'])
+        short_opportunities = len([opp for opp in opportunities if opp.direction == 'SHORT'])
+        
+        avg_confidence = sum(opp.confidence for opp in opportunities) / total_opportunities if total_opportunities > 0 else 0
+        avg_risk_reward = sum(opp.risk_reward for opp in opportunities) / total_opportunities if total_opportunities > 0 else 0
+        avg_score = sum(opp.score for opp in opportunities) / total_opportunities if total_opportunities > 0 else 0
+        
+        # Get top symbols by volume
+        top_volume_symbols = sorted(
+            opportunities,
+            key=lambda x: x.volume_24h,
+            reverse=True
+        )[:5]
+        
+        # Get top opportunities by score
+        top_scored_opportunities = sorted(
+            opportunities,
+            key=lambda x: x.score,
+            reverse=True
+        )[:5]
+        
+        return {
+            "total_opportunities": total_opportunities,
+            "long_opportunities": long_opportunities,
+            "short_opportunities": short_opportunities,
+            "avg_confidence": avg_confidence,
+            "avg_risk_reward": avg_risk_reward,
+            "avg_score": avg_score,
+            "top_volume_symbols": [
+                {
+                    "symbol": opp.symbol,
+                    "volume_24h": opp.volume_24h,
+                    "direction": opp.direction,
+                    "score": opp.score
+                }
+                for opp in top_volume_symbols
+            ],
+            "top_scored_opportunities": [
+                {
+                    "symbol": opp.symbol,
+                    "direction": opp.direction,
+                    "score": opp.score,
+                    "confidence": opp.confidence,
+                    "risk_reward": opp.risk_reward
+                }
+                for opp in top_scored_opportunities
+            ],
+            "timestamp": datetime.now().timestamp()
+        }
+    except Exception as e:
+        logger.error(f"Error getting opportunity stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
