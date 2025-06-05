@@ -134,23 +134,23 @@ const Dashboard = () => {
     const multiplier = sortOrder === 'asc' ? 1 : -1;
     switch (sortBy) {
       case 'pnl':
-        return (a.pnl - b.pnl) * multiplier;
+        return ((a.pnl || 0) - (b.pnl || 0)) * multiplier;
       case 'size':
-        return (a.size - b.size) * multiplier;
+        return ((a.size || 0) - (b.size || 0)) * multiplier;
       case 'leverage':
-        return (a.leverage - b.leverage) * multiplier;
+        return ((a.leverage || 0) - (b.leverage || 0)) * multiplier;
       default:
         return 0;
     }
   });
 
   const getTotalPnL = () => {
-    return positions.reduce((sum, pos) => sum + pos.pnl, 0);
+    return positions.reduce((sum, pos) => sum + (pos.pnl || 0), 0);
   };
 
   const getRiskLevel = () => {
     if (!stats) return 'low';
-    const drawdown = stats.max_drawdown;
+    const drawdown = stats.max_drawdown || 0;
     if (drawdown > 0.15) return 'high';
     if (drawdown > 0.1) return 'medium';
     return 'low';
@@ -172,7 +172,7 @@ const Dashboard = () => {
         </Typography>
         <Box display="flex" alignItems="center" gap={2}>
           <Chip
-            label={`Total PnL: ${getTotalPnL().toFixed(2)}%`}
+            label={`Total PnL: ${(getTotalPnL() || 0).toFixed(2)}%`}
             color={getTotalPnL() >= 0 ? 'success' : 'error'}
             icon={getTotalPnL() >= 0 ? <TrendingUpIcon /> : <TrendingDownIcon />}
           />
@@ -263,23 +263,23 @@ const Dashboard = () => {
                   Total Trades
                 </Typography>
                 <Typography variant="h6">
-                  {stats.total_trades}
+                  {stats.total_trades || 0}
                 </Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography color="textSecondary" variant="body2">
                   Win Rate
                 </Typography>
-                <Typography variant="h6" color={stats.win_rate >= 0.5 ? 'success.main' : 'error.main'}>
-                  {(stats.win_rate * 100).toFixed(1)}%
+                <Typography variant="h6" color={(stats.win_rate || 0) >= 0.5 ? 'success.main' : 'error.main'}>
+                  {((stats.win_rate || 0) * 100).toFixed(1)}%
                 </Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography color="textSecondary" variant="body2">
                   Profit Factor
                 </Typography>
-                <Typography variant="h6" color={stats.profit_factor >= 1 ? 'success.main' : 'error.main'}>
-                  {stats.profit_factor.toFixed(2)}
+                <Typography variant="h6" color={(stats.profit_factor || 0) >= 1 ? 'success.main' : 'error.main'}>
+                  {(stats.profit_factor || 0).toFixed(2)}
                 </Typography>
               </Grid>
               <Grid item xs={6}>
@@ -287,7 +287,7 @@ const Dashboard = () => {
                   Max Drawdown
                 </Typography>
                 <Typography variant="h6" color="error.main">
-                  {(stats.max_drawdown * 100).toFixed(1)}%
+                  {((stats.max_drawdown || 0) * 100).toFixed(1)}%
                 </Typography>
               </Grid>
             </Grid>
@@ -306,28 +306,28 @@ const Dashboard = () => {
                 </Typography>
                 <LinearProgress 
                   variant="determinate" 
-                  value={stats.daily_risk_usage * 100} 
-                  color={stats.daily_risk_usage > 0.8 ? 'error' : stats.daily_risk_usage > 0.5 ? 'warning' : 'success'}
+                  value={(stats.daily_risk_usage || 0) * 100} 
+                  color={(stats.daily_risk_usage || 0) > 0.8 ? 'error' : (stats.daily_risk_usage || 0) > 0.5 ? 'warning' : 'success'}
                   sx={{ height: 10, borderRadius: 5, mb: 1 }}
                 />
                 <Typography variant="body2" color="textSecondary">
-                  {(stats.daily_risk_usage * 100).toFixed(1)}% of daily risk limit used
+                  {((stats.daily_risk_usage || 0) * 100).toFixed(1)}% of daily risk limit used
                 </Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography color="textSecondary" variant="body2">
                   Current Leverage
                 </Typography>
-                <Typography variant="h6" color={stats.current_leverage > 3 ? 'error.main' : 'success.main'}>
-                  {stats.current_leverage.toFixed(1)}x
+                <Typography variant="h6" color={(stats.current_leverage || 0) > 3 ? 'error.main' : 'success.main'}>
+                  {(stats.current_leverage || 0).toFixed(1)}x
                 </Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography color="textSecondary" variant="body2">
                   Portfolio Beta
                 </Typography>
-                <Typography variant="h6" color={Math.abs(stats.portfolio_beta) > 1 ? 'warning.main' : 'success.main'}>
-                  {stats.portfolio_beta.toFixed(2)}
+                <Typography variant="h6" color={Math.abs(stats.portfolio_beta || 0) > 1 ? 'warning.main' : 'success.main'}>
+                  {(stats.portfolio_beta || 0).toFixed(2)}
                 </Typography>
               </Grid>
             </Grid>
@@ -352,18 +352,18 @@ const Dashboard = () => {
                         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                           <Typography variant="h6">{position.symbol}</Typography>
                           <Chip
-                            label={`${position.pnl.toFixed(2)}%`}
-                            color={position.pnl >= 0 ? 'success' : 'error'}
+                            label={`${(position.pnl || 0).toFixed(2)}%`}
+                            color={(position.pnl || 0) >= 0 ? 'success' : 'error'}
                             size="small"
                           />
                         </Box>
-                        <Grid container spacing={1}>
+                        <Grid container spacing={2}>
                           <Grid item xs={6}>
                             <Typography color="textSecondary" variant="body2">
                               Size
                             </Typography>
                             <Typography variant="body1">
-                              {position.size.toFixed(4)}
+                              {(position.size || 0).toFixed(4)}
                             </Typography>
                           </Grid>
                           <Grid item xs={6}>
@@ -371,7 +371,7 @@ const Dashboard = () => {
                               Leverage
                             </Typography>
                             <Typography variant="body1">
-                              {position.leverage}x
+                              {(position.leverage || 0)}x
                             </Typography>
                           </Grid>
                           <Grid item xs={6}>
@@ -379,7 +379,7 @@ const Dashboard = () => {
                               Entry Price
                             </Typography>
                             <Typography variant="body1">
-                              {position.entry_price.toFixed(2)}
+                              {(position.entry_price || 0).toFixed(2)}
                             </Typography>
                           </Grid>
                           <Grid item xs={6}>
@@ -387,7 +387,7 @@ const Dashboard = () => {
                               Current Price
                             </Typography>
                             <Typography variant="body1">
-                              {position.current_price.toFixed(2)}
+                              {(position.current_price || 0).toFixed(2)}
                             </Typography>
                           </Grid>
                         </Grid>
