@@ -1,0 +1,17 @@
+[Unit]
+Description=Crypto Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/crypto-trading-bot
+EnvironmentFile=/root/crypto-trading-bot/.env
+ExecStart=/root/crypto-trading-bot/venv/bin/python src/main.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/root/crypto-trading-bot/logs/trading_bot.log
+StandardError=append:/root/crypto-trading-bot/logs/trading_bot.log
+
+[Install]
+WantedBy=multi-user.target 

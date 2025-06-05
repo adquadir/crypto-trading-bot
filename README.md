@@ -1,6 +1,27 @@
 # Crypto Trading Bot
 
-A sophisticated cryptocurrency trading bot that implements various technical analysis strategies with risk management and proxy support.
+A sophisticated cryptocurrency trading bot with a modern web interface for monitoring and control.
+
+## Architecture
+
+The system consists of three main components:
+
+1. **Trading Bot (Internal Service)**
+   - Handles all trading logic and risk management
+   - Runs internally on the VPS
+   - Communicates with the exchange directly
+
+2. **Web Interface (Backend API)**
+   - FastAPI-based REST API and WebSocket server
+   - Runs on port 8000
+   - Provides endpoints for frontend communication
+   - Available at `http://50.31.0.105:8000`
+
+3. **Frontend (React Dashboard)**
+   - Modern React-based web interface
+   - Runs on port 3000
+   - Real-time updates via WebSocket
+   - Available at `http://localhost:3000`
 
 ## Features
 
@@ -14,7 +35,11 @@ A sophisticated cryptocurrency trading bot that implements various technical ana
 - Proxy support with failover
 - Machine learning integration
 - Debug mode for development
-- Comprehensive API integration
+- Modern web dashboard
+- Real-time trading signals
+- Performance metrics and charts
+- Position management
+- Strategy configuration
 
 ## Setup
 
@@ -24,12 +49,18 @@ git clone https://github.com/yourusername/crypto-trading-bot.git
 cd crypto-trading-bot
 ```
 
-2. Create a virtual environment and install dependencies:
+2. Run the setup script:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+./scripts/setup.sh
 ```
+
+This will:
+- Create a virtual environment
+- Install backend dependencies
+- Install frontend dependencies
+- Start the trading bot
+- Start the web interface
+- Start the frontend
 
 3. Create a `.env` file in the root directory with the following variables:
 ```env
@@ -80,55 +111,35 @@ PROXY_LIST=port1,port2,port3
 FAILOVER_PORTS=port1,port2,port3,port4
 ```
 
-## Configuration
+## Services
 
-The bot's configuration is managed through environment variables and the `config.py` file. Key configuration sections include:
+### Trading Bot Service
+- Status: `sudo systemctl status crypto-trading-bot.service`
+- Logs: `sudo journalctl -u crypto-trading-bot.service -f`
+- Restart: `sudo systemctl restart crypto-trading-bot.service`
 
-### Exchange Configuration
-- API keys for Binance
-- Testnet mode for safe testing
-- Trading symbols and timeframe
+### Web Interface Service
+- Status: `sudo systemctl status crypto-trading-bot-web.service`
+- Logs: `sudo journalctl -u crypto-trading-bot-web.service -f`
+- Restart: `sudo systemctl restart crypto-trading-bot-web.service`
 
-### Risk Management
-- Maximum position size
-- Leverage limits
-- Risk per trade
-- Maximum open trades
-- Correlation limits
-- Risk-reward ratio
-- Daily loss limits
-- Maximum drawdown
+### Frontend
+- Status: `ps aux | grep "node.*react-scripts start"`
+- Logs: `journalctl -f | grep "react-scripts"`
 
-### Strategy Parameters
-- MACD settings
-- RSI thresholds
-- Bollinger Bands parameters
+## API Endpoints
 
-### Market Data
-- Indicator window sizes
-- Orderbook depth
-- Update intervals
+The web interface provides the following endpoints:
 
-### Proxy Configuration
-- Proxy host and port
-- Authentication credentials
-- Proxy list for rotation
-- Failover ports
-- Health check settings
-
-## Usage
-
-1. Start the trading bot:
-```bash
-python run_bot.py
-```
-
-2. For debug mode:
-```bash
-python debug.py
-```
-
-3. Monitor the logs in `trading_bot.log`
+- `GET /` - API status and documentation
+- `GET /docs` - Swagger UI documentation
+- `GET /redoc` - ReDoc documentation
+- `GET /api/trading/signals` - Get trading signals
+- `GET /api/trading/pnl` - Get profit and loss data
+- `GET /api/trading/stats` - Get trading statistics
+- `GET /api/trading/positions` - Get current positions
+- `GET /api/trading/strategies` - Get strategy information
+- `WS /ws/signals` - WebSocket for real-time signals
 
 ## Project Structure
 
@@ -141,7 +152,7 @@ crypto-trading-bot/
 │   ├── trading_bot.py
 │   ├── api/
 │   │   ├── __init__.py
-│   │   └── endpoints.py
+│   │   └── main.py
 │   ├── market_data/
 │   │   ├── __init__.py
 │   │   ├── exchange_client.py
@@ -161,6 +172,17 @@ crypto-trading-bot/
 │   └── utils/
 │       ├── __init__.py
 │       └── helpers.py
+├── frontend/
+│   ├── public/
+│   │   ├── index.html
+│   │   └── manifest.json
+│   ├── src/
+│   │   ├── App.js
+│   │   ├── index.js
+│   │   ├── index.css
+│   │   ├── components/
+│   │   └── pages/
+│   └── package.json
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
