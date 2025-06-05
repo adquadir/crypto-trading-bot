@@ -88,9 +88,24 @@ const Signals = () => {
     try {
       setLoading(true);
       const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.SIGNALS}`, {
-        timeout: 5000
+        timeout: 5000,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
       });
-      setSignals(response.data.signals || []);
+      
+      // Ensure signals have the required structure
+      const processedSignals = (response.data.signals || []).map(signal => ({
+        ...signal,
+        indicators: signal.indicators || {
+          macd: { value: 0, signal: 0 },
+          rsi: 0,
+          bb: { upper: 0, middle: 0, lower: 0 }
+        }
+      }));
+      
+      setSignals(processedSignals);
       setError(null);
       setRetryCount(0);
       setLastUpdated(new Date());
@@ -564,7 +579,7 @@ const Signals = () => {
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                     <Typography variant="h6">{signal.symbol}</Typography>
                     <Chip
-                      label={signal.action.toUpperCase()}
+                      label={signal.action?.toUpperCase() || 'UNKNOWN'}
                       color={signal.action === 'buy' ? 'success' : 'error'}
                       size="small"
                     />
@@ -575,7 +590,7 @@ const Signals = () => {
                         Strategy
                       </Typography>
                       <Typography variant="body1">
-                        {signal.strategy}
+                        {signal.strategy || 'Unknown'}
                       </Typography>
                     </Grid>
                     <Grid item xs={6}>
@@ -583,7 +598,7 @@ const Signals = () => {
                         Confidence
                       </Typography>
                       <Typography variant="body1" color={signal.confidence >= 0.7 ? 'success.main' : 'warning.main'}>
-                        {(signal.confidence * 100).toFixed(1)}%
+                        {((signal.confidence || 0) * 100).toFixed(1)}%
                       </Typography>
                     </Grid>
                     <Grid item xs={6}>
@@ -591,7 +606,7 @@ const Signals = () => {
                         Price
                       </Typography>
                       <Typography variant="body1">
-                        ${signal.price.toFixed(2)}
+                        ${(signal.price || 0).toFixed(2)}
                       </Typography>
                     </Grid>
                     <Grid item xs={6}>
@@ -602,6 +617,37 @@ const Signals = () => {
                         {new Date(signal.timestamp).toLocaleTimeString()}
                       </Typography>
                     </Grid>
+                    {signal.indicators && (
+                      <>
+                        <Grid item xs={12}>
+                          <Divider sx={{ my: 1 }} />
+                        </Grid>
+                        <Grid item xs={4}>
+                          <Typography color="textSecondary" variant="body2">
+                            MACD
+                          </Typography>
+                          <Typography variant="body2">
+                            {signal.indicators.macd?.value?.toFixed(2) || 'N/A'}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={4}>
+                          <Typography color="textSecondary" variant="body2">
+                            RSI
+                          </Typography>
+                          <Typography variant="body2">
+                            {signal.indicators.rsi?.toFixed(2) || 'N/A'}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={4}>
+                          <Typography color="textSecondary" variant="body2">
+                            BB
+                          </Typography>
+                          <Typography variant="body2">
+                            {signal.indicators.bb?.middle?.toFixed(2) || 'N/A'}
+                          </Typography>
+                        </Grid>
+                      </>
+                    )}
                   </Grid>
                 </CardContent>
               </Card>
