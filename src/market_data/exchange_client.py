@@ -550,10 +550,10 @@ class ExchangeClient:
                 try:
                     formatted_data.append({
                         'timestamp': int(k[0]),
-                        'open': float(k[1]),
-                        'high': float(k[2]),
-                        'low': float(k[3]),
-                        'close': float(k[4]),
+                'open': float(k[1]),
+                'high': float(k[2]),
+                'low': float(k[3]),
+                'close': float(k[4]),
                         'volume': float(k[5]),
                         'close_time': int(k[6]),
                         'quote_volume': float(k[7]),
@@ -618,7 +618,7 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Unexpected error fetching data for {symbol}: {str(e)}")
             return []
-
+            
     def _should_rotate_proxy(self) -> bool:
         metrics = self.proxy_metrics[self.proxy_port]
         if metrics.total_requests < 10:
@@ -750,7 +750,7 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Failed to initialize exchange client: {str(e)}")
             raise
-
+            
     async def close(self):
         """Clean up resources."""
         self._shutdown_event.set()

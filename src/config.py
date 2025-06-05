@@ -78,6 +78,9 @@ EXCHANGE_CONFIG = {
     }
 }
 
+# Trading symbols configuration
+TRADING_SYMBOLS = os.getenv('TRADING_SYMBOLS', 'BTCUSDT,ETHUSDT,BNBUSDT').split(',')
+
 # Risk management configuration
 RISK_CONFIG = {
     'max_position_size': float(os.getenv('MAX_POSITION_SIZE', '0.1')),
