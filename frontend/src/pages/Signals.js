@@ -303,7 +303,7 @@ const Signals = () => {
         }
       }, 10000); // 10 second timeout
 
-      const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.SIGNALS_WS}`);
+      const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
