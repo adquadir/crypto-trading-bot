@@ -1,108 +1,98 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Grid,
+  Box,
   Paper,
   Typography,
-  Box,
+  Grid,
   Card,
   CardContent,
+  CircularProgress,
   Alert,
   Snackbar,
-  CircularProgress,
-  Button
-} from '@mui/material';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
+  Button,
+  TextField,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  IconButton,
   Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from 'recharts';
+  Chip,
+  Divider,
+  LinearProgress
+} from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import WarningIcon from '@mui/icons-material/Warning';
 import axios from 'axios';
 import config from '../config';
 
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
-  const [pnl, setPnl] = useState(null);
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
-  const [lastSuccessfulFetch, setLastSuccessfulFetch] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [timeRange, setTimeRange] = useState('24h');
+  const [sortBy, setSortBy] = useState('pnl');
+  const [sortOrder, setSortOrder] = useState('desc');
   const maxRetries = 3;
 
-  const fetchStats = async () => {
-    try {
-      const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.STATS}`);
-      setStats(response.data);
-      setError(null);
-      setRetryCount(0);
-      setLastSuccessfulFetch(new Date());
-    } catch (err) {
-      console.error('Error fetching stats:', err);
-      if (retryCount < maxRetries) {
-        setRetryCount(prev => prev + 1);
-        setTimeout(fetchStats, 5000); // Retry after 5 seconds
-      } else {
-        setError('Failed to connect to server. Please check your connection.');
+  const handleError = (error) => {
+    console.error('Error in dashboard:', error);
+    let errorMessage = 'Failed to fetch dashboard data';
+
+    if (error.response) {
+      switch (error.response.status) {
+        case 401:
+          errorMessage = 'Authentication required. Please log in.';
+          break;
+        case 403:
+          errorMessage = 'Access denied. Please check your permissions.';
+          break;
+        case 404:
+          errorMessage = 'Dashboard endpoint not found. Please check the API configuration.';
+          break;
+        case 500:
+          errorMessage = 'Server error. Please try again later.';
+          break;
+        default:
+          errorMessage = `Server error: ${error.response.status}`;
       }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 30000); // Update every 30 seconds
-    return () => clearInterval(interval);
-  }, [retryCount]);
-
-  const handleError = (error, endpoint) => {
-    console.error(`Error fetching ${endpoint}:`, error);
-    
-    let errorMessage = 'Failed to fetch data';
-    if (error.code === 'ECONNREFUSED') {
-      errorMessage = 'Cannot connect to server. Please check if the server is running.';
-    } else if (error.code === 'ETIMEDOUT') {
-      errorMessage = 'Connection timed out. Please check your internet connection.';
-    } else if (error.response) {
-      errorMessage = `Server error: ${error.response.status} - ${error.response.statusText}`;
     } else if (error.request) {
       errorMessage = 'No response from server. Please check your connection.';
+    } else if (error.code === 'ECONNABORTED') {
+      errorMessage = 'Request timed out. Please try again.';
     }
 
-    setError({
-      message: errorMessage,
-      endpoint,
-      timestamp: new Date().toISOString()
-    });
+    setError(errorMessage);
   };
 
-  const fetchData = async () => {
+  const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const [statsRes, pnlRes, positionsRes] = await Promise.all([
-        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.STATS}`),
-        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.PNL}`),
-        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.POSITIONS}`)
+      const [statsResponse, positionsResponse] = await Promise.all([
+        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.STATS}`, {
+          params: { timeRange },
+          timeout: 5000
+        }),
+        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.POSITIONS}`, {
+          timeout: 5000
+        })
       ]);
 
-      setStats(statsRes.data);
-      setPnl(pnlRes.data);
-      setPositions(positionsRes.data.positions || []);
+      setStats(statsResponse.data);
+      setPositions(positionsResponse.data.positions || []);
       setError(null);
       setRetryCount(0);
-      setLastSuccessfulFetch(new Date());
+      setLastUpdated(new Date());
     } catch (err) {
-      console.error('Error fetching dashboard data:', err);
+      handleError(err);
       if (retryCount < maxRetries) {
         setRetryCount(prev => prev + 1);
-        setTimeout(fetchData, 5000);
-      } else {
-        setError('Failed to connect to server. Please check your connection.');
+        setTimeout(fetchDashboardData, 5000);
       }
     } finally {
       setLoading(false);
@@ -110,30 +100,47 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
+    fetchDashboardData();
+    const interval = setInterval(fetchDashboardData, 30000); // Update every 30 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [retryCount, timeRange]);
 
-  const StatCard = ({ title, value, subtitle }) => (
-    <Card>
-      <CardContent>
-        <Typography color="textSecondary" gutterBottom>
-          {title}
-        </Typography>
-        <Typography variant="h4" component="div">
-          {value}
-        </Typography>
-        {subtitle && (
-          <Typography color="textSecondary">
-            {subtitle}
-          </Typography>
-        )}
-      </CardContent>
-    </Card>
-  );
+  const handleSort = (field) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder('desc');
+    }
+  };
 
-  if (loading && !stats && !pnl && !positions.length) {
+  const sortedPositions = [...positions].sort((a, b) => {
+    const multiplier = sortOrder === 'asc' ? 1 : -1;
+    switch (sortBy) {
+      case 'pnl':
+        return (a.pnl - b.pnl) * multiplier;
+      case 'size':
+        return (a.size - b.size) * multiplier;
+      case 'leverage':
+        return (a.leverage - b.leverage) * multiplier;
+      default:
+        return 0;
+    }
+  });
+
+  const getTotalPnL = () => {
+    return positions.reduce((sum, pos) => sum + pos.pnl, 0);
+  };
+
+  const getRiskLevel = () => {
+    if (!stats) return 'low';
+    const drawdown = stats.max_drawdown;
+    if (drawdown > 0.15) return 'high';
+    if (drawdown > 0.1) return 'medium';
+    return 'low';
+  };
+
+  if (loading && !stats) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
         <CircularProgress />
@@ -143,9 +150,28 @@ const Dashboard = () => {
 
   return (
     <Box p={3}>
-      <Typography variant="h4" gutterBottom>
-        Trading Dashboard
-      </Typography>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h4">
+          Trading Dashboard
+        </Typography>
+        <Box display="flex" alignItems="center" gap={2}>
+          <Chip
+            label={`Total PnL: ${getTotalPnL().toFixed(2)}%`}
+            color={getTotalPnL() >= 0 ? 'success' : 'error'}
+            icon={getTotalPnL() >= 0 ? <TrendingUpIcon /> : <TrendingDownIcon />}
+          />
+          <Chip
+            label={`Risk Level: ${getRiskLevel().toUpperCase()}`}
+            color={getRiskLevel() === 'high' ? 'error' : getRiskLevel() === 'medium' ? 'warning' : 'success'}
+            icon={getRiskLevel() === 'high' ? <WarningIcon /> : null}
+          />
+          <Tooltip title="Refresh dashboard">
+            <IconButton onClick={fetchDashboardData} disabled={loading}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
 
       {error && (
         <Snackbar 
@@ -158,122 +184,203 @@ const Dashboard = () => {
             severity="error" 
             onClose={() => setError(null)}
             action={
-              <Button color="inherit" size="small" onClick={fetchStats}>
+              <Button color="inherit" size="small" onClick={fetchDashboardData}>
                 Retry
               </Button>
             }
           >
-            {error?.message}
-            {retryCount > 0 && ` (Retry ${retryCount}/${maxRetries})`}
+            {error}
           </Alert>
         </Snackbar>
       )}
 
-      {/* Last Update Time */}
-      {lastSuccessfulFetch && (
+      <Box mb={3}>
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Time Range</InputLabel>
+              <Select
+                value={timeRange}
+                label="Time Range"
+                onChange={(e) => setTimeRange(e.target.value)}
+              >
+                <MenuItem value="1h">Last Hour</MenuItem>
+                <MenuItem value="24h">Last 24 Hours</MenuItem>
+                <MenuItem value="7d">Last 7 Days</MenuItem>
+                <MenuItem value="30d">Last 30 Days</MenuItem>
+                <MenuItem value="all">All Time</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Sort Positions By</InputLabel>
+              <Select
+                value={sortBy}
+                label="Sort Positions By"
+                onChange={(e) => handleSort(e.target.value)}
+              >
+                <MenuItem value="pnl">PnL</MenuItem>
+                <MenuItem value="size">Size</MenuItem>
+                <MenuItem value="leverage">Leverage</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+      </Box>
+
+      {lastUpdated && (
         <Typography variant="caption" color="textSecondary" sx={{ mb: 2, display: 'block' }}>
-          Last updated: {new Date(lastSuccessfulFetch).toLocaleTimeString()}
+          Last updated: {lastUpdated.toLocaleTimeString()}
         </Typography>
       )}
 
       <Grid container spacing={3}>
-        {/* Performance Stats */}
-        <Grid item xs={12} md={3}>
-          <StatCard
-            title="Total PnL"
-            value={`$${pnl?.total_pnl?.toFixed(2) || '0.00'}`}
-            subtitle={`Daily: $${pnl?.daily_pnl?.toFixed(2) || '0.00'}`}
-          />
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <StatCard
-            title="Win Rate"
-            value={`${stats?.win_rate ? (stats.win_rate * 100).toFixed(1) : '0'}%`}
-            subtitle={`Total Trades: ${stats?.total_trades || 0}`}
-          />
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <StatCard
-            title="Profit Factor"
-            value={stats?.profit_factor?.toFixed(2) || '0.00'}
-            subtitle={`Sharpe: ${stats?.sharpe_ratio?.toFixed(2) || '0.00'}`}
-          />
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <StatCard
-            title="Max Drawdown"
-            value={`${stats?.max_drawdown ? (stats.max_drawdown * 100).toFixed(1) : '0'}%`}
-            subtitle={`Open Positions: ${positions.length}`}
-          />
-        </Grid>
-
-        {/* PnL Chart */}
-        <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Performance History
+              Performance Metrics
             </Typography>
-            <Box sx={{ height: 400 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={[
-                    { time: '00:00', pnl: 0 },
-                    { time: '04:00', pnl: 500 },
-                    { time: '08:00', pnl: 1200 },
-                    { time: '12:00', pnl: 800 },
-                    { time: '16:00', pnl: 1500 },
-                    { time: '20:00', pnl: 2000 },
-                  ]}
-                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="pnl"
-                    stroke="#8884d8"
-                    name="PnL"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <Typography color="textSecondary" variant="body2">
+                  Total Trades
+                </Typography>
+                <Typography variant="h6">
+                  {stats?.total_trades || 0}
+                </Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography color="textSecondary" variant="body2">
+                  Win Rate
+                </Typography>
+                <Typography variant="h6" color={stats?.win_rate >= 0.5 ? 'success.main' : 'error.main'}>
+                  {(stats?.win_rate * 100 || 0).toFixed(1)}%
+                </Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography color="textSecondary" variant="body2">
+                  Profit Factor
+                </Typography>
+                <Typography variant="h6" color={stats?.profit_factor >= 1 ? 'success.main' : 'error.main'}>
+                  {stats?.profit_factor?.toFixed(2) || 0}
+                </Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography color="textSecondary" variant="body2">
+                  Max Drawdown
+                </Typography>
+                <Typography variant="h6" color="error.main">
+                  {(stats?.max_drawdown * 100 || 0).toFixed(1)}%
+                </Typography>
+              </Grid>
+            </Grid>
           </Paper>
         </Grid>
 
-        {/* Active Positions */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Risk Metrics
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <Typography color="textSecondary" variant="body2">
+                  Daily Risk Usage
+                </Typography>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={(stats?.daily_risk_usage || 0) * 100} 
+                  color={stats?.daily_risk_usage > 0.8 ? 'error' : stats?.daily_risk_usage > 0.5 ? 'warning' : 'success'}
+                  sx={{ height: 10, borderRadius: 5, mb: 1 }}
+                />
+                <Typography variant="body2" color="textSecondary">
+                  {(stats?.daily_risk_usage * 100 || 0).toFixed(1)}% of daily risk limit used
+                </Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography color="textSecondary" variant="body2">
+                  Current Leverage
+                </Typography>
+                <Typography variant="h6" color={stats?.current_leverage > 3 ? 'error.main' : 'success.main'}>
+                  {stats?.current_leverage?.toFixed(1) || 0}x
+                </Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography color="textSecondary" variant="body2">
+                  Portfolio Beta
+                </Typography>
+                <Typography variant="h6" color={Math.abs(stats?.portfolio_beta || 0) > 1 ? 'warning.main' : 'success.main'}>
+                  {(stats?.portfolio_beta || 0).toFixed(2)}
+                </Typography>
+              </Grid>
+            </Grid>
+          </Paper>
+        </Grid>
+
         <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
+          <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
               Active Positions
             </Typography>
-            <Grid container spacing={2}>
-              {positions.map((position) => (
-                <Grid item xs={12} sm={6} md={4} key={position.symbol}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6">{position.symbol}</Typography>
-                      <Typography color="textSecondary">
-                        Size: {position.size} BTC
-                      </Typography>
-                      <Typography color="textSecondary">
-                        Entry: ${position.entry_price}
-                      </Typography>
-                      <Typography color="textSecondary">
-                        Current: ${position.current_price}
-                      </Typography>
-                      <Typography
-                        color={position.pnl >= 0 ? 'success.main' : 'error.main'}
-                      >
-                        PnL: ${position.pnl.toFixed(2)}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
+            {sortedPositions.length === 0 ? (
+              <Typography color="textSecondary" align="center">
+                No active positions
+              </Typography>
+            ) : (
+              <Grid container spacing={2}>
+                {sortedPositions.map((position) => (
+                  <Grid item xs={12} sm={6} md={4} key={position.id}>
+                    <Card>
+                      <CardContent>
+                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                          <Typography variant="h6">{position.symbol}</Typography>
+                          <Chip
+                            label={`${position.pnl.toFixed(2)}%`}
+                            color={position.pnl >= 0 ? 'success' : 'error'}
+                            size="small"
+                          />
+                        </Box>
+                        <Grid container spacing={1}>
+                          <Grid item xs={6}>
+                            <Typography color="textSecondary" variant="body2">
+                              Size
+                            </Typography>
+                            <Typography variant="body1">
+                              {position.size.toFixed(4)}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography color="textSecondary" variant="body2">
+                              Leverage
+                            </Typography>
+                            <Typography variant="body1">
+                              {position.leverage}x
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography color="textSecondary" variant="body2">
+                              Entry Price
+                            </Typography>
+                            <Typography variant="body1">
+                              {position.entry_price.toFixed(2)}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography color="textSecondary" variant="body2">
+                              Current Price
+                            </Typography>
+                            <Typography variant="body1">
+                              {position.current_price.toFixed(2)}
+                            </Typography>
+                          </Grid>
+                        </Grid>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            )}
           </Paper>
         </Grid>
       </Grid>
