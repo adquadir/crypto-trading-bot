@@ -9,6 +9,7 @@ import {
   Alert,
   Snackbar,
   CircularProgress,
+  Button
 } from '@mui/material';
 import {
   LineChart,
@@ -21,9 +22,9 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import axios from 'axios';
-import { API_CONFIG } from '../config';
+import config from '../config';
 
-function Dashboard() {
+const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [pnl, setPnl] = useState(null);
   const [positions, setPositions] = useState([]);
@@ -31,9 +32,33 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const [lastSuccessfulFetch, setLastSuccessfulFetch] = useState(null);
+  const maxRetries = 3;
 
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY = 5000; // 5 seconds
+  const fetchStats = async () => {
+    try {
+      const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.STATS}`);
+      setStats(response.data);
+      setError(null);
+      setRetryCount(0);
+      setLastSuccessfulFetch(new Date());
+    } catch (err) {
+      console.error('Error fetching stats:', err);
+      if (retryCount < maxRetries) {
+        setRetryCount(prev => prev + 1);
+        setTimeout(fetchStats, 5000); // Retry after 5 seconds
+      } else {
+        setError('Failed to connect to server. Please check your connection.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000); // Update every 30 seconds
+    return () => clearInterval(interval);
+  }, [retryCount]);
 
   const handleError = (error, endpoint) => {
     console.error(`Error fetching ${endpoint}:`, error);
@@ -60,9 +85,9 @@ function Dashboard() {
     try {
       setLoading(true);
       const [statsRes, pnlRes, positionsRes] = await Promise.all([
-        axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.STATS}`),
-        axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.PNL}`),
-        axios.get(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.POSITIONS}`),
+        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.STATS}`),
+        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.PNL}`),
+        axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.POSITIONS}`),
       ]);
 
       setStats(statsRes.data);
@@ -75,9 +100,9 @@ function Dashboard() {
       handleError(error, 'dashboard data');
       
       // Implement retry logic
-      if (retryCount < MAX_RETRIES) {
+      if (retryCount < maxRetries) {
         setRetryCount(prev => prev + 1);
-        setTimeout(fetchData, RETRY_DELAY);
+        setTimeout(fetchData, 5000);
       }
     } finally {
       setLoading(false);
@@ -117,17 +142,32 @@ function Dashboard() {
   }
 
   return (
-    <Box>
-      {/* Error Alert */}
-      <Snackbar
-        open={!!error}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="error" sx={{ width: '100%' }}>
-          {error?.message}
-          {retryCount > 0 && ` (Retry ${retryCount}/${MAX_RETRIES})`}
-        </Alert>
-      </Snackbar>
+    <Box p={3}>
+      <Typography variant="h4" gutterBottom>
+        Trading Dashboard
+      </Typography>
+
+      {error && (
+        <Snackbar 
+          open={!!error} 
+          autoHideDuration={6000} 
+          onClose={() => setError(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+          <Alert 
+            severity="error" 
+            onClose={() => setError(null)}
+            action={
+              <Button color="inherit" size="small" onClick={fetchStats}>
+                Retry
+              </Button>
+            }
+          >
+            {error?.message}
+            {retryCount > 0 && ` (Retry ${retryCount}/${maxRetries})`}
+          </Alert>
+        </Snackbar>
+      )}
 
       {/* Last Update Time */}
       {lastSuccessfulFetch && (
@@ -239,6 +279,6 @@ function Dashboard() {
       </Grid>
     </Box>
   );
-}
+};
 
 export default Dashboard; 

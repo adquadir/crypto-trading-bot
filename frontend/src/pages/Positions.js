@@ -7,31 +7,43 @@ import {
   Grid,
   CircularProgress,
   Alert,
-  Snackbar
+  Snackbar,
+  Button
 } from '@mui/material';
 import axios from 'axios';
+import config from '../config';
 
 const Positions = () => {
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const maxRetries = 3;
+
+  const fetchPositions = async () => {
+    try {
+      const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.POSITIONS}`);
+      setPositions(response.data);
+      setError(null);
+      setRetryCount(0);
+    } catch (err) {
+      console.error('Error fetching positions:', err);
+      if (retryCount < maxRetries) {
+        setRetryCount(prev => prev + 1);
+        setTimeout(fetchPositions, 5000);
+      } else {
+        setError('Failed to connect to server. Please check your connection.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchPositions = async () => {
-      try {
-        const response = await axios.get('http://50.31.0.105:8000/api/trading/positions');
-        setPositions(response.data);
-        setLoading(false);
-      } catch (err) {
-        setError('Failed to fetch positions');
-        setLoading(false);
-      }
-    };
-
     fetchPositions();
     const interval = setInterval(fetchPositions, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [retryCount]);
 
   if (loading) {
     return (
@@ -48,8 +60,21 @@ const Positions = () => {
       </Typography>
       
       {error && (
-        <Snackbar open={!!error} autoHideDuration={6000} onClose={() => setError(null)}>
-          <Alert severity="error" onClose={() => setError(null)}>
+        <Snackbar 
+          open={!!error} 
+          autoHideDuration={6000} 
+          onClose={() => setError(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+          <Alert 
+            severity="error" 
+            onClose={() => setError(null)}
+            action={
+              <Button color="inherit" size="small" onClick={fetchPositions}>
+                Retry
+              </Button>
+            }
+          >
             {error}
           </Alert>
         </Snackbar>
