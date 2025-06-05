@@ -219,7 +219,11 @@ const Signals = () => {
     heartbeatIntervalRef.current = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         try {
-          ws.send(JSON.stringify({ type: 'ping' }));
+          const timestamp = Date.now();
+          ws.send(JSON.stringify({ 
+            type: 'ping',
+            timestamp
+          }));
           missedHeartbeatsRef.current = 0;
         } catch (err) {
           console.error('Error sending heartbeat:', err);
@@ -230,6 +234,9 @@ const Signals = () => {
             reconnectWebSocket();
           }
         }
+      } else if (ws.readyState === WebSocket.CLOSED) {
+        console.error('WebSocket is closed, attempting to reconnect...');
+        reconnectWebSocket();
       }
     }, heartbeatInterval);
   };
@@ -271,10 +278,19 @@ const Signals = () => {
     }
 
     try {
+      // Add connection timeout
+      const connectionTimeout = setTimeout(() => {
+        if (wsRef.current?.readyState !== WebSocket.OPEN) {
+          console.error('WebSocket connection timeout');
+          handleWebSocketError({ code: 1006, reason: 'Connection timeout' });
+        }
+      }, 10000); // 10 second timeout
+
       const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.SIGNALS_WS}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        clearTimeout(connectionTimeout);
         console.log('WebSocket Connected');
         updateConnectionStatus('connected', null);
         setError(null);
@@ -321,9 +337,13 @@ const Signals = () => {
         }
       };
 
-      ws.onerror = handleWebSocketError;
+      ws.onerror = (event) => {
+        clearTimeout(connectionTimeout);
+        handleWebSocketError(event);
+      };
 
       ws.onclose = (event) => {
+        clearTimeout(connectionTimeout);
         console.log('WebSocket Disconnected:', event.code, event.reason);
         updateConnectionStatus('disconnected', {
           code: event.code,

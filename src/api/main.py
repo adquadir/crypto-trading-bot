@@ -5,6 +5,11 @@ from typing import List, Dict
 import json
 import asyncio
 from datetime import datetime
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Crypto Trading Bot API",
@@ -41,17 +46,40 @@ async def root():
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self.heartbeat_interval = 30  # seconds
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        logger.info(f"New WebSocket connection. Total connections: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
+        logger.info(f"WebSocket disconnected. Remaining connections: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
+        disconnected = []
         for connection in self.active_connections:
-            await connection.send_json(message)
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting message: {e}")
+                disconnected.append(connection)
+
+        # Clean up disconnected clients
+        for connection in disconnected:
+            self.disconnect(connection)
+
+    async def handle_heartbeat(self, websocket: WebSocket, data: dict):
+        try:
+            # Echo back the timestamp for latency calculation
+            await websocket.send_json({
+                "type": "pong",
+                "timestamp": data.get("timestamp")
+            })
+        except Exception as e:
+            logger.error(f"Error handling heartbeat: {e}")
+            self.disconnect(websocket)
 
 manager = ConnectionManager()
 
@@ -61,21 +89,29 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Simulate live signal updates
-            signal = {
-                "timestamp": datetime.now().isoformat(),
-                "symbol": "BTCUSDT",
-                "signal": "BUY",
-                "confidence": 0.85,
-                "indicators": {
-                    "macd": {"value": 0.5, "signal": 0.3},
-                    "rsi": 65,
-                    "bb": {"upper": 50000, "middle": 48000, "lower": 46000}
-                }
-            }
-            await websocket.send_json(signal)
-            await asyncio.sleep(1)
+            try:
+                # Wait for messages from client
+                data = await websocket.receive_json()
+                
+                # Handle heartbeat messages
+                if data.get("type") == "ping":
+                    await manager.handle_heartbeat(websocket, data)
+                    continue
+
+                # Handle other message types here
+                logger.debug(f"Received message: {data}")
+
+            except json.JSONDecodeError:
+                logger.error("Invalid JSON received")
+                continue
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+                continue
+
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
 # REST endpoints
