@@ -51,6 +51,8 @@ const Signals = () => {
   const baseReconnectDelay = 1000; // 1 second
   const maxReconnectDelay = 30000; // 30 seconds
   const latencyTimeoutRef = useRef(null);
+  const maxMissedHeartbeats = 3; // Maximum number of missed heartbeats before reconnecting
+  const heartbeatInterval = 30000; // Heartbeat interval in milliseconds (30 seconds)
 
   const handleError = (error) => {
     console.error('Error in signals:', error);
