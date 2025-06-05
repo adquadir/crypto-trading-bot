@@ -30,8 +30,6 @@ class TradingBot:
         )
         self.market_processor = MarketDataProcessor()
         self.signal_engine = SignalEngine()
-        self.risk_manager = RiskManager()
-        self.symbol_discovery = SymbolDiscovery(self.exchange_client)
         
         # Initialize database
         self._init_database()
@@ -44,6 +42,10 @@ class TradingBot:
         
         # Start opportunity scanning in background
         self.opportunity_scan_task = None
+        
+        # Risk manager will be initialized in start() after getting account balance
+        self.risk_manager = None
+        self.symbol_discovery = None
         
     def _init_database(self):
         """Initialize database connection and create tables."""
@@ -73,6 +75,12 @@ class TradingBot:
             # Initialize with debug checks
             await self.exchange_client.initialize()
             await self.exchange_client.test_proxy_connection()
+            
+            # Get account balance and initialize risk manager
+            account_info = await asyncio.to_thread(self.exchange_client.client.get_account)
+            total_balance = sum(float(b['balance']) for b in account_info['balances'] if float(b['balance']) > 0)
+            self.risk_manager = RiskManager(account_balance=total_balance)
+            self.symbol_discovery = SymbolDiscovery(self.exchange_client)
             
             # Start opportunity scanning in background
             self.opportunity_scan_task = asyncio.create_task(
