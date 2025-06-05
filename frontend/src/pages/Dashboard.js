@@ -29,7 +29,15 @@ import axios from 'axios';
 import config from '../config';
 
 const Dashboard = () => {
-  const [stats, setStats] = useState(null);
+  const [stats, setStats] = useState({
+    total_trades: 0,
+    win_rate: 0,
+    profit_factor: 0,
+    max_drawdown: 0,
+    daily_risk_usage: 0,
+    current_leverage: 0,
+    portfolio_beta: 0
+  });
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -83,8 +91,16 @@ const Dashboard = () => {
         })
       ]);
 
-      setStats(statsResponse.data);
-      setPositions(positionsResponse.data.positions || []);
+      setStats(statsResponse.data || {
+        total_trades: 0,
+        win_rate: 0,
+        profit_factor: 0,
+        max_drawdown: 0,
+        daily_risk_usage: 0,
+        current_leverage: 0,
+        portfolio_beta: 0
+      });
+      setPositions(positionsResponse.data?.positions || []);
       setError(null);
       setRetryCount(0);
       setLastUpdated(new Date());
@@ -247,23 +263,23 @@ const Dashboard = () => {
                   Total Trades
                 </Typography>
                 <Typography variant="h6">
-                  {stats?.total_trades || 0}
+                  {stats.total_trades}
                 </Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography color="textSecondary" variant="body2">
                   Win Rate
                 </Typography>
-                <Typography variant="h6" color={stats?.win_rate >= 0.5 ? 'success.main' : 'error.main'}>
-                  {(stats?.win_rate * 100 || 0).toFixed(1)}%
+                <Typography variant="h6" color={stats.win_rate >= 0.5 ? 'success.main' : 'error.main'}>
+                  {(stats.win_rate * 100).toFixed(1)}%
                 </Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography color="textSecondary" variant="body2">
                   Profit Factor
                 </Typography>
-                <Typography variant="h6" color={stats?.profit_factor >= 1 ? 'success.main' : 'error.main'}>
-                  {stats?.profit_factor?.toFixed(2) || 0}
+                <Typography variant="h6" color={stats.profit_factor >= 1 ? 'success.main' : 'error.main'}>
+                  {stats.profit_factor.toFixed(2)}
                 </Typography>
               </Grid>
               <Grid item xs={6}>
@@ -271,7 +287,7 @@ const Dashboard = () => {
                   Max Drawdown
                 </Typography>
                 <Typography variant="h6" color="error.main">
-                  {(stats?.max_drawdown * 100 || 0).toFixed(1)}%
+                  {(stats.max_drawdown * 100).toFixed(1)}%
                 </Typography>
               </Grid>
             </Grid>
@@ -290,28 +306,28 @@ const Dashboard = () => {
                 </Typography>
                 <LinearProgress 
                   variant="determinate" 
-                  value={(stats?.daily_risk_usage || 0) * 100} 
-                  color={stats?.daily_risk_usage > 0.8 ? 'error' : stats?.daily_risk_usage > 0.5 ? 'warning' : 'success'}
+                  value={stats.daily_risk_usage * 100} 
+                  color={stats.daily_risk_usage > 0.8 ? 'error' : stats.daily_risk_usage > 0.5 ? 'warning' : 'success'}
                   sx={{ height: 10, borderRadius: 5, mb: 1 }}
                 />
                 <Typography variant="body2" color="textSecondary">
-                  {(stats?.daily_risk_usage * 100 || 0).toFixed(1)}% of daily risk limit used
+                  {(stats.daily_risk_usage * 100).toFixed(1)}% of daily risk limit used
                 </Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography color="textSecondary" variant="body2">
                   Current Leverage
                 </Typography>
-                <Typography variant="h6" color={stats?.current_leverage > 3 ? 'error.main' : 'success.main'}>
-                  {stats?.current_leverage?.toFixed(1) || 0}x
+                <Typography variant="h6" color={stats.current_leverage > 3 ? 'error.main' : 'success.main'}>
+                  {stats.current_leverage.toFixed(1)}x
                 </Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography color="textSecondary" variant="body2">
                   Portfolio Beta
                 </Typography>
-                <Typography variant="h6" color={Math.abs(stats?.portfolio_beta || 0) > 1 ? 'warning.main' : 'success.main'}>
-                  {(stats?.portfolio_beta || 0).toFixed(2)}
+                <Typography variant="h6" color={Math.abs(stats.portfolio_beta) > 1 ? 'warning.main' : 'success.main'}>
+                  {stats.portfolio_beta.toFixed(2)}
                 </Typography>
               </Grid>
             </Grid>
@@ -330,7 +346,7 @@ const Dashboard = () => {
             ) : (
               <Grid container spacing={2}>
                 {sortedPositions.map((position) => (
-                  <Grid item xs={12} sm={6} md={4} key={position.id}>
+                  <Grid item xs={12} sm={6} md={4} key={`${position.symbol}-${position.id}`}>
                     <Card>
                       <CardContent>
                         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
