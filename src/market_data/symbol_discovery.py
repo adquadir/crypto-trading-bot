@@ -478,200 +478,303 @@ class SymbolDiscovery:
         """Validate a trading signal."""
         errors = []
         warnings = []
+
+        # Required fields based on the signal structure from SignalGenerator
+        # Expected fields are 'symbol', 'direction', 'entry', 'take_profit', 'stop_loss', 'confidence', 'indicators'
+        required_fields = ['symbol', 'direction', 'entry', 'take_profit', 'stop_loss', 'confidence', 'indicators']
         
-        # Required fields
-        required_fields = ['symbol', 'direction', 'price', 'confidence', 'indicators']
+        # Check for presence of required fields
         for field in required_fields:
             if field not in signal:
-                errors.append(f"Missing required field: {field}")
-                
+                # Use a more informative error message if a level is missing
+                if field in ['entry', 'take_profit', 'stop_loss']:
+                    errors.append(f"Missing required trading level in signal: {field}")
+                else:
+                    errors.append(f"Missing required field in signal: {field}")
+
+        # If essential fields are missing, stop validation here
         if errors:
             return SignalValidationResult(False, errors, warnings)
-            
+
         # Validate field types and values
         try:
             if not isinstance(signal['symbol'], str):
                 errors.append("Symbol must be a string")
-                
+
+            # Allow both 'LONG' and 'SHORT' for direction
             if signal['direction'] not in ['LONG', 'SHORT']:
                 errors.append("Direction must be 'LONG' or 'SHORT'")
-                
-            if not isinstance(signal['price'], (int, float)) or signal['price'] <= 0:
-                errors.append("Price must be a positive number")
-                
-            if not isinstance(signal['confidence'], (int, float)) or not 0 <= signal['confidence'] <= 1:
-                errors.append("Confidence must be a number between 0 and 1")
-                
-            if not isinstance(signal['indicators'], dict):
+
+            # Validate entry, take_profit, stop_loss
+            for level_field in ['entry', 'take_profit', 'stop_loss']:
+                # Check if the value is numeric and positive
+                value = signal[level_field]
+                if not (isinstance(value, (int, float)) and value > 0):
+                     # Add a specific check for non-positive values
+                     if isinstance(value, (int, float)) and value <= 0:
+                         errors.append(f"{level_field.replace('_', ' ').capitalize()} must be a positive number (got {value})")
+                     else:
+                         errors.append(f"{level_field.replace('_', ' ').capitalize()} must be a number (got {type(value).__name__})")
+
+            # Validate confidence (using the key 'confidence')
+            confidence_value = signal.get('confidence')
+            if not isinstance(confidence_value, (int, float)) or not 0.0 <= confidence_value <= 1.0:
+                # Add a specific message if the value is outside the 0-1 range
+                if isinstance(confidence_value, (int, float)):
+                    errors.append(f"Confidence must be a number between 0 and 1 (got {confidence_value})")
+                else:
+                    errors.append(f"Confidence must be a number (got {type(confidence_value).__name__})")
+
+            if not isinstance(signal.get('indicators', {}), dict):
                 errors.append("Indicators must be a dictionary")
-                
-            # Validate indicators
-            if 'rsi' in signal['indicators']:
-                rsi = signal['indicators']['rsi']
-                if not isinstance(rsi, (int, float)) or not 0 <= rsi <= 100:
-                    warnings.append("RSI value out of normal range (0-100)")
-                    
-            if 'macd' in signal['indicators']:
-                macd = signal['indicators']['macd']
-                if not isinstance(macd, dict) or 'value' not in macd or 'signal' not in macd:
-                    warnings.append("MACD indicator missing required fields")
-                    
-            # Check for extreme values
-            if signal['confidence'] > 0.9:
-                warnings.append("Unusually high confidence value")
-                
-            if 'volatility' in signal['indicators']:
-                vol = signal['indicators']['volatility']
-                if vol > 0.1:  # 10% volatility
-                    warnings.append("High volatility detected")
-                    
+
+            # Validate indicators (optional deep validation can be added here)
+            # Example: Validate RSI if present
+            rsi_value = signal['indicators'].get('rsi')
+            if rsi_value is not None:
+                if not isinstance(rsi_value, (int, float)) or not 0 <= rsi_value <= 100:
+                    warnings.append(f"RSI value out of normal range (0-100) in indicators (got {rsi_value})")
+
+            # Example: Validate MACD if present
+            macd_value = signal['indicators'].get('macd')
+            if macd_value is not None:
+                 if not isinstance(macd_value, dict) or 'value' not in macd_value or 'signal' not in macd_value:
+                     warnings.append("MACD indicator missing required fields or is not a dict in indicators")
+
+            # Check for extreme values or inconsistencies (example: stop_loss on wrong side)
+            entry = signal['entry']
+            stop_loss = signal['stop_loss']
+            take_profit = signal['take_profit']
+
+            if signal['direction'] == 'LONG':
+                if stop_loss >= entry:
+                    errors.append("LONG trade stop loss must be strictly below entry price")
+                # Using >= and <= for TP/SL relative to entry to catch potential issues
+                if take_profit <= entry:
+                     warnings.append("LONG trade take profit is not strictly above entry price")
+                 # Check if stop_loss is too far from entry (more than entry itself, e.g., 100% loss potential in one step)
+                if entry > 0 and abs(entry - stop_loss) / entry > 0.95: # 95% max distance as a heuristic
+                    warnings.append(f"LONG trade stop loss is very far from entry price ({abs(entry - stop_loss) / entry:.2f}%) - potential data issue or wide range")
+
+            elif signal['direction'] == 'SHORT':
+                 if stop_loss <= entry:
+                     errors.append("SHORT trade stop loss must be strictly above entry price")
+                 if take_profit >= entry:
+                      warnings.append("SHORT trade take profit is not strictly below entry price")
+                 # Check if stop_loss is too far from entry
+                 if entry > 0 and abs(entry - stop_loss) / entry > 0.95:
+                     warnings.append(f"SHORT trade stop loss is very far from entry price ({abs(entry - stop_loss) / entry:.2f}%) - potential data issue or wide range")
+
+            # Check for extreme confidence value (already handled by type/range check, but can add specific warnings)
+            if 0.9 <= confidence_value < 1.0:
+                 warnings.append("High confidence value detected (>=0.9)")
+            elif confidence_value == 1.0:
+                 warnings.append("Maximum confidence value (1.0) detected - ensure this isn't a default or placeholder")
+
+            # Check for very tight stop loss (potentially due to calculation error or illiquid symbol)
+            if entry > 0:
+                stop_loss_percentage = abs(entry - stop_loss) / entry
+                # Lowering threshold for tight stop loss warning
+                if 0 < stop_loss_percentage < 0.001: # e.g., less than 0.1% from entry
+                    warnings.append(f"Very tight stop loss detected ({stop_loss_percentage:.4f}%) - may be prone to slippage or whipsaw")
+                # Check for zero distance stop loss which indicates an error in strategy calculation
+                if stop_loss_percentage == 0:
+                     errors.append("Stop loss is at the entry price, resulting in zero risk distance.")
+
         except Exception as e:
-            errors.append(f"Error validating signal: {str(e)}")
-            
+            # Catch any unexpected errors during the validation process itself
+            errors.append(f"Unexpected error during signal validation: {str(e)}")
+            logger.error(f"Unexpected error during signal validation for {signal.get('symbol', 'UNKNOWN')}: {e}", exc_info=True)
+
         return SignalValidationResult(len(errors) == 0, errors, warnings)
-        
+
     def _get_cached_signal(self, symbol: str) -> Optional[Dict]:
         """Get a cached signal if it exists and is still valid."""
         if symbol in self.signal_cache:
             cached = self.signal_cache[symbol]
             if datetime.now() < cached.expires_at:
-                return cached.signal
-            del self.signal_cache[symbol]
+                # Ensure cached signal has required keys for current validation logic
+                # If not, treat as invalid cache
+                required_keys = ['symbol', 'direction', 'entry', 'take_profit', 'stop_loss', 'confidence', 'indicators']
+                if all(key in cached.signal for key in required_keys):
+                    return cached.signal
+                else:
+                     logger.warning(f"Cached signal for {symbol} is missing required keys. Discarding cache.")
+                     del self.signal_cache[symbol]
         return None
         
     def _cache_signal(self, symbol: str, signal: Dict):
         """Cache a signal with expiration."""
+        # Ensure the signal being cached has the required structure
+        required_keys = ['symbol', 'direction', 'entry', 'take_profit', 'stop_loss', 'confidence', 'indicators']
+        if not all(key in signal for key in required_keys):
+             logger.error(f"Attempted to cache a signal for {symbol} missing required keys. Not caching.")
+             return # Do not cache incomplete signals
+
         expires_at = datetime.now() + timedelta(seconds=self.cache_duration)
         self.signal_cache[symbol] = CachedSignal(signal, datetime.now(), expires_at)
-        
+
         # Also save to disk for persistence
         try:
             cache_file = self.cache_dir / f"{symbol}.json"
-            with open(cache_file, 'w') as f:
-                json.dump({
-                    'signal': signal,
-                    'timestamp': datetime.now().isoformat(),
-                    'expires_at': expires_at.isoformat()
-                }, f)
+            # Ensure the signal structure is valid before writing to disk
+            if not self._validate_signal(signal).is_valid:
+                 logger.warning(f"Attempted to cache an invalid signal for {symbol} to disk. Skipping disk cache.")
+                 # Optional: log the validation errors here if needed
+            else:
+                 with open(cache_file, 'w') as f:
+                    json.dump({
+                        'signal': signal,
+                        'timestamp': datetime.now().isoformat(),
+                        'expires_at': expires_at.isoformat()
+                    }, f)
         except Exception as e:
-            logger.error(f"Error saving signal to cache file: {e}")
+            logger.error(f"Error saving signal to cache file for {symbol}: {e}")
             
     async def _process_symbol_with_retry(self, symbol: str, risk_per_trade: float, max_retries: int) -> Optional[TradingOpportunity]:
         """Process a single symbol with retry logic."""
         for attempt in range(max_retries):
             try:
-                # Check cache first
+                # Fetch fresh market data first to ensure up-to-date volume, volatility, etc.
+                market_data = await self.get_market_data(symbol)
+                if not market_data:
+                    logger.debug(f"No fresh market data for {symbol} before processing signal.")
+                    return None
+
+                # Apply advanced filters BEFORE checking cache or generating signal
+                if not self._apply_advanced_filters(market_data):
+                    logger.debug(f"Symbol {symbol} rejected by advanced filters even with fresh data.")
+                    return None
+
+                # Now, check cache for a recent signal
                 cached_signal = self._get_cached_signal(symbol)
+
                 if cached_signal:
                     logger.debug(f"Using cached signal for {symbol}")
                     signal = cached_signal
                 else:
-                    # Get market data
-                    market_data = await self.get_market_data(symbol)
-                    if not market_data:
-                        logger.debug(f"No market data for {symbol}")
-                        return None
+                    # Generate signal using the fresh market_data and indicators
+                    indicators = market_data.get('indicators', {})
+                    # The signal_generator is expected to return a confidence score based on its logic.
+                    # We pass a placeholder/default if not available from market data, but the generator should override it.
+                    initial_confidence = market_data.get('confidence', 0.5) # Use confidence from market data or default
 
-                    # Apply advanced filters
-                    if not self._apply_advanced_filters(market_data):
-                        logger.debug(f"Symbol {symbol} rejected by advanced filters.")
-                        return None
-
-                    # Format market data for signal generation
-                    formatted_market_data = {
-                        'price': float(market_data['ohlcv'][-1]['close']),
-                        'funding_rate': float(market_data['funding_rate']),
-                        'open_interest': float(market_data.get('open_interest', 0)),
-                        'symbol': market_data['symbol'],
-                        'volume_24h': float(market_data['volume_24h']),
-                        'indicators': market_data.get('indicators', {})
-                    }
-
-                    # Pass symbol, indicators, and an initial/placeholder confidence score
-                    # A more sophisticated approach might estimate initial confidence here
-                    initial_confidence = 0.5 # Placeholder value
                     signal = self.signal_generator.generate_signals(
-                        symbol,  # Pass the symbol string
-                        market_data.get('indicators', {}), # Pass the indicators dictionary
-                        initial_confidence # Pass an initial confidence score
+                        symbol,
+                        indicators,
+                        initial_confidence # Pass initial confidence
                     )
 
                     if not signal:
-                        logger.debug(f"No signal generated for {symbol}")
+                        logger.debug(f"No signal generated for {symbol} with fresh data.")
                         return None
 
-                    # Validate signal
+                    # Validate the newly generated signal structure and basic values
                     validation = self._validate_signal(signal)
                     if not validation.is_valid:
-                        logger.error(f"Invalid signal for {symbol}: {validation.errors}")
+                        for error in validation.errors:
+                             logger.error(f"Newly generated signal validation failed for {symbol}: {error}. Signal: {signal}")
                         return None
 
                     if validation.warnings:
-                        logger.warning(f"Signal warnings for {symbol}: {validation.warnings}")
+                        for warning in validation.warnings:
+                            logger.warning(f"Newly generated signal validation warning for {symbol}: {warning}")
 
-                    # Cache valid signal
+                    # Cache valid signal (will only cache if validation passed and required keys are present)
                     self._cache_signal(symbol, signal)
 
-                # Check confidence after potential caching
-                logger.debug(f"Signal confidence for {symbol}: {signal.get('confidence')}")
-                if signal.get('confidence', 0) < self.min_confidence:
-                    logger.debug(f"Signal for {symbol} discarded due to low confidence ({signal.get('confidence')} < {self.min_confidence})")
-                    return None
+                # --- Extract and use the levels provided by the signal generator from the validated signal --- #
+                # The signal is now expected to have 'entry', 'take_profit', 'stop_loss', 'confidence', 'direction', 'symbol', and 'indicators'
+                try:
+                    entry_price = float(signal['entry'])
+                    take_profit = float(signal['take_profit'])
+                    stop_loss = float(signal['stop_loss'])
+                    confidence = float(signal['confidence'])
+                    direction = signal['direction']
+                    symbol_name = signal['symbol']
+                    signal_indicators = signal.get('indicators', {}) # Use indicators from signal
+                    reasoning = signal.get('reasoning', []) # Use reasoning from signal
 
-                # Calculate volatility
-                volatility = self.calculate_volatility(market_data['ohlcv'])
-                
-                # Calculate position parameters
-                entry_price = float(signal['price'])
-                direction = signal['direction']
-                
-                # Calculate stop loss and take profit
-                atr = volatility * entry_price  # Using volatility as ATR proxy
-                stop_loss = entry_price - (2 * atr) if direction == 'LONG' else entry_price + (2 * atr)
-                take_profit = entry_price + (4 * atr) if direction == 'LONG' else entry_price - (4 * atr)
-                
-                # Calculate leverage based on risk
+                    # Use volume_24h and volatility from the fresh market_data (fetched earlier)
+                    volume_24h = market_data.get('volume_24h', 0.0)
+                    volatility = market_data.get('volatility', 0.0)
+                     # Recalculate volatility from fresh market data ohlcv if necessary (safety check)
+                    if volatility == 0.0 and 'ohlcv' in market_data and market_data['ohlcv']:
+                         volatility = self.calculate_volatility(market_data['ohlcv'])
+
+                except KeyError as e:
+                     logger.error(f"Signal dictionary for {symbol} is missing expected key during extraction: {e}. Signal: {signal}")
+                     return None # Cannot proceed without essential keys
+                except (ValueError, TypeError) as e:
+                     logger.error(f"Signal dictionary for {symbol} contains invalid data types during extraction: {e}. Signal: {signal}")
+                     return None # Cannot proceed with invalid data
+
+                # Calculate risk-reward ratio based on the provided levels
                 risk_amount = abs(entry_price - stop_loss)
-                leverage = min(risk_per_trade / risk_amount, self.max_leverage)
-                
-                # Calculate risk-reward ratio
-                risk_reward = abs(take_profit - entry_price) / abs(entry_price - stop_loss)
-                
-                logger.debug(f"Calculated Risk-Reward for {symbol}: {risk_reward}. Minimum required: {self.min_risk_reward}")
+                reward_amount = abs(take_profit - entry_price)
 
+                # Avoid division by zero for risk_reward
+                risk_reward = reward_amount / risk_amount if risk_amount > 0 else 0.0
+
+                logger.debug(f"Calculated Risk-Reward for {symbol_name} using signal levels: {risk_reward}. Minimum required: {self.min_risk_reward}")
+
+                # Discard if risk-reward is below minimum
                 if risk_reward < self.min_risk_reward:
-                    logger.debug(f"Opportunity for {symbol} discarded due to low risk-reward ({risk_reward} < {self.min_risk_reward})")
+                    logger.debug(f"Opportunity for {symbol_name} discarded due to low risk-reward ({risk_reward} < {self.min_risk_reward})")
                     return None
-                
+
+                # Calculate leverage for the opportunity object (display/scoring)
+                # This is a simplified estimate based on stop loss percentage relative to entry and a hypothetical risk.
+                # The actual leverage for a trade execution will be determined by the TradingBot based on position size and account equity.
+                leverage = 1.0 # Default minimum leverage
+                if entry_price > 0 and abs(entry_price - stop_loss) > 0: # Avoid division by zero
+                    # Heuristic: Estimate leverage based on the stop loss percentage. A smaller stop loss allows higher leverage for the same risk amount.
+                    # Assuming a small percentage risk of the entry price (e.g., 1%) to get an estimated max leverage for display.
+                    stop_loss_percent = abs(entry_price - stop_loss) / entry_price
+                    # Estimated max leverage for display: Inverse of stop loss percentage (as a fraction of entry price) * a risk factor (e.g., 0.01 for 1% risk)
+                    # This is not a precise calculation for trade execution, just an indication for the opportunity object.
+                    estimated_leverage = 1.0 / stop_loss_percent if stop_loss_percent > 0 else self.max_leverage # Inverse of stop loss percentage
+                    # Example adjustment: Multiply by a factor representing desired risk % relative to potential 100% loss at SL
+                    # This part is complex and depends heavily on overall risk strategy. Let's keep it simple for display.
+                    leverage = max(1.0, min(estimated_leverage, self.max_leverage)) # Cap leverage and ensure minimum
+
+
                 opportunity = TradingOpportunity(
-                    symbol=market_data['symbol'],
+                    symbol=symbol_name,
                     direction=direction,
                     entry_price=entry_price,
                     take_profit=take_profit,
                     stop_loss=stop_loss,
-                    confidence=signal['confidence'],
-                    leverage=leverage,
+                    confidence=confidence,
+                    leverage=leverage, # Use calculated leverage for opportunity object (display/scoring)
                     risk_reward=risk_reward,
-                    volume_24h=market_data['volume_24h'],
-                    volatility=volatility,
+                    volume_24h=volume_24h, # From fresh market data
+                    volatility=volatility, # From fresh market data
                     score=0.0,  # Will be calculated below
-                    indicators=signal.get('indicators', {}),
-                    reasoning=signal.get('reasoning', [])
+                    indicators=signal_indicators, # Use indicators from the signal
+                    reasoning=reasoning
                 )
-                
-                # Calculate final score
+
+                # Calculate final score based on the complete opportunity object
                 opportunity.score = self.calculate_opportunity_score(opportunity)
-                
+
+                # Check if the calculated score meets the minimum confidence requirement
+                # This is a redundancy if min_confidence filter is applied earlier, but good for clarity
+                if opportunity.confidence < self.min_confidence:
+                     logger.debug(f"Opportunity for {symbol_name} discarded after scoring due to low confidence ({opportunity.confidence} < {self.min_confidence})")
+                     return None
+
                 return opportunity
-                
+
             except Exception as e:
+                # Catch exceptions during market data fetch, filtering, signal generation, validation, or opportunity creation
                 if attempt < max_retries - 1:
-                    logger.warning(f"Retry {attempt + 1}/{max_retries} for {symbol}: {e}")
+                    logger.warning(f"Retry {attempt + 1}/{max_retries} processing {symbol}: {e}", exc_info=True)
                     await asyncio.sleep(1.0 * (attempt + 1))  # Exponential backoff
                 else:
-                    logger.error(f"Failed to process {symbol} after {max_retries} attempts: {e}")
+                    logger.error(f"Failed to process {symbol} after {max_retries} attempts: {e}", exc_info=True)
                     return None
-                    
+
         return None
 
     def _apply_advanced_filters(self, market_data: Dict) -> bool:

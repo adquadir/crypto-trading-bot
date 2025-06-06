@@ -157,7 +157,7 @@ async def market_data_stream(client_id: str):
             for symbol in symbols_to_stream:
                 try:
                     # Get market data
-                    market_data = await exchange_client.get_market_data(symbol)
+                    market_data = await symbol_discovery.get_market_data(symbol)
                     if not market_data:
                         continue
                         

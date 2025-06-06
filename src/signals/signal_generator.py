@@ -184,18 +184,42 @@ class SignalGenerator:
                 # Override with the new signal type and structure if found
                 return {
                     "symbol": symbol,
-                    "entry": hovering_opportunity['entry'],
-                    "take_profit": hovering_opportunity['take_profit'],
-                    "stop_loss": hovering_opportunity['stop_loss'],
-                    "confidence_score": hovering_opportunity['confidence_score'],
-                    "signal_type": hovering_opportunity['signal_type']
+                    "price": indicators['current_price'], # Use current price as the signal price for validation
+                    "direction": "LONG" if hovering_opportunity['signal_type'] == 'SAFE_BUY' else "SHORT",
+                    "confidence": hovering_opportunity['confidence_score'],
+                    "entry": hovering_opportunity['entry'], # Include strategy's calculated entry
+                    "take_profit": hovering_opportunity['take_profit'], # Include strategy's calculated TP
+                    "stop_loss": hovering_opportunity['stop_loss'], # Include strategy's calculated SL
+                    "signal_type": hovering_opportunity['signal_type'], # Keep signal_type for downstream logic
+                    "indicators": indicators, # Include indicators
+                    "reasoning": hovering_opportunity.get('reasoning', []) # Include reasoning if available
                 }
+
+            # For standard signals, determine direction from strength and include required fields
+            direction = "LONG" if signal_strength > 0 else ("SHORT" if signal_strength < 0 else "NEUTRAL")
+
+            # Only generate a signal if there's a clear direction
+            if direction == "NEUTRAL":
+                logger.debug(f"Generated NEUTRAL signal for {symbol}.")
+                return {}
+
+            # For standard signals, SymbolDiscovery will calculate entry/TP/SL based on price and volatility.
+            # We still include these keys but potentially with None or placeholder values if the strategy doesn't provide them,
+            # or set entry to current price for clarity.
+            entry_price = indicators['current_price'] # Use current price for standard signal entry
+            take_profit = None # SignalGenerator doesn't calculate for standard signals currently
+            stop_loss = None # SignalGenerator doesn't calculate for standard signals currently
 
             return {
                 'symbol': symbol,
-                'signal_type': signal_type,
-                'signal_strength': abs(signal_strength),
-                'confidence_score': confidence_score,
+                'direction': direction, # Map signal_type/strength to direction
+                'price': indicators['current_price'], # Include current price as signal price for validation
+                'confidence': confidence_score, # Rename confidence_score to confidence
+                'entry': entry_price, # Include entry price (current price for standard signals)
+                'take_profit': take_profit, # Include placeholder TP
+                'stop_loss': stop_loss, # Include placeholder SL
+                'signal_type': signal_type, # Keep original signal_type
+                'signal_strength': abs(signal_strength), # Keep original signal_strength
                 'timestamp': datetime.now().isoformat(),
                 'indicators': indicators,
                 'parameters': params

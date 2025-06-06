@@ -11,6 +11,7 @@ def detector():
 def sample_data():
     """Create sample OHLCV data for testing."""
     # Create a DataFrame with 20 candles
+    np.random.seed(42) # Set a seed for reproducibility
     data = pd.DataFrame({
         'open': np.random.uniform(100, 110, 20),
         'high': np.random.uniform(110, 120, 20),
@@ -24,6 +25,7 @@ def sample_data():
 def hovering_data():
     """Create sample data showing a hovering pattern."""
     # Create a tight range of prices
+    np.random.seed(123) # Set a seed for reproducibility
     base_price = 100
     range_size = 0.5  # Small range for hovering
     data = pd.DataFrame({

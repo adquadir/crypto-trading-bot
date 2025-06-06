@@ -170,7 +170,7 @@ class TradingBot:
                     for opportunity in opportunities:
                         symbol = opportunity.symbol
                         # Get market data
-                        market_data = await self.exchange_client.get_market_data(symbol)
+                        market_data = await self.symbol_discovery.get_market_data(symbol)
                         if not market_data:
                             continue
                             
