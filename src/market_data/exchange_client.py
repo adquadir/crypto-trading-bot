@@ -11,23 +11,24 @@ import time
 from functools import wraps
 import os
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import deque
 import json
 from pathlib import Path
 import random
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class CacheEntry:
     data: any
-    timestamp: datetime
-    expires_at: datetime
+    timestamp: datetime = field(default_factory=datetime.now)
+    expires_at: datetime = field(default_factory=datetime.now)
 
 @dataclass
 class ProxyMetrics:
-    response_times: deque = deque(maxlen=100)
+    response_times: deque = field(default_factory=lambda: deque(maxlen=100))
     error_count: int = 0
     last_error: Optional[datetime] = None
     last_success: Optional[datetime] = None
@@ -787,3 +788,65 @@ class ExchangeClient:
         proxy = self.proxy_list[self.current_port_index]
         self.current_port_index = (self.current_port_index + 1) % len(self.proxy_list)
         return proxy
+
+    @retry_with_backoff(max_retries=3)
+    @rate_limit(limit=10, period=1.0)
+    async def get_market_data(self, symbol: str) -> Dict:
+        """Fetch comprehensive market data for a symbol."""
+        try:
+            # Get OHLCV data
+            ohlcv = await self.get_historical_data(symbol, interval="1m", limit=200)
+            
+            # Get funding rate
+            funding_rate = await self.get_funding_rate(symbol)
+            
+            # Get 24h statistics
+            ticker_24h = await self.get_ticker_24h(symbol)
+            
+            # Get order book
+            orderbook = await self.get_orderbook(symbol, limit=10)
+            
+            # Calculate spread from orderbook
+            spread = 0.0
+            if orderbook['bids'] and orderbook['asks']:
+                best_bid = float(orderbook['bids'][0][0])
+                best_ask = float(orderbook['asks'][0][0])
+                spread = (best_ask - best_bid) / best_bid
+            
+            # Calculate liquidity from orderbook
+            liquidity = 0.0
+            if orderbook['bids'] and orderbook['asks']:
+                bid_liquidity = sum(float(bid[0]) * float(bid[1]) for bid in orderbook['bids'][:10])
+                ask_liquidity = sum(float(ask[0]) * float(ask[1]) for ask in orderbook['asks'][:10])
+                liquidity = (bid_liquidity + ask_liquidity) / 2
+            
+            # Get open interest
+            open_interest = await self.get_open_interest(symbol)
+            
+            # Calculate volatility from OHLCV data
+            volatility = 0.0
+            if ohlcv:
+                closes = [float(candle['close']) for candle in ohlcv]
+                returns = np.diff(closes) / closes[:-1]
+                volatility = np.std(returns) * np.sqrt(24 * 60)  # Annualized volatility
+            
+            return {
+                'symbol': symbol,
+                'ohlcv': ohlcv,
+                'funding_rate': funding_rate,
+                'volume_24h': float(ticker_24h.get('volume', 0)),
+                'price_change_24h': float(ticker_24h.get('priceChangePercent', 0)),
+                'orderbook': orderbook,
+                'spread': spread,
+                'liquidity': liquidity,
+                'open_interest': open_interest,
+                'volatility': volatility,
+                'last_price': float(ticker_24h.get('lastPrice', 0)),
+                'high_24h': float(ticker_24h.get('highPrice', 0)),
+                'low_24h': float(ticker_24h.get('lowPrice', 0)),
+                'quote_volume': float(ticker_24h.get('quoteVolume', 0))
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching market data for {symbol}: {e}")
+            return {}

@@ -3,7 +3,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from src.market_data.exchange_client import ExchangeClient
 from src.signals.signal_generator import SignalGenerator
 import os
@@ -28,14 +28,14 @@ class TradingOpportunity:
     volume_24h: float
     volatility: float
     score: float
-    indicators: Dict
-    reasoning: List[str]
+    indicators: Dict = field(default_factory=dict)
+    reasoning: List[str] = field(default_factory=list)
 
 @dataclass
 class SignalValidationResult:
     is_valid: bool
-    errors: List[str]
-    warnings: List[str]
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
 
 @dataclass
 class CachedSignal:

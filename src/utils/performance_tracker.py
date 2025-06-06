@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 

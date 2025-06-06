@@ -55,6 +55,20 @@ A sophisticated cryptocurrency trading bot with a modern web interface for monit
 - Volume requirements
 - Correlation limits
 
+### Market Data
+- Comprehensive market data fetching through `get_market_data`:
+  - OHLCV data with customizable intervals
+  - Real-time funding rates
+  - 24-hour statistics
+  - Order book depth analysis
+  - Spread and liquidity calculations
+  - Open interest tracking
+  - Volatility analysis
+  - Volume analysis
+- Caching system for optimized performance
+- Rate limiting and retry mechanisms
+- Proxy support with automatic failover
+
 ## System Architecture
 
 The system consists of three main components:
@@ -258,6 +272,11 @@ crypto-trading-bot/
 - `GET /api/trading/settings` - Get current general bot settings.
 - `PUT /api/trading/settings` - Update general bot settings.
 - `PUT /api/trading/strategies/{profile_name}` - **Update parameters for a specific strategy profile.**
+- `GET /api/market/data/{symbol}` - Get comprehensive market data for a symbol
+- `GET /api/market/orderbook/{symbol}` - Get order book data
+- `GET /api/market/funding/{symbol}` - Get current funding rate
+- `GET /api/market/interest/{symbol}` - Get open interest
+- `GET /api/market/historical/{symbol}` - Get historical OHLCV data
 
 ### WebSocket Endpoints
 - `WS /ws/signals` - Real-time trading signals and market data updates.

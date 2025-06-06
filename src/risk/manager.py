@@ -3,7 +3,7 @@ from enum import Enum
 import logging
 from datetime import datetime, timedelta
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class Position:
     direction: str  # 'LONG' or 'SHORT'
     trailing_stop: Optional[float] = None
     trailing_distance: Optional[float] = None
-    timestamp: float = datetime.now().timestamp()
+    timestamp: float = field(default_factory=lambda: datetime.now().timestamp())
 
 class RiskManager:
     def __init__(

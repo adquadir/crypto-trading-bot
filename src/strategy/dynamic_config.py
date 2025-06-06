@@ -1,6 +1,6 @@
 from typing import Dict, Optional
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 from datetime import datetime, timedelta
 import json
