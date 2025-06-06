@@ -245,6 +245,22 @@ async def get_symbols():
     symbols_list = [opp.symbol for opp in opportunities_list]
     return {"symbols": symbols_list}
 
+def clean_float_values(data):
+    """Recursively replace NaN and Infinity float values with None."""
+    if isinstance(data, float):
+        if np.isnan(data) or np.isinf(data):
+            return None
+        return data
+    elif isinstance(data, dict):
+        return {k: clean_float_values(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_float_values(item) for item in data]
+    elif hasattr(data, '__dict__'):
+        # Handle objects by converting to dict and cleaning
+        return clean_float_values(data.__dict__)
+    else:
+        return data
+
 @app.get("/market-data/{symbol}")
 async def get_market_data(symbol: str):
     """Get current market data for a symbol."""
@@ -265,7 +281,25 @@ async def get_market_data(symbol: str):
         market_data = await exchange_client.get_market_data(symbol)
         if not market_data:
             raise HTTPException(status_code=404, detail="Market data not available")
-        return market_data
+        
+        # Apply filtering
+        filtered_market_data = {
+            'risk_reward_ratio': market_data.get('risk_reward_ratio'),
+            'volatility_score': market_data.get('volatility_score'),
+            'technical_score': market_data.get('technical_score'),
+            'fundamental_score': market_data.get('fundamental_score'),
+            'overall_score': market_data.get('overall_score'),
+            'signal_strength': market_data.get('signal_strength'),
+            'signal_type': market_data.get('signal_type'),
+            'entry_price': market_data.get('entry_price'),
+            'take_profit': market_data.get('take_profit'),
+            'stop_loss': market_data.get('stop_loss')
+        }
+
+        # Clean potential NaN/Infinity values before returning
+        cleaned_market_data = clean_float_values(filtered_market_data)
+
+        return JSONResponse(content=cleaned_market_data)
     except Exception as e:
         logger.error(f"Error fetching market data for {symbol}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -490,105 +524,91 @@ async def get_opportunities(
 
 @app.get("/api/trading/opportunities/{symbol}")
 async def get_symbol_opportunity(symbol: str):
-    """Get detailed opportunity information for a specific symbol."""
-    try:
-        opportunities = await symbol_discovery.scan_opportunities()
-        symbol_opportunities = [
-            opp for opp in opportunities
-            if opp.symbol == symbol
-        ]
-        
-        if not symbol_opportunities:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No opportunities found for {symbol}"
-            )
-            
-        # Get the highest scoring opportunity
-        best_opportunity = max(symbol_opportunities, key=lambda x: x.score)
-        
-        return {
-            "symbol": best_opportunity.symbol,
-            "direction": best_opportunity.direction,
-            "entry_price": best_opportunity.entry_price,
-            "take_profit": best_opportunity.take_profit,
-            "stop_loss": best_opportunity.stop_loss,
-            "confidence": best_opportunity.confidence,
-            "leverage": best_opportunity.leverage,
-            "risk_reward": best_opportunity.risk_reward,
-            "volume_24h": best_opportunity.volume_24h,
-            "volatility": best_opportunity.volatility,
-            "score": best_opportunity.score,
-            "indicators": best_opportunity.indicators,
-            "reasoning": best_opportunity.reasoning,
-            "timestamp": datetime.now().timestamp()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting symbol opportunity: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """Get a specific trading opportunity by symbol."""
+    # Trigger a scan to ensure opportunities are up-to-date
+    opportunities_list = await symbol_discovery.scan_opportunities()
+
+    # Find the specific opportunity
+    opportunity = next((opp for opp in opportunities_list if opp.symbol == symbol), None)
+
+    if opportunity is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+
+    # Prepare data dictionary (similar structure to get_opportunities for consistency)
+    opportunity_data = clean_float_values({
+        'symbol': opportunity.symbol,
+        'timestamp': opportunity.timestamp.isoformat(),
+        'indicators': opportunity.indicators, # Assuming indicators are JSON serializable
+        'signal': opportunity.signal, # Assuming signal is JSON serializable
+        'risk_reward_ratio': opportunity.risk_reward_ratio,
+        'volatility_score': opportunity.volatility_score,
+        'technical_score': opportunity.technical_score,
+        'fundamental_score': opportunity.fundamental_score,
+        'overall_score': opportunity.overall_score,
+        'signal_strength': opportunity.signal_strength,
+        'signal_type': opportunity.signal_type,
+        'entry_price': opportunity.entry_price,
+        'take_profit': opportunity.take_profit,
+        'stop_loss': opportunity.stop_loss
+    })
+
+    # Clean potential NaN/Infinity values before returning
+    cleaned_opportunity = clean_float_values(opportunity_data)
+
+    return JSONResponse(content=cleaned_opportunity)
 
 @app.get("/api/trading/opportunities/stats")
 async def get_opportunity_stats():
-    """Get statistics about available trading opportunities."""
+    """Get statistics on trading opportunities."""
+    db: Session = SessionLocal()
     try:
-        opportunities = await symbol_discovery.scan_opportunities()
-        
-        # Calculate statistics
-        total_opportunities = len(opportunities)
-        long_opportunities = len([opp for opp in opportunities if opp.direction == 'LONG'])
-        short_opportunities = len([opp for opp in opportunities if opp.direction == 'SHORT'])
-        
-        avg_confidence = sum(opp.confidence for opp in opportunities) / total_opportunities if total_opportunities > 0 else 0
-        avg_risk_reward = sum(opp.risk_reward for opp in opportunities) / total_opportunities if total_opportunities > 0 else 0
-        avg_score = sum(opp.score for opp in opportunities) / total_opportunities if total_opportunities > 0 else 0
-        
-        # Get top symbols by volume
-        top_volume_symbols = sorted(
-            opportunities,
-            key=lambda x: x.volume_24h,
-            reverse=True
-        )[:5]
-        
-        # Get top opportunities by score
-        top_scored_opportunities = sorted(
-            opportunities,
-            key=lambda x: x.score,
-            reverse=True
-        )[:5]
-        
-        return {
-            "total_opportunities": total_opportunities,
-            "long_opportunities": long_opportunities,
-            "short_opportunities": short_opportunities,
-            "avg_confidence": avg_confidence,
-            "avg_risk_reward": avg_risk_reward,
-            "avg_score": avg_score,
-            "top_volume_symbols": [
-                {
-                    "symbol": opp.symbol,
-                    "volume_24h": opp.volume_24h,
-                    "direction": opp.direction,
-                    "score": opp.score
-                }
-                for opp in top_volume_symbols
-            ],
-            "top_scored_opportunities": [
-                {
-                    "symbol": opp.symbol,
-                    "direction": opp.direction,
-                    "score": opp.score,
-                    "confidence": opp.confidence,
-                    "risk_reward": opp.risk_reward
-                }
-                for opp in top_scored_opportunities
-            ],
-            "timestamp": datetime.now().timestamp()
+        total_trades = db.query(Trade).count()
+        winning_trades = db.query(Trade).filter(Trade.pnl > 0).count()
+        total_pnl_result = db.query(db.func.sum(Trade.pnl)).scalar()
+
+        total_pnl = total_pnl_result if total_pnl_result is not None else 0
+
+        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+
+        # Calculate Profit Factor: Total Gross Profit / Total Gross Loss
+        # Need to query sum of winning PnL and sum of losing PnL separately
+        total_gross_profit_result = db.query(db.func.sum(Trade.pnl)).filter(Trade.pnl > 0).scalar()
+        total_gross_loss_result = db.query(db.func.sum(Trade.pnl)).filter(Trade.pnl < 0).scalar()
+
+        total_gross_profit = total_gross_profit_result if total_gross_profit_result is not None else 0
+        total_gross_loss = total_gross_loss_result if total_gross_loss_result is not None else 0
+
+        # Avoid division by zero for profit factor
+        profit_factor = abs(total_gross_profit / total_gross_loss) if total_gross_loss < 0 else float('inf') if total_gross_profit > 0 else 0
+
+        # Calculate Maximum Drawdown (Simplified - requires more trade history analysis for accuracy)
+        # This is a placeholder; a proper drawdown calculation needs state over time
+        max_drawdown = 0 # Placeholder
+
+        # Calculate Average Trade PnL
+        average_trade_pnl = (total_pnl / total_trades) if total_trades > 0 else 0
+
+        stats = {
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "win_rate": win_rate,
+            "total_pnl": total_pnl,
+            "profit_factor": profit_factor,
+            "max_drawdown": max_drawdown, # Placeholder
+            "average_trade_pnl": average_trade_pnl,
+            # Add other relevant stats here
         }
+
+        # Clean potential NaN/Infinity values before returning
+        cleaned_stats = clean_float_values(stats)
+
+        return JSONResponse(content=cleaned_stats)
+
     except Exception as e:
-        logger.error(f"Error getting opportunity stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching opportunity stats: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching statistics")
+    finally:
+        db.close()
 
 if __name__ == "__main__":
     import uvicorn
