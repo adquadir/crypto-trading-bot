@@ -53,6 +53,7 @@ import {
   Tooltip as ChartTooltip,
   Legend
 } from 'chart.js';
+import config from '../config';
 
 // Register ChartJS components
 ChartJS.register(
@@ -86,7 +87,7 @@ const Opportunities = () => {
   const fetchOpportunities = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/trading/opportunities');
+      const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.OPPORTUNITIES}`);
       setOpportunities(response.data.opportunities);
       setError(null);
     } catch (err) {
