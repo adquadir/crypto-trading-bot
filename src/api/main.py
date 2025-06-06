@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from src.market_data.exchange_client import ExchangeClient
 from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
 from src.signals.signal_generator import SignalGenerator
-from src.config import EXCHANGE_CONFIG, TRADING_SYMBOLS
+from src.config import EXCHANGE_CONFIG
 
 # Load environment variables
 load_dotenv()
@@ -106,6 +106,8 @@ manager = ConnectionManager()
 @app.on_event("startup")
 async def startup_event():
     await exchange_client.initialize()
+    # Start symbol discovery scan on startup
+    asyncio.create_task(symbol_discovery.scan_opportunities())
     logger.info("API server started")
 
 @app.on_event("shutdown")
@@ -138,7 +140,16 @@ async def market_data_stream(client_id: str):
     """Stream market data to connected clients."""
     try:
         while True:
-            for symbol in TRADING_SYMBOLS:
+            # Get symbols from dynamically discovered opportunities
+            opportunities = symbol_discovery.get_opportunities()
+            symbols_to_stream = [opp.symbol for opp in opportunities]
+
+            if not symbols_to_stream:
+                logger.warning("No active opportunities to stream market data.")
+                await asyncio.sleep(10) # Wait before checking again
+                continue
+
+            for symbol in symbols_to_stream:
                 try:
                     # Get market data
                     market_data = await exchange_client.get_market_data(symbol)
@@ -219,12 +230,18 @@ async def health_check():
 @app.get("/symbols")
 async def get_symbols():
     """Get list of available trading symbols."""
-    return {"symbols": TRADING_SYMBOLS}
+    # Return symbols from dynamically discovered opportunities
+    opportunities = symbol_discovery.get_opportunities()
+    symbols_list = [opp.symbol for opp in opportunities]
+    return {"symbols": symbols_list}
 
 @app.get("/market-data/{symbol}")
 async def get_market_data(symbol: str):
     """Get current market data for a symbol."""
-    if symbol not in TRADING_SYMBOLS:
+    # Validate symbol against dynamically discovered opportunities
+    opportunities = symbol_discovery.get_opportunities()
+    valid_symbols = [opp.symbol for opp in opportunities]
+    if symbol not in valid_symbols:
         raise HTTPException(status_code=400, detail="Invalid symbol")
         
     try:

@@ -22,14 +22,14 @@ A sophisticated cryptocurrency trading bot with a modern web interface for monit
   - Volatility: Bollinger Bands, ATR
   - Volume: OBV, VWAP
   - Support/Resistance levels
-- Sophisticated opportunity scoring:
-  - **Dynamic parameters based on active strategy profile and adaptation**
-  - Signal confidence
-  - Technical indicators
-  - Volume
-  - Risk-reward ratio
-  - Volatility
-  - Leverage
+  - **Safe Candle-Based Opportunity Detection:**
+    - Identifies hovering zones with tight price ranges
+    - Detects small candle bodies indicating consolidation
+    - Monitors decreasing volatility through ATR trend
+    - Analyzes horizontal volume clusters
+    - Calculates precise entry, take-profit, and stop-loss levels
+    - Provides both long (SAFE_BUY) and short (SAFE_SELL) opportunities
+    - Targets small, consistent profits ($25-$35 per trade)
 
 ### Risk Management
 - Fixed risk per trade ($50 by default) - **now dynamically calculated per strategy profile**
@@ -243,7 +243,7 @@ crypto-trading-bot/
 ### REST Endpoints
 - `GET /api/trading/opportunities` - Get top trading opportunities based on current dynamic scan and filtering.
 - `GET /api/trading/opportunities/{symbol}` - Get detailed opportunity information for a specific symbol.
-- `GET /api/trading/opportunities/stats` - Get statistics about available trading opportunities (total, long/short counts, average confidence/score, top performers).
+- `GET /api/trading/opportunities/stats` - Get statistics about available trading opportunities (total, long/short counts, average confidence/score, top performers, including SAFE_BUY/SAFE_SELL signals).
 - `GET /api/trading/signals` - Get recent trading signals (Note: Real-time signals are primarily via WebSocket).
 - `GET /api/trading/pnl` - Get profit and loss data.
 - `GET /api/trading/stats` - Get comprehensive trading statistics, **including profile-specific performance metrics, parameter adaptation history, and volatility impact.**

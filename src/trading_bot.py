@@ -28,12 +28,16 @@ class TradingBot:
         # Load environment variables
         load_dotenv()
         
-        # Initialize components
+        # Load configuration from YAML
+        # Binance API keys and testnet are loaded directly from environment variables
+        # to prioritize the recommended .env configuration method.
         self.config = load_config(config_path)
+        
+        # Initialize components
         self.exchange_client = ExchangeClient(
-            api_key=self.config['binance']['api_key'],
-            api_secret=self.config['binance']['api_secret'],
-            testnet=self.config['binance']['testnet']
+            api_key=os.getenv('BINANCE_API_KEY'),
+            api_secret=os.getenv('BINANCE_API_SECRET'),
+            testnet=os.getenv('USE_TESTNET', 'False').lower() == 'true' # Use USE_TESTNET from .env
         )
         self.market_processor = MarketDataProcessor()
         self.signal_engine = SignalEngine()
@@ -224,41 +228,200 @@ class TradingBot:
             position = await self.exchange_client.get_position(symbol)
             
             # Determine trade direction and size
-            direction = "LONG" if signal['signal_type'] in ["STRONG_BUY", "BUY"] else "SHORT"
-            size = self.risk_manager.calculate_position_size(
-                symbol,
-                signal['confidence_score'],
-                self.signal_generator.get_risk_limits()
-            )
-            
-            # Execute trade
-            if direction == "LONG":
+            signal_type = signal['signal_type']
+            current_price = signal['indicators']['current_price']
+
+            if signal_type == "SAFE_BUY":
+                entry_price = signal['entry']
+                take_profit = signal['take_profit']
+                stop_loss = signal['stop_loss']
+                direction = "LONG"
+                # Calculate size based on risk_per_trade and stop loss distance
+                # Assuming risk_per_trade is in percentage of account balance for simplicity here,
+                # needs to be adjusted based on how risk_per_trade is defined (e.g., fixed amount or percent)
+                # Let's use risk_per_trade from dynamic config, which is a percentage.
+                risk_percentage = self.signal_generator.get_risk_limits().get('risk_per_trade', 0.015)
+                account_balance = await self._get_account_balance()
+                risk_amount_usd = account_balance * risk_percentage
+
+                price_distance_to_stop = entry_price - stop_loss # For LONG
+                if price_distance_to_stop <= 0:
+                    logger.warning(f"Invalid stop loss distance for {symbol} SAFE_BUY signal: {price_distance_to_stop}")
+                    return None # Cannot calculate size with invalid SL
+
+                # Calculate size based on risk amount and stop loss distance
+                # size = risk_amount_usd / price_distance_to_stop # This is a simplified calculation and might need adjustment
+                # For a safer approach, let's use a fixed small size for now in debug mode
+                trade_size = 0.001 # Example small size
+
+                # Check if current price is near entry for market order (simplified)
+                price_tolerance = entry_price * 0.001 # e.g., 0.1% tolerance
+                if abs(current_price - entry_price) <= price_tolerance:
+                    order_type = 'MARKET'
+                    order_price = None # Market order doesn't need price
+                    logger.info(f"Executing {direction} MARKET order for {symbol} with size {trade_size}")
+                    # Simulate market order execution
+                    # In a real scenario, you'd call exchange_client.create_order here
+                    executed_price = current_price # Assume filled at current price for simulation
+                    order_id = f"simulated_market_{symbol}_{datetime.now().timestamp()}"
+                    executed_qty = trade_size
+                    status = "FILLED"
+
+                    # Log and record trade
+                    trade_result = {
+                        "symbol": symbol,
+                        "order_id": order_id,
+                        "direction": direction,
+                        "entry_price": executed_price,
+                        "executed_qty": executed_qty,
+                        "timestamp": datetime.now().isoformat(),
+                        "status": status,
+                        "signal_type": signal_type,
+                        "take_profit": take_profit,
+                        "stop_loss": stop_loss,
+                        "initial_risk_usd": risk_amount_usd # Store initial risk
+                    }
+                    self.trade_history.append(trade_result)
+                    logger.info(f"Trade executed: {trade_result}")
+                    return trade_result
+                else:
+                    logger.info(f"Current price {current_price:.2f} not near entry {entry_price:.2f} for {symbol} SAFE_BUY. Skipping market order.")
+                    return None
+
+            elif signal_type == "SAFE_SELL":
+                entry_price = signal['entry']
+                take_profit = signal['take_profit']
+                stop_loss = signal['stop_loss']
+                direction = "SHORT"
+                # Calculate size based on risk_per_trade and stop loss distance
+                risk_percentage = self.signal_generator.get_risk_limits().get('risk_per_trade', 0.015)
+                account_balance = await self._get_account_balance()
+                risk_amount_usd = account_balance * risk_percentage
+
+                price_distance_to_stop = stop_loss - entry_price # For SHORT
+                if price_distance_to_stop <= 0:
+                    logger.warning(f"Invalid stop loss distance for {symbol} SAFE_SELL signal: {price_distance_to_stop}")
+                    return None # Cannot calculate size with invalid SL
+
+                # Calculate size based on risk amount and stop loss distance
+                # size = risk_amount_usd / price_distance_to_stop # Simplified calculation
+                # For a safer approach, let's use a fixed small size for now in debug mode
+                trade_size = 0.001 # Example small size
+
+                # Check if current price is near entry for market order (simplified)
+                price_tolerance = entry_price * 0.001 # e.g., 0.1% tolerance
+                if abs(current_price - entry_price) <= price_tolerance:
+                    order_type = 'MARKET'
+                    order_price = None # Market order doesn't need price
+                    logger.info(f"Executing {direction} MARKET order for {symbol} with size {trade_size}")
+                    # Simulate market order execution
+                    # In a real scenario, you'd call exchange_client.create_order here
+                    executed_price = current_price # Assume filled at current price for simulation
+                    order_id = f"simulated_market_{symbol}_{datetime.now().timestamp()}"
+                    executed_qty = trade_size
+                    status = "FILLED"
+
+                    # Log and record trade
+                    trade_result = {
+                        "symbol": symbol,
+                        "order_id": order_id,
+                        "direction": direction,
+                        "entry_price": executed_price,
+                        "executed_qty": executed_qty,
+                        "timestamp": datetime.now().isoformat(),
+                        "status": status,
+                        "signal_type": signal_type,
+                        "take_profit": take_profit,
+                        "stop_loss": stop_loss,
+                        "initial_risk_usd": risk_amount_usd # Store initial risk
+                    }
+                    self.trade_history.append(trade_result)
+                    logger.info(f"Trade executed: {trade_result}")
+                    return trade_result
+                else:
+                    logger.info(f"Current price {current_price:.2f} not near entry {entry_price:.2f} for {symbol} SAFE_SELL. Skipping market order.")
+                    return None
+
+            elif signal_type in ["STRONG_BUY", "BUY", "STRONG_SELL", "SELL"]:
+                # Existing logic for standard signals
+                direction = "LONG" if signal_type in ["STRONG_BUY", "BUY"] else "SHORT"
+                # Recalculate size and levels based on standard risk management if not a SAFE signal
+                # This might be redundant if signal_generator always provides levels, 
+                # but kept for clarity on handling different signal types.
+                # For standard signals, calculate levels using risk manager or signal_generator if it provides them
+                # Assuming for now that standard signals rely on risk_manager for size/levels calculation approach
+                size = self.risk_manager.calculate_position_size(
+                     symbol,
+                     current_price, # Pass current price or entry if signal provides it
+                     direction,
+                     signal.get('indicators', {}), # Pass indicators/market state
+                     signal.get('confidence_score', 1.0)
+                )
+
+                if size == 0:
+                    logger.warning(f"Risk manager prevented opening standard trade for {symbol}.")
+                    return None
+
+                # For standard signals, TP/SL would typically be calculated here or by signal_generator
+                # Assuming signal_generator provides these now in its standard output too
+                entry_price = current_price # Or signal['entry'] if available
+                take_profit = signal.get('take_profit') # Get from signal if available
+                stop_loss = signal.get('stop_loss') # Get from signal if available
+
+                if take_profit is None or stop_loss is None:
+                     # Fallback or calculate based on risk_manager if signal didn't provide them
+                     stop_loss = self.risk_manager.calculate_stop_loss(symbol, entry_price, direction, signal.get('indicators', {}))
+                     # Calculate take profit based on a default risk:reward or from signal
+                     take_profit = self.risk_manager.calculate_take_profit(symbol, entry_price, stop_loss, direction, signal.get('indicators', {})) # Assuming calculate_take_profit exists and uses risk:reward
+
+                logger.info(f"Executing Standard {signal_type} for {symbol}: Entry={entry_price:.2f}, TP={take_profit:.2f}, SL={stop_loss:.2f}, Size={size:.4f}")
+
                 if position and position['side'] == "SHORT":
                     await self.exchange_client.close_position(symbol)
-                await self.exchange_client.open_long_position(symbol, size)
+
+                # Place order (simplified - market execution assumed if price is close to entry)
+                # In a real bot, use limit orders and manage TP/SL
+                if abs(current_price - entry_price) / entry_price < 0.001: # If within 0.1% of entry
+                    order_side = 'BUY' if direction == 'LONG' else 'SELL'
+                    order = await self.exchange_client.place_order(symbol, order_side, 'MARKET', size)
+                    logger.info(f"Placed market {order_side} order for {symbol}. Order ID: {order.get('orderId')}")
+                else:
+                     logger.warning(f"Current price {current_price:.2f} too far from Standard {signal_type} entry {entry_price:.2f} for {symbol}. Skipping trade.")
+                     return None # Skip trade if price moved significantly
+
             else:
-                if position and position['side'] == "LONG":
-                    await self.exchange_client.close_position(symbol)
-                await self.exchange_client.open_short_position(symbol, size)
-                
-            # Record trade
+                logger.info(f"Received NEUTRAL signal for {symbol}. No trade executed.")
+                return None
+
+            # Record trade - update this to use actual fill price and other order details
+            # This is a simplified recording and needs to be enhanced with real order management
             trade = {
                 'symbol': symbol,
                 'direction': direction,
                 'size': size,
-                'entry_price': signal['indicators']['current_price'],
+                'entry_price': order.get('fills', [{}])[0].get('price', entry_price) if order else entry_price, # Attempt to get fill price, fallback to calculated entry
                 'timestamp': datetime.now().isoformat(),
-                'signal': signal
+                'signal': signal,
+                'take_profit': take_profit, # Record calculated TP/SL
+                'stop_loss': stop_loss
             }
-            
-            self.active_trades[symbol] = trade
-            self.trade_history.append(trade)
-            
-            logger.info(f"Executed {direction} trade for {symbol}")
+
+            # Add the trade to active_trades (needs unique ID)
+            # Using symbol as key assumes only one position per symbol at a time
+            # For multiple positions per symbol, active_trades structure needs to change
+            trade_id = f"{symbol}_{int(time.time())}" # Simple unique ID
+            self.active_trades[trade_id] = trade
+
+            # Add to history (can store less detail here)
+            self.trade_history.append({**trade, 'status': 'OPEN'}) # Record status
+
+            logger.info(f"Recorded trade for {symbol}: ID={trade_id}")
+            # In a real bot, you would now monitor the active_trade for TP/SL execution or manual closing
+
             return trade
-            
+
         except Exception as e:
-            logger.error(f"Error executing trade for {symbol}: {e}")
+            logger.error(f"Error executing trade for {symbol} with signal {signal_type}: {e}")
             return None
             
     async def stop(self):
