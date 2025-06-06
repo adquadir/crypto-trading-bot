@@ -244,18 +244,17 @@ class ExchangeClient:
     async def get_exchange_info(self) -> Dict:
         """Fetch exchange information including all available trading pairs."""
         try:
-            # Check cache first
-            cache_key = 'exchange_info'
-            cached_data = self.cache.get(cache_key, max_age=3600)  # Cache for 1 hour
-            if cached_data:
-                logger.debug("Using cached exchange info from memory/disk.")
-                # Log the number of perpetual symbols found in the cached data
-                if 'symbols' in cached_data:
-                    cached_perpetual_symbols = [s for s in cached_data['symbols'] if s.get('contractType') == 'PERPETUAL' and s.get('status') == 'TRADING']
-                    logger.debug(f"Cached data contains {len(cached_perpetual_symbols)} TRADING perpetual symbols.")
-                return cached_data
+            # --- Temporarily disable cache check to force fresh fetch ---
+            # cache_key = 'exchange_info'
+            # cached_data = self.cache.get(cache_key, max_age=3600)  # Cache for 1 hour
+            # if cached_data:
+            #     logger.debug("Using cached exchange info from memory/disk.")
+            #     if 'symbols' in cached_data:
+            #         cached_perpetual_symbols = [s for s in cached_data['symbols'] if s.get('contractType') == 'PERPETUAL' and s.get('status') == 'TRADING']
+            #         logger.debug(f"Cached data contains {len(cached_perpetual_symbols)} TRADING perpetual symbols.")
+            #     return cached_data
 
-            logger.debug("Cache miss for exchange info. Fetching from exchange...")
+            logger.debug("Cache check skipped. Fetching exchange info from exchange...")
             # Fetch from exchange
             # Use the Binance Client instance which is configured with the proxy
             exchange_info = await asyncio.to_thread(self.client.futures_exchange_info) # Ensure futures endpoint is used
@@ -266,8 +265,8 @@ class ExchangeClient:
                 fetched_perpetual_symbols = [s for s in exchange_info['symbols'] if s.get('contractType') == 'PERPETUAL' and s.get('status') == 'TRADING']
                 logger.debug(f"Fetched data contains {len(fetched_perpetual_symbols)} TRADING perpetual symbols.")
 
-            # Cache the fetched data
-            self.cache.set(cache_key, exchange_info, max_age=3600)
+            # Cache the fetched data (still cache, but don't read from it for this call)
+            # self.cache.set(cache_key, exchange_info, max_age=3600)
 
             return exchange_info
         except Exception as e:
