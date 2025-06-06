@@ -248,60 +248,31 @@ class ExchangeClient:
             cache_key = 'exchange_info'
             cached_data = self.cache.get(cache_key, max_age=3600)  # Cache for 1 hour
             if cached_data:
-                logger.debug("Using cached exchange info")
+                logger.debug("Using cached exchange info from memory/disk.")
+                # Log the number of perpetual symbols found in the cached data
+                if 'symbols' in cached_data:
+                    cached_perpetual_symbols = [s for s in cached_data['symbols'] if s.get('contractType') == 'PERPETUAL' and s.get('status') == 'TRADING']
+                    logger.debug(f"Cached data contains {len(cached_perpetual_symbols)} TRADING perpetual symbols.")
                 return cached_data
 
-            logger.debug("Fetching exchange information")
-            
-            # Get exchange info from Binance
-            exchange_info = await asyncio.to_thread(self.client.get_exchange_info)
-            
-            # Filter for perpetual futures only
-            futures_symbols = [
-                symbol for symbol in exchange_info['symbols']
-                if symbol['status'] == 'TRADING' and
-                symbol.get('contractType') == 'PERPETUAL'
-            ]
-            
-            result = {
-                'symbols': futures_symbols,
-                'timezone': exchange_info.get('timezone', 'UTC'),
-                'serverTime': exchange_info.get('serverTime', int(time.time() * 1000))
-            }
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=3600)
-            
-            logger.info(f"Found {len(futures_symbols)} active perpetual futures pairs")
-            return result
-            
-        except BinanceAPIException as e:
-            logger.error(f"Binance API error: {e}")
-            # Try with different proxy
-            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
-            exchange_info = await asyncio.to_thread(self.client.get_exchange_info)
-            
-            # Filter for perpetual futures only
-            futures_symbols = [
-                symbol for symbol in exchange_info['symbols']
-                if symbol['status'] == 'TRADING' and
-                symbol.get('contractType') == 'PERPETUAL'
-            ]
-            
-            result = {
-                'symbols': futures_symbols,
-                'timezone': exchange_info.get('timezone', 'UTC'),
-                'serverTime': exchange_info.get('serverTime', int(time.time() * 1000))
-            }
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=3600)
-            
-            logger.info(f"Found {len(futures_symbols)} active perpetual futures pairs")
-            return result
+            logger.debug("Cache miss for exchange info. Fetching from exchange...")
+            # Fetch from exchange
+            # Use the Binance Client instance which is configured with the proxy
+            exchange_info = await asyncio.to_thread(self.client.futures_exchange_info) # Ensure futures endpoint is used
+
+            logger.debug("Successfully fetched exchange info from exchange.")
+            # Log the number of perpetual symbols found in the fetched data
+            if 'symbols' in exchange_info:
+                fetched_perpetual_symbols = [s for s in exchange_info['symbols'] if s.get('contractType') == 'PERPETUAL' and s.get('status') == 'TRADING']
+                logger.debug(f"Fetched data contains {len(fetched_perpetual_symbols)} TRADING perpetual symbols.")
+
+            # Cache the fetched data
+            self.cache.set(cache_key, exchange_info, max_age=3600)
+
+            return exchange_info
         except Exception as e:
-            logger.error(f"Unexpected error fetching exchange info: {str(e)}")
-            return {'symbols': [], 'timezone': 'UTC', 'serverTime': int(time.time() * 1000)}
+            logger.error(f"Error fetching exchange info: {e}")
+            raise # Re-raise the exception to be caught by retry decorator or calling function
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
