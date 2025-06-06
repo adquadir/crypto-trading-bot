@@ -192,7 +192,7 @@ crypto-trading-bot/
 ├── web/                      # Static web assets
 ├── docs/                     # Project documentation
 ├── config/                   # YAML configuration files
-├── tests/                    # Test suite
+├── tests/                    # Test suite, **including tests for the Candle Cluster Detector and safe-entry logic**
 ├── scripts/                  # Setup and utility scripts
 │   ├── setup.sh             # Development setup script
 │   ├── setup_service.sh     # Production service setup
@@ -236,6 +236,7 @@ crypto-trading-bot/
 - Unit tests
 - Integration tests
 - Test fixtures and utilities
+- **Includes specific tests for the `Candle Cluster Detector` and associated safe-entry logic.**
 
 #### `scripts/`
 - **setup.sh**: Development environment setup script

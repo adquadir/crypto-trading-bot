@@ -167,7 +167,8 @@ class TradingBot:
                     # Discover trading opportunities
                     opportunities = await self.symbol_discovery.scan_opportunities()
                     
-                    for symbol, opportunity in opportunities.items():
+                    for opportunity in opportunities:
+                        symbol = opportunity.symbol
                         # Get market data
                         market_data = await self.exchange_client.get_market_data(symbol)
                         if not market_data:
@@ -178,7 +179,7 @@ class TradingBot:
                             market_data,
                             self.signal_generator.strategy_config.get_symbol_specific_params(
                                 symbol,
-                                opportunity['confidence_score']
+                                opportunity.confidence
                             )
                         )
                         
@@ -186,7 +187,7 @@ class TradingBot:
                         signal = self.signal_generator.generate_signals(
                             symbol,
                             indicators,
-                            opportunity['confidence_score']
+                            opportunity.confidence
                         )
                         
                         if signal and signal['signal_type'] != "NEUTRAL":
@@ -203,7 +204,7 @@ class TradingBot:
                                     if 'volatility' in opportunity:
                                         self.signal_generator.update_volatility(
                                             symbol,
-                                            opportunity['volatility']
+                                            opportunity.volatility
                                         )
                                         
                     # Sleep to prevent excessive API calls

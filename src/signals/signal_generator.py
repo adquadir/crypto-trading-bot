@@ -84,16 +84,16 @@ class SignalGenerator:
             atr_series = atr_indicator.average_true_range()
             atr_value = atr_series.iloc[-1]
             # Calculate ATR trend (slope over a short window)
-            atr_trend_window = 5 # Lookback window for ATR trend
+            lookback_window = 5  # Lookback window for ATR trend and volume analysis
             atr_trend = 0
-            if len(atr_series) >= atr_trend_window:
-                recent_atrs = atr_series[-atr_trend_window:]
+            if len(atr_series) >= lookback_window:
+                recent_atrs = atr_series[-lookback_window:]
                 # Use simple linear regression slope
                 x = np.arange(len(recent_atrs))
                 atr_trend = np.polyfit(x, recent_atrs, 1)[0] # Get the slope
 
             # Volume Data
-            recent_volumes = data['volume'].tolist()[-lookback_window:] # Reuse the lookback window from hovering strat
+            recent_volumes = data['volume'].tolist()[-lookback_window:] # Use the same lookback window
             avg_recent_volume = np.mean(recent_volumes) if recent_volumes else 0
             overall_avg_volume = data['volume'].mean() # Average volume over the entire data
 

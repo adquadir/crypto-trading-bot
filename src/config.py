@@ -100,7 +100,7 @@ STRATEGY_CONFIG = {
         'slow_period': int(os.getenv('MACD_SLOW_PERIOD', '26')),
         'signal_period': int(os.getenv('MACD_SIGNAL_PERIOD', '9'))
     },
-    'rsi': {
+        'rsi': {
         'overbought': float(os.getenv('RSI_OVERBOUGHT', '70')),
         'oversold': float(os.getenv('RSI_OVERSOLD', '30'))
         },

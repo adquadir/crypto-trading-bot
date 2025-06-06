@@ -78,7 +78,7 @@ class CandleClusterDetector:
                 potential_take_profit = recent_range_high
                 if potential_take_profit - current_price < target_profit_min:
                     potential_take_profit = current_price + target_profit_min # Ensure minimum gain
-                if potential_take_profit - current_take_profit > target_profit_max:
+                if potential_take_profit - current_price > target_profit_max:
                     potential_take_profit = current_price + target_profit_max # Cap maximum gain
 
                 # Calculate stop loss just below recent lows
