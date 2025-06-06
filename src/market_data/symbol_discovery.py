@@ -877,18 +877,26 @@ class SymbolDiscovery:
         try:
             volumes = [float(candle['volume']) for candle in ohlcv]
             
+            # Need at least 20 data points for the MA and STD calculations
+            if len(volumes) < 20:
+                # If insufficient data, assume healthy for now or return False based on desired behavior
+                # Returning True to allow symbols through if not enough data to strictly fail
+                return True # Or False, depending on desired strictness with limited data
+
             # Calculate volume moving averages
             vol_ma5 = np.mean(volumes[-5:])
             vol_ma20 = np.mean(volumes[-20:])
             
             # Volume should be increasing or stable
-            if vol_ma5 < vol_ma20 * 0.8:  # 20% decline threshold
+            # Relaxing the threshold from 0.8 to 0.5
+            if vol_ma5 < vol_ma20 * 0.5:  # Allow recent volume to be as low as 50% of the 20-period average
                 return False
                 
-            # Check for volume consistency
+            # Check for volume consistency (lower coefficient of variation indicates more consistent volume)
+            # Relaxing the threshold from 0.5 to 1.0
             vol_std = np.std(volumes[-20:])
             vol_mean = np.mean(volumes[-20:])
-            if vol_std / vol_mean > 0.5:  # 50% coefficient of variation threshold
+            if vol_mean > 0 and (vol_std / vol_mean) > 1.0:  # Allow higher coefficient of variation (more inconsistency)
                 return False
                 
             return True
