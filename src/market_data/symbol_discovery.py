@@ -569,12 +569,14 @@ class SymbolDiscovery:
                     # Get market data
                     market_data = await self.get_market_data(symbol)
                     if not market_data:
+                        logger.debug(f"No market data for {symbol}")
                         return None
-                        
+
                     # Apply advanced filters
                     if not self._apply_advanced_filters(market_data):
+                        logger.debug(f"Symbol {symbol} rejected by advanced filters.")
                         return None
-                    
+
                     # Format market data for signal generation
                     formatted_market_data = {
                         'price': float(market_data['ohlcv'][-1]['close']),
@@ -584,29 +586,35 @@ class SymbolDiscovery:
                         'volume_24h': float(market_data['volume_24h']),
                         'indicators': market_data.get('indicators', {})
                     }
-                    
+
                     # Generate signal
                     signal = self.signal_generator.generate_signals(
                         formatted_market_data,
                         market_data.get('indicators', {})
                     )
-                    
-                    if signal:
-                        # Validate signal
-                        validation = self._validate_signal(signal)
-                        if not validation.is_valid:
-                            logger.error(f"Invalid signal for {symbol}: {validation.errors}")
-                            return None
-                            
-                        if validation.warnings:
-                            logger.warning(f"Signal warnings for {symbol}: {validation.warnings}")
-                            
-                        # Cache valid signal
-                        self._cache_signal(symbol, signal)
-                
-                if not signal or signal['confidence'] < self.min_confidence:
+
+                    if not signal:
+                        logger.debug(f"No signal generated for {symbol}")
+                        return None
+
+                    # Validate signal
+                    validation = self._validate_signal(signal)
+                    if not validation.is_valid:
+                        logger.error(f"Invalid signal for {symbol}: {validation.errors}")
+                        return None
+
+                    if validation.warnings:
+                        logger.warning(f"Signal warnings for {symbol}: {validation.warnings}")
+
+                    # Cache valid signal
+                    self._cache_signal(symbol, signal)
+
+                # Check confidence after potential caching
+                logger.debug(f"Signal confidence for {symbol}: {signal.get('confidence')}")
+                if signal.get('confidence', 0) < self.min_confidence:
+                    logger.debug(f"Signal for {symbol} discarded due to low confidence ({signal.get('confidence')} < {self.min_confidence})")
                     return None
-                
+
                 # Calculate volatility
                 volatility = self.calculate_volatility(market_data['ohlcv'])
                 
@@ -626,7 +634,10 @@ class SymbolDiscovery:
                 # Calculate risk-reward ratio
                 risk_reward = abs(take_profit - entry_price) / abs(entry_price - stop_loss)
                 
+                logger.debug(f"Calculated Risk-Reward for {symbol}: {risk_reward}. Minimum required: {self.min_risk_reward}")
+
                 if risk_reward < self.min_risk_reward:
+                    logger.debug(f"Opportunity for {symbol} discarded due to low risk-reward ({risk_reward} < {self.min_risk_reward})")
                     return None
                 
                 opportunity = TradingOpportunity(
@@ -663,57 +674,66 @@ class SymbolDiscovery:
     def _apply_advanced_filters(self, market_data: Dict) -> bool:
         """Apply advanced filters to market data."""
         try:
+            symbol = market_data.get('symbol', 'UNKNOWN')
+
             # Volume filter
             if market_data['volume_24h'] < self.min_volume_24h:
-                logger.debug(f"{market_data['symbol']} rejected: Low volume")
+                logger.debug(f"{symbol} rejected by volume filter: {market_data['volume_24h']} < {self.min_volume_24h}")
                 return False
                 
             # Spread filter
-            if market_data.get('spread', 0) > self.max_spread:
-                logger.debug(f"{market_data['symbol']} rejected: High spread")
+            spread = market_data.get('spread', float('inf')) # Use a high default if missing
+            if spread > self.max_spread:
+                logger.debug(f"{symbol} rejected by spread filter: {spread} > {self.max_spread}")
                 return False
                 
             # Liquidity filter
-            if market_data.get('liquidity', 0) < self.min_liquidity:
-                logger.debug(f"{market_data['symbol']} rejected: Low liquidity")
+            liquidity = market_data.get('liquidity', 0) # Use 0 default if missing
+            if liquidity < self.min_liquidity:
+                logger.debug(f"{symbol} rejected by liquidity filter: {liquidity} < {self.min_liquidity}")
                 return False
                 
             # Volatility filter
+            # Note: calculate_volatility handles potential errors internally and returns 0 on failure
             volatility = self.calculate_volatility(market_data['ohlcv'])
             if not (self.min_volatility <= volatility <= self.max_volatility):
-                logger.debug(f"{market_data['symbol']} rejected: Volatility out of range")
+                logger.debug(f"{symbol} rejected by volatility filter: {volatility} out of range ({self.min_volatility}-{self.max_volatility})")
                 return False
                 
             # Market cap filter
-            if market_data.get('market_cap', 0) < self.min_market_cap:
-                logger.debug(f"{market_data['symbol']} rejected: Low market cap")
+            market_cap = market_data.get('market_cap', 0) # Use 0 default if missing
+            if market_cap < self.min_market_cap:
+                logger.debug(f"{symbol} rejected by market cap filter: {market_cap} < {self.min_market_cap}")
                 return False
                 
             # Funding rate filter
-            funding_rate = market_data.get('funding_rate', 0)
+            funding_rate = market_data.get('funding_rate', 0) # Use 0 default if missing
             if not (self.min_funding_rate <= funding_rate <= self.max_funding_rate):
-                logger.debug(f"{market_data['symbol']} rejected: Funding rate out of range")
+                logger.debug(f"{symbol} rejected by funding rate filter: {funding_rate} out of range ({self.min_funding_rate}-{self.max_funding_rate})")
                 return False
                 
             # Open interest filter
-            if market_data.get('open_interest', 0) < self.min_open_interest:
-                logger.debug(f"{market_data['symbol']} rejected: Low open interest")
+            open_interest = market_data.get('open_interest', 0) # Use 0 default if missing
+            if open_interest < self.min_open_interest:
+                logger.debug(f"{symbol} rejected by open interest filter: {open_interest} < {self.min_open_interest}")
                 return False
                 
             # Price stability filter
+            # Note: _check_price_stability handles potential errors internally and returns False on failure
             if not self._check_price_stability(market_data['ohlcv']):
-                logger.debug(f"{market_data['symbol']} rejected: Unstable price")
+                logger.debug(f"{symbol} rejected by price stability filter.")
                 return False
                 
             # Volume trend filter
+            # Note: _check_volume_trend handles potential errors internally and returns False on failure
             if not self._check_volume_trend(market_data['ohlcv']):
-                logger.debug(f"{market_data['symbol']} rejected: Declining volume")
+                logger.debug(f"{symbol} rejected by volume trend filter.")
                 return False
                 
             return True
             
         except Exception as e:
-            logger.error(f"Error applying advanced filters: {e}")
+            logger.error(f"Error applying advanced filters for {symbol}: {e}")
             return False
             
     def _check_price_stability(self, ohlcv: List[Dict]) -> bool:
