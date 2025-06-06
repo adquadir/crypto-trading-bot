@@ -5,8 +5,7 @@ import pandas as pd
 from datetime import datetime
 from ta.trend import SMAIndicator, EMAIndicator
 from ta.momentum import RSIIndicator
-from ta.volatility import BollingerBands
-from ta.volatility.average_true_range import AverageTrueRange
+from ta.volatility import BollingerBands, AverageTrueRange
 from ..strategy.dynamic_config import DynamicStrategyConfig
 from ..strategies.candle_cluster.detector import CandleClusterDetector
 
