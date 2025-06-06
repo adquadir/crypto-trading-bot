@@ -1,10 +1,13 @@
 binance:
   api_key: ${BINANCE_API_KEY}
   api_secret: ${BINANCE_API_SECRET}
-  testnet: ${TESTNET:-false}
+  testnet: ${USE_TESTNET:-false}
+  exchange_options:
+    adjustForTimeDifference: true
+    recvWindow: 10000
 
 trading:
-  scan_interval: 60  # seconds
+  scan_interval: 300 # seconds
   max_open_trades: 5
   min_volume_usdt: 1000000
   min_liquidity_usdt: 500000
