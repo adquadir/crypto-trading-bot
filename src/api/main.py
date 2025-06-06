@@ -361,7 +361,7 @@ async def get_stats():
         total_loss = abs(sum(t.pnl for t in trades if t.pnl and t.pnl < 0))
         profit_factor = total_profit / total_loss if total_loss > 0 else float('inf')
 
-        # Calculate maximum drawdown (simplified - needs proper implementation)
+        # Calculate Maximum Drawdown (simplified - needs proper implementation)
         # This is a placeholder; a full drawdown calculation requires tracking equity over time.
         max_drawdown = 0.0 # Placeholder
 
@@ -390,7 +390,11 @@ async def get_stats():
             "parameter_history": [], # Placeholder
             "volatility_impact": {} # Placeholder
         }
-        return {"stats": stats}
+
+        # Clean potential NaN/Infinity values before returning
+        cleaned_stats = clean_float_values(stats)
+        
+        return JSONResponse(content=cleaned_stats)
     except Exception as e:
         logger.error(f"Error getting stats: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
