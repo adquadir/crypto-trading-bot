@@ -22,13 +22,13 @@ LOGGING_CONFIG = {
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'level': 'INFO',
+            'level': 'DEBUG',
             'formatter': 'standard',
             'stream': 'ext://sys.stdout',
         },
         'file': {
             'class': 'logging.FileHandler',
-            'level': 'INFO',
+            'level': 'DEBUG',
             'formatter': 'standard',
             'filename': BASE_DIR / 'trading_bot.log',
         },
@@ -36,7 +36,7 @@ LOGGING_CONFIG = {
     'loggers': {
         '': {  # root logger
             'handlers': ['console', 'file'],
-            'level': 'INFO',
+            'level': 'DEBUG',
             'propagate': True
         }
     }
