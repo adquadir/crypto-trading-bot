@@ -46,61 +46,84 @@ class SignalGenerator:
             funding_rate = market_data['funding_rate']
             open_interest = market_data['open_interest']
             
-            # Get latest indicator values
-            rsi = indicators[-1]['rsi']
-            bb_upper = indicators[-1]['bb_upper']
-            bb_lower = indicators[-1]['bb_lower']
-            ema_20 = indicators[-1]['ema_20']
-            ema_50 = indicators[-1]['ema_50']
+            # Get latest indicator values directly from the dictionary
+            rsi = indicators.get('rsi')
+            bb_upper = indicators.get('bollinger_bands', {}).get('upper')
+            bb_lower = indicators.get('bollinger_bands', {}).get('lower')
+            ema_20 = indicators.get('ema', {}).get('ema_20')
+            ema_50 = indicators.get('ema', {}).get('ema_50')
+            macd_value = indicators.get('macd', {}).get('value')
+            macd_signal = indicators.get('macd', {}).get('signal')
+            # Add other indicators as needed
             
             signal = {
                 'timestamp': datetime.now().timestamp(),
-                'symbol': market_data.get('symbol', 'BTCUSDT'),
+                'symbol': market_data.get('symbol', 'UNKNOWN'),
                 'price': current_price,
                 'direction': None,
                 'confidence': 0.0,
-                'reasoning': []
+                'reasoning': [],
+                'indicators': indicators # Include all calculated indicators
             }
             
             # Rule 1: RSI Oversold/Overbought
-            if rsi < 30:
-                signal['direction'] = 'LONG'
-                signal['confidence'] += 0.3
-                signal['reasoning'].append('RSI oversold')
-            elif rsi > 70:
-                signal['direction'] = 'SHORT'
-                signal['confidence'] += 0.3
-                signal['reasoning'].append('RSI overbought')
+            if rsi is not None:
+                if rsi < 30:
+                    signal['direction'] = 'LONG'
+                    signal['confidence'] += 0.3
+                    signal['reasoning'].append('RSI oversold')
+                elif rsi > 70:
+                    signal['direction'] = 'SHORT'
+                    signal['confidence'] += 0.3
+                    signal['reasoning'].append('RSI overbought')
                 
             # Rule 2: Bollinger Bands
-            if current_price < bb_lower:
+            if bb_lower is not None and current_price < bb_lower:
                 if signal['direction'] == 'LONG':
                     signal['confidence'] += 0.2
+                else:
+                     # If no initial direction, set based on this rule
+                    signal['direction'] = 'LONG'
+                    signal['confidence'] += 0.2
                 signal['reasoning'].append('Price below lower BB')
-            elif current_price > bb_upper:
+            elif bb_upper is not None and current_price > bb_upper:
                 if signal['direction'] == 'SHORT':
+                    signal['confidence'] += 0.2
+                else:
+                    # If no initial direction, set based on this rule
+                    signal['direction'] = 'SHORT'
                     signal['confidence'] += 0.2
                 signal['reasoning'].append('Price above upper BB')
                 
             # Rule 3: EMA Crossover
-            if ema_20 > ema_50:
-                if signal['direction'] == 'LONG':
-                    signal['confidence'] += 0.2
-                signal['reasoning'].append('EMA 20 crossed above EMA 50')
-            elif ema_20 < ema_50:
-                if signal['direction'] == 'SHORT':
-                    signal['confidence'] += 0.2
-                signal['reasoning'].append('EMA 20 crossed below EMA 50')
+            if ema_20 is not None and ema_50 is not None:
+                if ema_20 > ema_50:
+                    if signal['direction'] == 'LONG':
+                        signal['confidence'] += 0.2
+                    else:
+                        # If no initial direction, set based on this rule
+                        signal['direction'] = 'LONG'
+                        signal['confidence'] += 0.2
+                    signal['reasoning'].append('EMA 20 crossed above EMA 50')
+                elif ema_20 < ema_50:
+                    if signal['direction'] == 'SHORT':
+                        signal['confidence'] += 0.2
+                    else:
+                         # If no initial direction, set based on this rule
+                        signal['direction'] = 'SHORT'
+                        signal['confidence'] += 0.2
+                    signal['reasoning'].append('EMA 20 crossed below EMA 50')
                 
             # Rule 4: Funding Rate
-            if funding_rate < -0.0004:  # -0.04%
-                if signal['direction'] == 'LONG':
-                    signal['confidence'] += 0.1
-                signal['reasoning'].append('Negative funding rate')
-            elif funding_rate > 0.0004:  # 0.04%
-                if signal['direction'] == 'SHORT':
-                    signal['confidence'] += 0.1
-                signal['reasoning'].append('Positive funding rate')
+            if funding_rate is not None:
+                if funding_rate < -0.0004:  # -0.04%
+                    if signal['direction'] == 'LONG':
+                        signal['confidence'] += 0.1
+                    signal['reasoning'].append('Negative funding rate')
+                elif funding_rate > 0.0004:  # 0.04%
+                    if signal['direction'] == 'SHORT':
+                        signal['confidence'] += 0.1
+                    signal['reasoning'].append('Positive funding rate')
                 
             # Only return signals with sufficient confidence
             if signal['confidence'] >= 0.5 and signal['direction'] is not None:

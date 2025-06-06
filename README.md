@@ -27,11 +27,11 @@ A sophisticated cryptocurrency trading bot with a modern web interface for monit
 
 ### Risk Management
 - Fixed risk per trade ($50 by default)
-- Dynamic position sizing
+   - Dynamic position sizing
 - Maximum leverage limits
 - Correlation monitoring
 - Drawdown protection
-- Stop-loss and take-profit calculation
+   - Stop-loss and take-profit calculation
 
 ### Real-time Monitoring
 - Live WebSocket updates
@@ -74,15 +74,15 @@ The system consists of three main components:
 ## Setup Instructions
 
 1. **Clone the Repository**
-```bash
+   ```bash
 git clone https://github.com/yourusername/crypto-trading-bot.git
 cd crypto-trading-bot
-```
+   ```
 
 2. **Install Dependencies**
-```bash
+   ```bash
 # Backend
-pip install -r requirements.txt
+   pip install -r requirements.txt
 
 # Frontend
 cd frontend
@@ -133,9 +133,9 @@ Create configuration files in the `config/` directory:
 - `config/production.yaml` - Production-specific settings
 
 4. **Initialize Database**
-```bash
-python scripts/init_db.py
-```
+   ```bash
+   python scripts/init_db.py
+   ```
 
 5. **Setup Services**
 Choose one of the following methods:

@@ -462,7 +462,7 @@ const Signals = () => {
         heartbeatIntervalRef.current = null;
       }
     };
-  }, []);
+  }, [retryCount]);
 
   const handleSort = (field) => {
     if (sortBy === field) {
