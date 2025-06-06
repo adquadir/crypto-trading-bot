@@ -10,35 +10,42 @@ A sophisticated cryptocurrency trading bot with a modern web interface for monit
 - Intelligent opportunity scoring based on multiple factors
 - No manual symbol configuration required
 
+### Dynamic Strategy Configuration & Adaptation
+- **Strategy Profiles:** Define multiple trading strategies (Conservative, Moderate, Aggressive) with distinct parameter sets.
+- **Real-time Adaptation:** Strategy parameters automatically adjust based on market volatility and trading performance (win rate, profit factor).
+- **Profile Management:** Easily switch between, edit, and create new strategy profiles via the UI.
+
 ### Advanced Technical Analysis
 - Multiple technical indicators:
-  - Trend: MACD, EMA
-  - Momentum: RSI, Stochastic
+  - Trend: MACD, EMA, **ADX, Ichimoku Cloud**
+  - Momentum: RSI, Stochastic, **CCI**
   - Volatility: Bollinger Bands, ATR
   - Volume: OBV, VWAP
   - Support/Resistance levels
 - Sophisticated opportunity scoring:
-  - Signal confidence (30%)
-  - Technical indicators (25%)
-  - Volume (15%)
-  - Risk-reward ratio (15%)
-  - Volatility (10%)
-  - Leverage (5%)
+  - **Dynamic parameters based on active strategy profile and adaptation**
+  - Signal confidence
+  - Technical indicators
+  - Volume
+  - Risk-reward ratio
+  - Volatility
+  - Leverage
 
 ### Risk Management
-- Fixed risk per trade ($50 by default)
-   - Dynamic position sizing
-- Maximum leverage limits
+- Fixed risk per trade ($50 by default) - **now dynamically calculated per strategy profile**
+- Dynamic position sizing - **adapted based on confidence score and strategy profile**
+- Maximum leverage limits - **adapted based on confidence score and strategy profile**
 - Correlation monitoring
-- Drawdown protection
-   - Stop-loss and take-profit calculation
+- Drawdown protection - **configurable per strategy profile**
+- Stop-loss and take-profit calculation - **based on dynamic parameters**
 
 ### Real-time Monitoring
 - Live WebSocket updates
 - Modern React-based dashboard
 - Real-time opportunity display
-- Performance metrics
+- Performance metrics - **including profile-specific performance metrics**
 - Position management
+- **Parameter Adaptation History and Volatility Impact visualization**
 
 ### Advanced Filtering
 - Minimum market cap ($100M)
@@ -170,8 +177,9 @@ crypto-trading-bot/
 │   ├── signals/              # Trading signal generation
 │   ├── risk/                 # Risk management system
 │   ├── database/             # Database models and operations
-│   ├── utils/                # Utility functions and helpers
-│   └── ml/                   # Machine learning components
+│   ├── utils/                # Helper functions and utility classes, including configuration loading
+│   ├── ml/                   # Machine learning components
+│   └── strategy/             # Dynamic strategy configuration and profile management
 ├── frontend/                 # React-based web dashboard
 │   └── src/
 │       ├── components/       # Reusable React components
@@ -198,9 +206,10 @@ crypto-trading-bot/
 - **market_data/**: Handles all exchange interactions, market data processing, and symbol discovery
 - **signals/**: Implements technical analysis and trading signal generation
 - **risk/**: Manages position sizing, risk limits, and portfolio management
-- **database/**: Database models, migrations, and query operations
-- **utils/**: Helper functions and utility classes
-- **ml/**: Machine learning models for market prediction
+- **database/**: Database models and operations
+- **utils/**: Helper functions and utility classes, **including configuration loading**
+- **ml/**: Machine learning components
+- **strategy/**: **Dynamic strategy configuration and profile management**
 
 #### `frontend/`
 - **components/**: Reusable React components for the dashboard
@@ -232,19 +241,22 @@ crypto-trading-bot/
 ## API Endpoints
 
 ### REST Endpoints
-- `GET /api/trading/opportunities` - Get top trading opportunities
-- `GET /api/trading/opportunities/{symbol}` - Get detailed opportunity for a symbol
-- `GET /api/trading/opportunities/stats` - Get opportunity statistics
-- `GET /api/trading/signals` - Get trading signals
-- `GET /api/trading/pnl` - Get profit and loss data
-- `GET /api/trading/stats` - Get trading statistics
-- `GET /api/trading/positions` - Get current positions
-- `GET /api/trading/strategies` - Get strategy information
-- `GET /api/trading/settings` - Get current settings
+- `GET /api/trading/opportunities` - Get top trading opportunities based on current dynamic scan and filtering.
+- `GET /api/trading/opportunities/{symbol}` - Get detailed opportunity information for a specific symbol.
+- `GET /api/trading/opportunities/stats` - Get statistics about available trading opportunities (total, long/short counts, average confidence/score, top performers).
+- `GET /api/trading/signals` - Get recent trading signals (Note: Real-time signals are primarily via WebSocket).
+- `GET /api/trading/pnl` - Get profit and loss data.
+- `GET /api/trading/stats` - Get comprehensive trading statistics, **including profile-specific performance metrics, parameter adaptation history, and volatility impact.**
+- `GET /api/trading/positions` - Get current open positions.
+- `GET /api/trading/strategies` - Get list of available strategy profiles and their performance summaries.
+- `GET /api/trading/settings` - Get current general bot settings.
+- `PUT /api/trading/settings` - Update general bot settings.
+- `PUT /api/trading/strategies/{profile_name}` - **Update parameters for a specific strategy profile.**
 
 ### WebSocket Endpoints
-- `WS /ws/signals` - Real-time trading signals
-- `WS /ws/opportunities` - Real-time opportunity updates
+- `WS /ws/signals` - Real-time trading signals and market data updates.
+- `WS /ws/opportunities` - Real-time updates on newly discovered trading opportunities.
+- **WS /ws/stats** - **Real-time updates for dashboard statistics, including profile performance and parameter changes.**
 
 ## Services
 
@@ -839,3 +851,7 @@ Response:
      timestamp: Date;
    }
    ```
+
+## Dependencies
+
+In addition to the Python dependencies listed in `requirements.txt` (which now includes `pyyaml`), the frontend requires Node.js and npm.
