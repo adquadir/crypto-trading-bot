@@ -148,7 +148,8 @@ INDICATOR_WINDOWS=20,50,200
 ORDERBOOK_DEPTH=10
 
 # Dynamic Symbol Discovery
-# When SYMBOL_DISCOVERY_MODE is set to 'dynamic', TRADING_SYMBOLS is optional.
+# SYMBOL_DISCOVERY_MODE: Set to 'dynamic' to automatically discover pairs, or 'static' to use TRADING_SYMBOLS.
+# TRADING_SYMBOLS is ignored when SYMBOL_DISCOVERY_MODE is 'dynamic'.
 SYMBOL_DISCOVERY_MODE=dynamic # or 'static'
 TRADING_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT # Comma-separated list (only used if SYMBOL_DISCOVERY_MODE is 'static')
 ```

@@ -198,6 +198,14 @@ class SignalGenerator:
             # For standard signals, determine direction from strength and include required fields
             direction = "LONG" if signal_strength > 0 else ("SHORT" if signal_strength < 0 else "NEUTRAL")
 
+            # Determine signal_type based on signal_strength for standard signals
+            if signal_strength > 3: # Example threshold for STRONG signals
+                signal_type = "STRONG_BUY" if direction == "LONG" else "STRONG_SELL"
+            elif signal_strength > 0:
+                signal_type = "BUY" if direction == "LONG" else "SELL"
+            else:
+                signal_type = "NEUTRAL"
+
             # Only generate a signal if there's a clear direction
             if direction == "NEUTRAL":
                 logger.debug(f"Generated NEUTRAL signal for {symbol}.")
