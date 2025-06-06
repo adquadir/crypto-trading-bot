@@ -603,6 +603,10 @@ async def get_opportunity_stats():
             # Add other relevant stats here
         }
 
+        # Explicitly handle infinity for profit_factor before general cleaning
+        if stats.get("profit_factor") == float('inf'):
+            stats["profit_factor"] = None
+
         # Clean potential NaN/Infinity values before returning
         cleaned_stats = clean_float_values(stats)
 
