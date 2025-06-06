@@ -45,8 +45,6 @@ class TradingBot:
         self.signal_generator = SignalGenerator()
         self.risk_manager = RiskManager(
             account_balance=self.config['risk']['initial_balance'],
-            # max_daily_loss and max_drawdown are determined by risk_mode
-            # account_balance is required
         )
         
         # Initialize database

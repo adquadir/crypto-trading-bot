@@ -587,10 +587,13 @@ class SymbolDiscovery:
                         'indicators': market_data.get('indicators', {})
                     }
 
-                    # Generate signal
+                    # Pass symbol, indicators, and an initial/placeholder confidence score
+                    # A more sophisticated approach might estimate initial confidence here
+                    initial_confidence = 0.5 # Placeholder value
                     signal = self.signal_generator.generate_signals(
-                        formatted_market_data,
-                        market_data.get('indicators', {})
+                        symbol,  # Pass the symbol string
+                        market_data.get('indicators', {}), # Pass the indicators dictionary
+                        initial_confidence # Pass an initial confidence score
                     )
 
                     if not signal:

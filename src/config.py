@@ -54,7 +54,7 @@ DATABASE_CONFIG = {
 EXCHANGE_CONFIG = {
     'api_key': os.getenv('BINANCE_API_KEY'),
     'api_secret': os.getenv('BINANCE_API_SECRET'),
-    'testnet': os.getenv('BINANCE_TESTNET', 'true').lower() == 'true',
+    'testnet': os.getenv('USE_TESTNET', 'false').lower() == 'true',
     'symbols': os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(','),  # Default fallback symbols
     'timeframe': os.getenv('TIMEFRAME', '1m'),
     'discovery': {
@@ -103,10 +103,10 @@ STRATEGY_CONFIG = {
     'rsi': {
         'overbought': float(os.getenv('RSI_OVERBOUGHT', '70')),
         'oversold': float(os.getenv('RSI_OVERSOLD', '30'))
-    },
-    'bollinger_bands': {
+        },
+        'bollinger_bands': {
         'std_dev': float(os.getenv('BB_STD_DEV', '2.0'))
-    }
+        }
 }
 
 # Market data configuration

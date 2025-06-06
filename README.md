@@ -132,6 +132,11 @@ BB_STD_DEV=2.0
 # Market Data
 INDICATOR_WINDOWS=20,50,200
 ORDERBOOK_DEPTH=10
+
+# Dynamic Symbol Discovery
+# When SYMBOL_DISCOVERY_MODE is set to 'dynamic', TRADING_SYMBOLS is optional.
+SYMBOL_DISCOVERY_MODE=dynamic # or 'static'
+TRADING_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT # Comma-separated list (only used if SYMBOL_DISCOVERY_MODE is 'static')
 ```
 
 B. **YAML Configuration (Alternative)**
