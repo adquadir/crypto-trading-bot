@@ -121,13 +121,23 @@ class SymbolDiscovery:
                     if symbol['status'] == 'TRADING' and symbol['contractType'] == 'PERPETUAL'
                 ]
                 
+                logger.debug(f"Initial perpetual trading symbols found: {len(futures_symbols)}")
+                
                 # Apply filters
                 filtered_symbols = []
                 for symbol in futures_symbols:
+                    logger.debug(f"Processing symbol for advanced filtering: {symbol}")
                     market_data = await self.get_market_data(symbol)
-                    if market_data and self._apply_advanced_filters(market_data):
-                        filtered_symbols.append(symbol)
-                        
+                    if market_data:
+                        logger.debug(f"Market data fetched for {symbol}.")
+                        if self._apply_advanced_filters(market_data):
+                            logger.debug(f"Symbol {symbol} passed advanced filters.")
+                            filtered_symbols.append(symbol)
+                        else:
+                            logger.debug(f"Symbol {symbol} failed advanced filters.")
+                    else:
+                        logger.debug(f"Failed to fetch market data for {symbol}.")
+                
                 # Limit number of symbols if configured
                 if len(filtered_symbols) > self.max_symbols:
                     filtered_symbols = filtered_symbols[:self.max_symbols]
@@ -781,65 +791,63 @@ class SymbolDiscovery:
         """Apply advanced filters to market data."""
         try:
             symbol = market_data.get('symbol', 'UNKNOWN')
+            reasons = []
 
             # Volume filter
             if market_data['volume_24h'] < self.min_volume_24h:
-                logger.debug(f"{symbol} rejected by volume filter: {market_data['volume_24h']} < {self.min_volume_24h}")
-                return False
-                
+                reasons.append(f"Low volume: {market_data['volume_24h']} < {self.min_volume_24h}")
+
             # Spread filter
             spread = market_data.get('spread', float('inf')) # Use a high default if missing
             if spread > self.max_spread:
-                logger.debug(f"{symbol} rejected by spread filter: {spread} > {self.max_spread}")
-                return False
-                
+                reasons.append(f"Spread too high: {spread} > {self.max_spread}")
+
             # Liquidity filter
             liquidity = market_data.get('liquidity', 0) # Use 0 default if missing
             if liquidity < self.min_liquidity:
-                logger.debug(f"{symbol} rejected by liquidity filter: {liquidity} < {self.min_liquidity}")
-                return False
-                
+                reasons.append(f"Low liquidity: {liquidity} < {self.min_liquidity}")
+
+            # Market cap filter
+            market_cap = market_data.get('market_cap', 0) # Use 0 default if missing
+            if market_cap < self.min_market_cap:
+                reasons.append(f"Low market cap: {market_cap} < {self.min_market_cap}")
+
             # Volatility filter
             # Note: calculate_volatility handles potential errors internally and returns 0 on failure
             volatility = self.calculate_volatility(market_data['ohlcv'])
             if not (self.min_volatility <= volatility <= self.max_volatility):
-                logger.debug(f"{symbol} rejected by volatility filter: {volatility} out of range ({self.min_volatility}-{self.max_volatility})")
-                return False
-                
-            # Market cap filter
-            market_cap = market_data.get('market_cap', 0) # Use 0 default if missing
-            if market_cap < self.min_market_cap:
-                logger.debug(f"{symbol} rejected by market cap filter: {market_cap} < {self.min_market_cap}")
-                return False
-                
+                reasons.append(f"Volatility out of range: {volatility} ({self.min_volatility}-{self.max_volatility})")
+
             # Funding rate filter
             funding_rate = market_data.get('funding_rate', 0) # Use 0 default if missing
             if not (self.min_funding_rate <= funding_rate <= self.max_funding_rate):
-                logger.debug(f"{symbol} rejected by funding rate filter: {funding_rate} out of range ({self.min_funding_rate}-{self.max_funding_rate})")
-                return False
-                
+                reasons.append(f"Funding rate out of range: {funding_rate} ({self.min_funding_rate}-{self.max_funding_rate})")
+
             # Open interest filter
             open_interest = market_data.get('open_interest', 0) # Use 0 default if missing
             if open_interest < self.min_open_interest:
-                logger.debug(f"{symbol} rejected by open interest filter: {open_interest} < {self.min_open_interest}")
-                return False
-                
+                reasons.append(f"Low open interest: {open_interest} < {self.min_open_interest}")
+
             # Price stability filter
             # Note: _check_price_stability handles potential errors internally and returns False on failure
             if not self._check_price_stability(market_data['ohlcv']):
-                logger.debug(f"{symbol} rejected by price stability filter.")
-                return False
-                
+                reasons.append("Price instability")
+
             # Volume trend filter
             # Note: _check_volume_trend handles potential errors internally and returns False on failure
             if not self._check_volume_trend(market_data['ohlcv']):
-                logger.debug(f"{symbol} rejected by volume trend filter.")
+                reasons.append("Unhealthy volume trend")
+
+            if reasons:
+                logger.debug(f"Excluded {symbol}: {'; '.join(reasons)}")
                 return False
-                
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error applying advanced filters for {symbol}: {e}")
+            # If an error occurs during filtering a symbol, we should probably exclude it
+            logger.debug(f"Excluded {symbol} due to error during filtering.")
             return False
             
     def _check_price_stability(self, ohlcv: List[Dict]) -> bool:
