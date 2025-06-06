@@ -511,6 +511,27 @@ async def get_opportunity_stats():
         logger.error(f"Error getting opportunity stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/stats")
+async def get_stats():
+    """Get trading statistics including profile performance and parameter history."""
+    try:
+        stats = {
+            "total_trades": len(trading_bot.get_trade_history()),
+            "win_rate": trading_bot.calculate_win_rate(),
+            "profit_factor": trading_bot.calculate_profit_factor(),
+            "max_drawdown": trading_bot.calculate_max_drawdown(),
+            "daily_risk_usage": trading_bot.get_daily_risk_usage(),
+            "current_leverage": trading_bot.get_current_leverage(),
+            "portfolio_beta": trading_bot.calculate_portfolio_beta(),
+            "profile_performance": trading_bot.get_profile_performance(),
+            "parameter_history": trading_bot.get_parameter_history(),
+            "volatility_impact": trading_bot.get_volatility_impact()
+        }
+        return {"stats": stats}
+    except Exception as e:
+        logger.error(f"Error getting stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000) 

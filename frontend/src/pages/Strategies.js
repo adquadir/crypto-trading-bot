@@ -19,11 +19,19 @@ import {
   Tooltip,
   Chip,
   Switch,
-  FormControlLabel
+  FormControlLabel,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Slider,
+  Divider
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import EditIcon from '@mui/icons-material/Edit';
+import SaveIcon from '@mui/icons-material/Save';
 import axios from 'axios';
 import config from '../config';
 
@@ -37,10 +45,13 @@ const Strategies = () => {
   const [sortOrder, setSortOrder] = useState('desc');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [currentProfile, setCurrentProfile] = useState(null);
+  const [editedProfile, setEditedProfile] = useState(null);
   const maxRetries = 3;
 
   const handleError = (error) => {
-    console.error('Error fetching strategies:', error);
+    console.error('Error:', error);
     let errorMessage = 'Failed to fetch strategies';
 
     if (error.response) {
@@ -90,29 +101,44 @@ const Strategies = () => {
     }
   };
 
-  const toggleStrategy = async (strategyName, currentStatus) => {
+  const handleEditProfile = (profile) => {
+    setCurrentProfile(profile);
+    setEditedProfile({ ...profile });
+    setEditDialogOpen(true);
+  };
+
+  const handleSaveProfile = async () => {
     try {
-      const response = await axios.post(`${config.API_BASE_URL}${config.ENDPOINTS.STRATEGIES}/toggle`, {
-        strategy: strategyName,
-        active: !currentStatus
-      });
+      const response = await axios.put(
+        `${config.API_BASE_URL}${config.ENDPOINTS.STRATEGIES}/${editedProfile.name}`,
+        editedProfile
+      );
       if (response.data.success) {
-        setStrategies(prev => 
-          prev.map(strat => 
-            strat.name === strategyName 
-              ? { ...strat, active: !currentStatus }
-              : strat
+        setStrategies(prev =>
+          prev.map(strat =>
+            strat.name === editedProfile.name ? editedProfile : strat
           )
         );
+        setEditDialogOpen(false);
       }
     } catch (err) {
       handleError(err);
     }
   };
 
+  const handleParameterChange = (param, value) => {
+    setEditedProfile(prev => ({
+      ...prev,
+      parameters: {
+        ...prev.parameters,
+        [param]: value
+      }
+    }));
+  };
+
   useEffect(() => {
     fetchStrategies();
-    const interval = setInterval(fetchStrategies, 30000); // Update every 30 seconds
+    const interval = setInterval(fetchStrategies, 30000);
     return () => clearInterval(interval);
   }, [retryCount]);
 
@@ -126,7 +152,7 @@ const Strategies = () => {
   };
 
   const filteredAndSortedStrategies = strategies
-    .filter(strategy => 
+    .filter(strategy =>
       (showInactive || strategy.active) &&
       strategy.name.toLowerCase().includes(filter.toLowerCase())
     )
@@ -179,14 +205,14 @@ const Strategies = () => {
       </Box>
 
       {error && (
-        <Snackbar 
-          open={!!error} 
-          autoHideDuration={6000} 
+        <Snackbar
+          open={!!error}
+          autoHideDuration={6000}
           onClose={() => setError(null)}
           anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
         >
-          <Alert 
-            severity="error" 
+          <Alert
+            severity="error"
             onClose={() => setError(null)}
             action={
               <Button color="inherit" size="small" onClick={fetchStrategies}>
@@ -245,7 +271,7 @@ const Strategies = () => {
         </Typography>
       )}
 
-      <Grid container spacing={3}>
+      <Grid container spacing={2}>
         {filteredAndSortedStrategies.length === 0 ? (
           <Grid item xs={12}>
             <Paper sx={{ p: 3, textAlign: 'center' }}>
@@ -261,17 +287,28 @@ const Strategies = () => {
                 <CardContent>
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                     <Typography variant="h6">{strategy.name}</Typography>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={strategy.active}
-                          onChange={() => toggleStrategy(strategy.name, strategy.active)}
-                          color="primary"
-                        />
-                      }
-                      label={strategy.active ? 'Active' : 'Inactive'}
-                    />
+                    <Box>
+                      <Tooltip title="Edit Strategy">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditProfile(strategy)}
+                        >
+                          <EditIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={strategy.active}
+                            onChange={() => toggleStrategy(strategy.name, strategy.active)}
+                            color="primary"
+                          />
+                        }
+                        label={strategy.active ? 'Active' : 'Inactive'}
+                      />
+                    </Box>
                   </Box>
+
                   <Grid container spacing={2}>
                     <Grid item xs={6}>
                       <Typography color="textSecondary" variant="body2">
@@ -297,6 +334,14 @@ const Strategies = () => {
                         {strategy.performance.sharpe_ratio.toFixed(2)}
                       </Typography>
                     </Grid>
+                    <Grid item xs={6}>
+                      <Typography color="textSecondary" variant="body2">
+                        Volatility Factor
+                      </Typography>
+                      <Typography variant="h6">
+                        {strategy.parameters.volatility_factor.toFixed(2)}
+                      </Typography>
+                    </Grid>
                   </Grid>
                 </CardContent>
               </Card>
@@ -304,6 +349,146 @@ const Strategies = () => {
           ))
         )}
       </Grid>
+
+      <Dialog
+        open={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Edit Strategy Profile: {currentProfile?.name}
+        </DialogTitle>
+        <DialogContent>
+          {editedProfile && (
+            <Box sx={{ mt: 2 }}>
+              <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <Typography variant="h6" gutterBottom>
+                    Technical Indicators
+                  </Typography>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography gutterBottom>MACD Fast Period</Typography>
+                  <Slider
+                    value={editedProfile.parameters.macd_fast_period}
+                    onChange={(_, value) => handleParameterChange('macd_fast_period', value)}
+                    min={5}
+                    max={20}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography gutterBottom>MACD Slow Period</Typography>
+                  <Slider
+                    value={editedProfile.parameters.macd_slow_period}
+                    onChange={(_, value) => handleParameterChange('macd_slow_period', value)}
+                    min={15}
+                    max={40}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography gutterBottom>RSI Overbought</Typography>
+                  <Slider
+                    value={editedProfile.parameters.rsi_overbought}
+                    onChange={(_, value) => handleParameterChange('rsi_overbought', value)}
+                    min={60}
+                    max={90}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography gutterBottom>RSI Oversold</Typography>
+                  <Slider
+                    value={editedProfile.parameters.rsi_oversold}
+                    onChange={(_, value) => handleParameterChange('rsi_oversold', value)}
+                    min={10}
+                    max={40}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                </Grid>
+
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="h6" gutterBottom>
+                    Risk Management
+                  </Typography>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography gutterBottom>Max Position Size</Typography>
+                  <Slider
+                    value={editedProfile.parameters.max_position_size}
+                    onChange={(_, value) => handleParameterChange('max_position_size', value)}
+                    min={0.01}
+                    max={0.5}
+                    step={0.01}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography gutterBottom>Max Leverage</Typography>
+                  <Slider
+                    value={editedProfile.parameters.max_leverage}
+                    onChange={(_, value) => handleParameterChange('max_leverage', value)}
+                    min={1}
+                    max={20}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography gutterBottom>Risk Per Trade</Typography>
+                  <Slider
+                    value={editedProfile.parameters.risk_per_trade}
+                    onChange={(_, value) => handleParameterChange('risk_per_trade', value)}
+                    min={0.01}
+                    max={0.05}
+                    step={0.01}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Typography gutterBottom>Confidence Threshold</Typography>
+                  <Slider
+                    value={editedProfile.parameters.confidence_threshold}
+                    onChange={(_, value) => handleParameterChange('confidence_threshold', value)}
+                    min={0.5}
+                    max={0.9}
+                    step={0.05}
+                    marks
+                    valueLabelDisplay="auto"
+                  />
+                </Grid>
+              </Grid>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleSaveProfile}
+            variant="contained"
+            startIcon={<SaveIcon />}
+          >
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

@@ -6,6 +6,7 @@ from datetime import datetime
 from ta.trend import SMAIndicator, EMAIndicator
 from ta.momentum import RSIIndicator
 from ta.volatility import BollingerBands
+from ..strategy.dynamic_config import DynamicStrategyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -13,127 +14,183 @@ class SignalGenerator:
     def __init__(self):
         self.signals = []
         self.indicators = {}
+        self.strategy_config = DynamicStrategyConfig()
+        self.strategy_config.set_profile("moderate")  # Default to moderate profile
         
-    def calculate_indicators(self, data: List[Dict]) -> Dict:
-        """Calculate technical indicators from market data."""
+    def calculate_indicators(self, data: pd.DataFrame, params: Dict) -> Dict:
+        """Calculate technical indicators with dynamic parameters."""
         try:
-            df = pd.DataFrame(data)
+            # MACD
+            exp1 = data['close'].ewm(span=params['macd_fast_period'], adjust=False).mean()
+            exp2 = data['close'].ewm(span=params['macd_slow_period'], adjust=False).mean()
+            macd = exp1 - exp2
+            signal = macd.ewm(span=params['macd_signal_period'], adjust=False).mean()
             
-            # Calculate RSI
-            rsi = RSIIndicator(close=df['close'], window=14)
-            df['rsi'] = rsi.rsi()
+            # RSI
+            delta = data['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
             
-            # Calculate Bollinger Bands
-            bb = BollingerBands(close=df['close'], window=20, window_dev=2)
-            df['bb_upper'] = bb.bollinger_hband()
-            df['bb_lower'] = bb.bollinger_lband()
+            # Bollinger Bands
+            sma = data['close'].rolling(window=20).mean()
+            std = data['close'].rolling(window=20).std()
+            upper_band = sma + (std * params['bb_std_dev'])
+            lower_band = sma - (std * params['bb_std_dev'])
             
-            # Calculate EMAs
-            ema_20 = EMAIndicator(close=df['close'], window=20)
-            ema_50 = EMAIndicator(close=df['close'], window=50)
-            df['ema_20'] = ema_20.ema_indicator()
-            df['ema_50'] = ema_50.ema_indicator()
+            # ADX
+            tr1 = pd.DataFrame(data['high'] - data['low'])
+            tr2 = pd.DataFrame(abs(data['high'] - data['close'].shift(1)))
+            tr3 = pd.DataFrame(abs(data['low'] - data['close'].shift(1)))
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = tr.rolling(14).mean()
             
-            return df.to_dict('records')
+            up_move = data['high'] - data['high'].shift(1)
+            down_move = data['low'].shift(1) - data['low']
+            
+            plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+            minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+            
+            plus_di = 100 * (pd.Series(plus_dm).rolling(14).mean() / atr)
+            minus_di = 100 * (pd.Series(minus_dm).rolling(14).mean() / atr)
+            
+            dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+            adx = dx.rolling(14).mean()
+            
+            # CCI
+            tp = (data['high'] + data['low'] + data['close']) / 3
+            sma_tp = tp.rolling(window=20).mean()
+            mean_deviation = tp.rolling(window=20).apply(lambda x: np.mean(np.abs(x - np.mean(x))))
+            cci = (tp - sma_tp) / (0.015 * mean_deviation)
+            
+            # Ichimoku Cloud
+            high_9 = data['high'].rolling(window=9).max()
+            low_9 = data['low'].rolling(window=9).min()
+            tenkan_sen = (high_9 + low_9) / 2
+            
+            high_26 = data['high'].rolling(window=26).max()
+            low_26 = data['low'].rolling(window=26).min()
+            kijun_sen = (high_26 + low_26) / 2
+            
+            senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(26)
+            senkou_span_b = ((high_52 := data['high'].rolling(window=52).max()) + 
+                            (low_52 := data['low'].rolling(window=52).min())) / 2
+            
+            return {
+                'macd': macd.iloc[-1],
+                'macd_signal': signal.iloc[-1],
+                'rsi': rsi.iloc[-1],
+                'bb_upper': upper_band.iloc[-1],
+                'bb_middle': sma.iloc[-1],
+                'bb_lower': lower_band.iloc[-1],
+                'adx': adx.iloc[-1],
+                'plus_di': plus_di.iloc[-1],
+                'minus_di': minus_di.iloc[-1],
+                'cci': cci.iloc[-1],
+                'tenkan_sen': tenkan_sen.iloc[-1],
+                'kijun_sen': kijun_sen.iloc[-1],
+                'senkou_span_a': senkou_span_a.iloc[-1],
+                'senkou_span_b': senkou_span_b.iloc[-1],
+                'current_price': data['close'].iloc[-1]
+            }
         except Exception as e:
             logger.error(f"Error calculating indicators: {e}")
             return {}
             
-    def generate_signals(self, market_data: Dict, indicators: Dict) -> Optional[Dict]:
-        """Generate trading signals based on market data and indicators."""
+    def generate_signals(self, symbol: str, indicators: Dict, confidence_score: float) -> Dict:
+        """Generate trading signals with dynamic parameters."""
         try:
-            current_price = market_data['price']
-            funding_rate = market_data['funding_rate']
-            open_interest = market_data['open_interest']
+            # Get symbol-specific parameters based on confidence score
+            params = self.strategy_config.get_symbol_specific_params(symbol, confidence_score)
+            if not params:
+                return {}
+                
+            # Calculate signal strength
+            signal_strength = 0
+            signal_type = None
             
-            # Get latest indicator values directly from the dictionary
-            rsi = indicators.get('rsi')
-            bb_upper = indicators.get('bollinger_bands', {}).get('upper')
-            bb_lower = indicators.get('bollinger_bands', {}).get('lower')
-            ema_20 = indicators.get('ema', {}).get('ema_20')
-            ema_50 = indicators.get('ema', {}).get('ema_50')
-            macd_value = indicators.get('macd', {}).get('value')
-            macd_signal = indicators.get('macd', {}).get('signal')
-            # Add other indicators as needed
-            
-            signal = {
-                'timestamp': datetime.now().timestamp(),
-                'symbol': market_data.get('symbol', 'UNKNOWN'),
-                'price': current_price,
-                'direction': None,
-                'confidence': 0.0,
-                'reasoning': [],
-                'indicators': indicators # Include all calculated indicators
+            # MACD Signal
+            if indicators['macd'] > indicators['macd_signal']:
+                signal_strength += 1
+            else:
+                signal_strength -= 1
+                
+            # RSI Signal
+            if indicators['rsi'] < params['rsi_oversold']:
+                signal_strength += 2
+            elif indicators['rsi'] > params['rsi_overbought']:
+                signal_strength -= 2
+                
+            # Bollinger Bands Signal
+            if indicators['current_price'] < indicators['bb_lower']:
+                signal_strength += 1
+            elif indicators['current_price'] > indicators['bb_upper']:
+                signal_strength -= 1
+                
+            # ADX Signal
+            if indicators['adx'] > 25:  # Strong trend
+                if indicators['plus_di'] > indicators['minus_di']:
+                    signal_strength += 1
+                else:
+                    signal_strength -= 1
+                    
+            # CCI Signal
+            if indicators['cci'] > 100:
+                signal_strength -= 1
+            elif indicators['cci'] < -100:
+                signal_strength += 1
+                
+            # Ichimoku Signal
+            if (indicators['current_price'] > indicators['senkou_span_a'] and 
+                indicators['current_price'] > indicators['senkou_span_b']):
+                signal_strength += 1
+            elif (indicators['current_price'] < indicators['senkou_span_a'] and 
+                  indicators['current_price'] < indicators['senkou_span_b']):
+                signal_strength -= 1
+                
+            # Determine signal type and strength
+            if signal_strength >= 3:
+                signal_type = "STRONG_BUY"
+            elif signal_strength >= 1:
+                signal_type = "BUY"
+            elif signal_strength <= -3:
+                signal_type = "STRONG_SELL"
+            elif signal_strength <= -1:
+                signal_type = "SELL"
+            else:
+                signal_type = "NEUTRAL"
+                
+            return {
+                'symbol': symbol,
+                'signal_type': signal_type,
+                'signal_strength': abs(signal_strength),
+                'confidence_score': confidence_score,
+                'timestamp': datetime.now().isoformat(),
+                'indicators': indicators,
+                'parameters': params
             }
             
-            # Rule 1: RSI Oversold/Overbought
-            if rsi is not None:
-                if rsi < 30:
-                    signal['direction'] = 'LONG'
-                    signal['confidence'] += 0.3
-                    signal['reasoning'].append('RSI oversold')
-                elif rsi > 70:
-                    signal['direction'] = 'SHORT'
-                    signal['confidence'] += 0.3
-                    signal['reasoning'].append('RSI overbought')
-                
-            # Rule 2: Bollinger Bands
-            if bb_lower is not None and current_price < bb_lower:
-                if signal['direction'] == 'LONG':
-                    signal['confidence'] += 0.2
-                else:
-                     # If no initial direction, set based on this rule
-                    signal['direction'] = 'LONG'
-                    signal['confidence'] += 0.2
-                signal['reasoning'].append('Price below lower BB')
-            elif bb_upper is not None and current_price > bb_upper:
-                if signal['direction'] == 'SHORT':
-                    signal['confidence'] += 0.2
-                else:
-                    # If no initial direction, set based on this rule
-                    signal['direction'] = 'SHORT'
-                    signal['confidence'] += 0.2
-                signal['reasoning'].append('Price above upper BB')
-                
-            # Rule 3: EMA Crossover
-            if ema_20 is not None and ema_50 is not None:
-                if ema_20 > ema_50:
-                    if signal['direction'] == 'LONG':
-                        signal['confidence'] += 0.2
-                    else:
-                        # If no initial direction, set based on this rule
-                        signal['direction'] = 'LONG'
-                        signal['confidence'] += 0.2
-                    signal['reasoning'].append('EMA 20 crossed above EMA 50')
-                elif ema_20 < ema_50:
-                    if signal['direction'] == 'SHORT':
-                        signal['confidence'] += 0.2
-                    else:
-                         # If no initial direction, set based on this rule
-                        signal['direction'] = 'SHORT'
-                        signal['confidence'] += 0.2
-                    signal['reasoning'].append('EMA 20 crossed below EMA 50')
-                
-            # Rule 4: Funding Rate
-            if funding_rate is not None:
-                if funding_rate < -0.0004:  # -0.04%
-                    if signal['direction'] == 'LONG':
-                        signal['confidence'] += 0.1
-                    signal['reasoning'].append('Negative funding rate')
-                elif funding_rate > 0.0004:  # 0.04%
-                    if signal['direction'] == 'SHORT':
-                        signal['confidence'] += 0.1
-                    signal['reasoning'].append('Positive funding rate')
-                
-            # Only return signals with sufficient confidence
-            if signal['confidence'] >= 0.5 and signal['direction'] is not None:
-                return signal
-            return None
-            
         except Exception as e:
-            logger.error(f"Error generating signals: {e}")
-            return None
+            logger.error(f"Error generating signals for {symbol}: {e}")
+            return {}
             
+    def update_volatility(self, symbol: str, volatility: float):
+        """Update strategy parameters based on market volatility."""
+        self.strategy_config.adapt_to_volatility(symbol, volatility)
+        
+    def update_performance(self, trade_result: Dict):
+        """Update strategy parameters based on trading performance."""
+        self.strategy_config.adapt_to_performance(trade_result)
+        
+    def set_strategy_profile(self, profile_name: str):
+        """Set the current strategy profile."""
+        self.strategy_config.set_profile(profile_name)
+        
+    def get_risk_limits(self) -> Dict:
+        """Get current risk management parameters."""
+        return self.strategy_config.get_risk_limits()
+        
     def get_signal_history(self) -> List[Dict]:
         """Get history of generated signals."""
         return self.signals

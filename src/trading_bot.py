@@ -6,6 +6,9 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 import numpy as np
+import json
+from pathlib import Path
+import time
 
 from src.market_data.exchange_client import ExchangeClient
 from src.market_data.processor import MarketDataProcessor
@@ -15,21 +18,32 @@ from src.database.models import Base, MarketData, OrderBook, TradingSignal, Trad
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
+from src.signals.signal_generator import SignalGenerator
+from src.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
 class TradingBot:
-    def __init__(self):
+    def __init__(self, config_path: str = "config/config.yaml"):
         # Load environment variables
         load_dotenv()
         
         # Initialize components
+        self.config = load_config(config_path)
         self.exchange_client = ExchangeClient(
-            api_key=os.getenv('BINANCE_API_KEY'),
-            api_secret=os.getenv('BINANCE_API_SECRET')
+            api_key=self.config['binance']['api_key'],
+            api_secret=self.config['binance']['api_secret'],
+            testnet=self.config['binance']['testnet']
         )
         self.market_processor = MarketDataProcessor()
         self.signal_engine = SignalEngine()
+        self.symbol_discovery = SymbolDiscovery(self.exchange_client)
+        self.signal_generator = SignalGenerator()
+        self.risk_manager = RiskManager(
+            account_balance=self.config['risk']['initial_balance'],
+            max_daily_loss=self.config['risk']['max_daily_loss'],
+            max_drawdown=self.config['risk']['max_drawdown']
+        )
         
         # Initialize database
         self._init_database()
@@ -49,8 +63,13 @@ class TradingBot:
         self.opportunity_scan_task = None
         
         # Risk manager will be initialized in start() after getting account balance
-        self.risk_manager = None
-        self.symbol_discovery = None
+        self.active_trades = {}
+        self.trade_history = []
+        self._shutdown_event = asyncio.Event()
+        
+        # New attributes for profile performance tracking
+        self.strategy_config = self.signal_generator.strategy_config
+        self.parameter_history = []
         
     def _init_database(self):
         """Initialize database connection and create tables."""
@@ -130,194 +149,133 @@ class TradingBot:
             return default_balance
 
     async def start(self):
-        """Start the trading bot with debug checks."""
+        """Start the trading bot."""
         try:
-            self.is_running = True
             logger.info("Starting trading bot...")
             
-            # Initialize with debug checks
+            # Initialize exchange client
             await self.exchange_client.initialize()
-            await self.exchange_client.test_proxy_connection()
             
-            # Get account balance and initialize risk manager
-            total_balance = await self._get_account_balance()
-            self.risk_manager = RiskManager(account_balance=total_balance)
-            self.symbol_discovery = SymbolDiscovery(self.exchange_client)
-            
-            # Start opportunity scanning in background
-            self.opportunity_scan_task = asyncio.create_task(
-                self.symbol_discovery.update_opportunities(self.risk_per_trade)
-            )
-            
-            if self.debug_mode:
-                logger.info("=== DEBUG MODE ===")
-                # Test symbol discovery
-                opportunities = await self.symbol_discovery.scan_opportunities(self.risk_per_trade)
-                logger.info(f"Found {len(opportunities)} trading opportunities")
-                if opportunities:
-                    top_opp = opportunities[0]
-                    logger.info(f"Top opportunity: {top_opp.symbol} {top_opp.direction} "
-                              f"Score: {top_opp.score:.2f} "
-                              f"Confidence: {top_opp.confidence:.2f}")
+            # Set initial strategy profile
+            self.signal_generator.set_strategy_profile(self.config['strategy']['default_profile'])
             
             # Start main trading loop
-            while self.is_running:
+            while not self._shutdown_event.is_set():
                 try:
-                    await self._trading_loop()
+                    # Discover trading opportunities
+                    opportunities = await self.symbol_discovery.scan_opportunities()
+                    
+                    for symbol, opportunity in opportunities.items():
+                        # Get market data
+                        market_data = await self.exchange_client.get_market_data(symbol)
+                        if not market_data:
+                            continue
+                            
+                        # Calculate indicators with dynamic parameters
+                        indicators = self.signal_generator.calculate_indicators(
+                            market_data,
+                            self.signal_generator.strategy_config.get_symbol_specific_params(
+                                symbol,
+                                opportunity['confidence_score']
+                            )
+                        )
+                        
+                        # Generate signals
+                        signal = self.signal_generator.generate_signals(
+                            symbol,
+                            indicators,
+                            opportunity['confidence_score']
+                        )
+                        
+                        if signal and signal['signal_type'] != "NEUTRAL":
+                            # Check risk limits
+                            risk_limits = self.signal_generator.get_risk_limits()
+                            if self.risk_manager.can_open_trade(symbol, risk_limits):
+                                # Execute trade
+                                trade_result = await self._execute_trade(symbol, signal)
+                                if trade_result:
+                                    # Update strategy parameters based on trade result
+                                    self.signal_generator.update_performance(trade_result)
+                                    
+                                    # Update volatility parameters
+                                    if 'volatility' in opportunity:
+                                        self.signal_generator.update_volatility(
+                                            symbol,
+                                            opportunity['volatility']
+                                        )
+                                        
+                    # Sleep to prevent excessive API calls
+                    await asyncio.sleep(self.config['trading']['scan_interval'])
+                    
                 except Exception as e:
                     logger.error(f"Error in trading loop: {e}")
-                    await asyncio.sleep(5)
-                finally:
-                    await asyncio.sleep(1)
-                
+                    await asyncio.sleep(5)  # Wait before retrying
+                    
         except Exception as e:
-            logger.error(f"Critical error in trading bot: {e}")
-            self.is_running = False
+            logger.error(f"Fatal error in trading bot: {e}")
             raise
+        finally:
+            await self.stop()
+            
+    async def _execute_trade(self, symbol: str, signal: Dict) -> Optional[Dict]:
+        """Execute a trade based on the signal."""
+        try:
+            # Get current position
+            position = await self.exchange_client.get_position(symbol)
+            
+            # Determine trade direction and size
+            direction = "LONG" if signal['signal_type'] in ["STRONG_BUY", "BUY"] else "SHORT"
+            size = self.risk_manager.calculate_position_size(
+                symbol,
+                signal['confidence_score'],
+                self.signal_generator.get_risk_limits()
+            )
+            
+            # Execute trade
+            if direction == "LONG":
+                if position and position['side'] == "SHORT":
+                    await self.exchange_client.close_position(symbol)
+                await self.exchange_client.open_long_position(symbol, size)
+            else:
+                if position and position['side'] == "LONG":
+                    await self.exchange_client.close_position(symbol)
+                await self.exchange_client.open_short_position(symbol, size)
+                
+            # Record trade
+            trade = {
+                'symbol': symbol,
+                'direction': direction,
+                'size': size,
+                'entry_price': signal['indicators']['current_price'],
+                'timestamp': datetime.now().isoformat(),
+                'signal': signal
+            }
+            
+            self.active_trades[symbol] = trade
+            self.trade_history.append(trade)
+            
+            logger.info(f"Executed {direction} trade for {symbol}")
+            return trade
+            
+        except Exception as e:
+            logger.error(f"Error executing trade for {symbol}: {e}")
+            return None
             
     async def stop(self):
         """Stop the trading bot."""
-        self.is_running = False
-        if self.opportunity_scan_task:
-            self.opportunity_scan_task.cancel()
+        logger.info("Stopping trading bot...")
+        self._shutdown_event.set()
         await self.exchange_client.close()
         logger.info("Trading bot stopped")
         
-    async def _trading_loop(self):
-        """Main trading loop."""
-        try:
-            # Get top opportunities
-            opportunities = self.symbol_discovery.get_top_opportunities(self.max_open_trades)
-            
-            for opportunity in opportunities:
-                try:
-                    # Check if we already have a position for this symbol
-                    if self.risk_manager.has_position(opportunity.symbol):
-                        continue
-                    
-                    # Validate opportunity
-                    if not self._validate_opportunity(opportunity):
-                        continue
-                    
-                    # Process the opportunity
-                    await self._process_opportunity(opportunity)
-                    
-                except Exception as e:
-                    logger.error(f"Error processing opportunity for {opportunity.symbol}: {e}")
-                    continue
-                    
-        except Exception as e:
-            logger.error(f"Error in trading loop: {e}")
-            
-    def _validate_opportunity(self, opportunity: TradingOpportunity) -> bool:
-        """Validate a trading opportunity."""
-        try:
-            # Check minimum requirements
-            if opportunity.confidence < 0.7:
-                return False
-                
-            if opportunity.risk_reward < 2.0:
-                return False
-                
-            if opportunity.volume_24h < 1000000:  # Minimum 1M USDT volume
-                return False
-                
-            # Check risk limits
-            if not self.risk_manager.check_risk_limits(
-                opportunity.symbol,
-                opportunity.leverage,
-                opportunity.risk_reward
-            ):
-                return False
-                
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error validating opportunity: {e}")
-            return False
-            
-    async def _process_opportunity(self, opportunity: TradingOpportunity):
-        """Process a trading opportunity."""
-        try:
-            logger.info(f"Processing {opportunity.direction} opportunity for {opportunity.symbol}")
-            logger.info(f"Entry: {opportunity.entry_price:.2f}")
-            logger.info(f"Take Profit: {opportunity.take_profit:.2f}")
-            logger.info(f"Stop Loss: {opportunity.stop_loss:.2f}")
-            logger.info(f"Leverage: {opportunity.leverage:.1f}x")
-            logger.info(f"Confidence: {opportunity.confidence:.2f}")
-            logger.info(f"Score: {opportunity.score:.2f}")
-            
-            # Create signal
-            signal = {
-                'symbol': opportunity.symbol,
-                'timestamp': datetime.now().timestamp(),
-                'signal_type': opportunity.direction.lower(),
-                'confidence': opportunity.confidence,
-                'price': opportunity.entry_price,
-                'indicators': opportunity.indicators,
-                'strategy': 'opportunity_scanner'
-            }
-            
-            # Execute trade
-            await self._execute_trade(
-                opportunity.symbol,
-                signal,
-                self.risk_per_trade,
-                opportunity.leverage
-            )
-            
-        except Exception as e:
-            logger.error(f"Error processing opportunity: {e}")
-            
-    async def _execute_trade(
-        self,
-        symbol: str,
-        signal: Dict,
-        position_size: float,
-        leverage: float
-    ):
-        """Execute a trade and persist data."""
-        db = None
-        try:
-            db = self._get_db_session()
-            
-            # Save signal
-            db_signal = TradingSignal(
-                symbol=symbol,
-                timestamp=datetime.fromtimestamp(signal['timestamp']),
-                signal_type=signal['signal_type'],
-                confidence=signal.get('confidence', 0.5),
-                price=signal['price'],
-                indicators=signal.get('indicators', {}),
-                strategy=signal.get('strategy', 'default')
-            )
-            db.add(db_signal)
-            db.flush()
-            
-            # Create trade
-            trade = Trade(
-                symbol=symbol,
-                entry_time=datetime.fromtimestamp(signal['timestamp']),
-                entry_price=signal['price'],
-                position_size=position_size,
-                leverage=leverage,
-                status='OPEN',
-                signal_id=db_signal.id
-            )
-            db.add(trade)
-            
-            db.commit()
-            logger.info(f"Trade executed for {symbol}: {signal['signal_type']} at {signal['price']}")
-            
-        except Exception as e:
-            if db:
-                db.rollback()
-            logger.error(f"Error executing trade for {symbol}: {e}")
-            raise
-        finally:
-            if db:
-                db.close()
-            
+    def get_trade_history(self) -> List[Dict]:
+        """Get the trade history."""
+        return self.trade_history
+        
+    def get_active_trades(self) -> Dict[str, Dict]:
+        """Get currently active trades."""
+        return self.active_trades
+
     def get_performance_summary(self) -> Dict:
         """Get performance summary of the trading bot."""
         db = None
@@ -362,3 +320,64 @@ class TradingBot:
         finally:
             if db:
                 db.close()
+
+    def get_profile_performance(self):
+        """Get performance metrics for each strategy profile."""
+        performance = {}
+        for profile in self.strategy_config.get_profiles():
+            trades = [t for t in self.trade_history if t.get('profile') == profile]
+            if not trades:
+                continue
+
+            wins = len([t for t in trades if t.get('pnl', 0) > 0])
+            total_trades = len(trades)
+            win_rate = wins / total_trades if total_trades > 0 else 0
+
+            total_profit = sum(t.get('pnl', 0) for t in trades if t.get('pnl', 0) > 0)
+            total_loss = abs(sum(t.get('pnl', 0) for t in trades if t.get('pnl', 0) < 0))
+            profit_factor = total_profit / total_loss if total_loss > 0 else float('inf')
+
+            avg_duration = sum((t.get('exit_time', 0) - t.get('entry_time', 0)) 
+                             for t in trades) / total_trades if total_trades > 0 else 0
+
+            performance[profile] = {
+                'win_rate': win_rate,
+                'profit_factor': profit_factor,
+                'total_trades': total_trades,
+                'avg_duration': f"{avg_duration/3600:.1f}h",
+                'parameter_adjustments': len([h for h in self.parameter_history 
+                                           if h.get('profile') == profile and 
+                                           h.get('timestamp', 0) > time.time() - 86400])
+            }
+        return performance
+
+    def get_parameter_history(self):
+        """Get history of parameter adjustments."""
+        return sorted(self.parameter_history, 
+                     key=lambda x: x.get('timestamp', 0), 
+                     reverse=True)[:100]  # Last 100 adjustments
+
+    def get_volatility_impact(self):
+        """Get impact of market volatility on each profile."""
+        impact = {}
+        for profile in self.strategy_config.get_profiles():
+            current_volatility = self.market_data.get_current_volatility()
+            impact_factor = self.strategy_config.get_volatility_impact_factor(profile)
+            
+            impact[profile] = {
+                'current_volatility': current_volatility,
+                'impact_factor': impact_factor,
+                'parameter_adjustments': self.strategy_config.get_volatility_adjustments(profile)
+            }
+        return impact
+
+    def record_parameter_adjustment(self, profile, trigger, changes):
+        """Record a parameter adjustment in the history."""
+        self.parameter_history.append({
+            'timestamp': time.time(),
+            'profile': profile,
+            'trigger': trigger,
+            'changes': changes
+        })
+        # Keep only last 1000 adjustments
+        self.parameter_history = self.parameter_history[-1000:]

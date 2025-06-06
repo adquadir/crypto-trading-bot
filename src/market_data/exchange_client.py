@@ -258,9 +258,8 @@ class ExchangeClient:
             # Filter for perpetual futures only
             futures_symbols = [
                 symbol for symbol in exchange_info['symbols']
-                if symbol['status'] == 'TRADING' and 
-                symbol.get('contractType') == 'PERPETUAL' and
-                symbol.get('isSpotTradingAllowed', False) is False
+                if symbol['status'] == 'TRADING' and
+                symbol.get('contractType') == 'PERPETUAL'
             ]
             
             result = {
@@ -284,9 +283,8 @@ class ExchangeClient:
             # Filter for perpetual futures only
             futures_symbols = [
                 symbol for symbol in exchange_info['symbols']
-                if symbol['status'] == 'TRADING' and 
-                symbol.get('contractType') == 'PERPETUAL' and
-                symbol.get('isSpotTradingAllowed', False) is False
+                if symbol['status'] == 'TRADING' and
+                symbol.get('contractType') == 'PERPETUAL'
             ]
             
             result = {
