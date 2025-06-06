@@ -5,7 +5,8 @@ import pandas as pd
 from datetime import datetime
 from ta.trend import SMAIndicator, EMAIndicator
 from ta.momentum import RSIIndicator
-from ta.volatility import BollingerBands, ATR
+from ta.volatility import BollingerBands
+from ta.volatility.average_true_range import AverageTrueRange
 from ..strategy.dynamic_config import DynamicStrategyConfig
 from ..strategies.candle_cluster.detector import CandleClusterDetector
 
@@ -80,8 +81,8 @@ class SignalGenerator:
                             (low_52 := data['low'].rolling(window=52).min())) / 2
             
             # ATR
-            atr_indicator = ATR(data['high'], data['low'], data['close'], window=14)
-            atr_series = atr_indicator.atr()
+            atr_indicator = AverageTrueRange(data['high'], data['low'], data['close'], window=14)
+            atr_series = atr_indicator.average_true_range()
             atr_value = atr_series.iloc[-1]
             # Calculate ATR trend (slope over a short window)
             atr_trend_window = 5 # Lookback window for ATR trend
