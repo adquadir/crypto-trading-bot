@@ -696,6 +696,10 @@ class SymbolDiscovery:
                     logger.debug(f"Symbol {symbol} rejected by advanced filters even with fresh data.")
                     return None
 
+                # Calculate indicators from klines data
+                indicators = self._calculate_indicators(market_data.get('klines', []))
+                market_data['indicators'] = indicators
+
                 # Now, check cache for a recent signal
                 cached_signal = self._get_cached_signal(symbol)
 
@@ -704,7 +708,6 @@ class SymbolDiscovery:
                     signal = cached_signal
                 else:
                     # Generate signal using the fresh market_data and indicators
-                    indicators = market_data.get('indicators', {})
                     # The signal_generator is expected to return a confidence score based on its logic.
                     # We pass a placeholder/default if not available from market data, but the generator should override it.
                     initial_confidence = market_data.get('confidence', 0.5) # Use confidence from market data or default
@@ -746,11 +749,8 @@ class SymbolDiscovery:
                     reasoning = signal.get('reasoning', []) # Use reasoning from signal
 
                     # Use volume_24h and volatility from the fresh market_data (fetched earlier)
-                    volume_24h = market_data.get('volume_24h', 0.0)
-                    volatility = market_data.get('volatility', 0.0)
-                     # Recalculate volatility from fresh market data ohlcv if necessary (safety check)
-                    if volatility == 0.0 and 'ohlcv' in market_data and market_data['ohlcv']:
-                         volatility = self.calculate_volatility(market_data['ohlcv'])
+                    volume_24h = market_data.get('ticker', {}).get('volume', 0.0)
+                    volatility = self.calculate_volatility(market_data.get('klines', []))
 
                 except KeyError as e:
                      logger.error(f"Signal dictionary for {symbol} is missing expected key during extraction: {e}. Signal: {signal}")
