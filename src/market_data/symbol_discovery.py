@@ -184,15 +184,17 @@ class SymbolDiscovery:
             cache_key = f"market_data_{symbol}"
             cached_data = self.cache.get(cache_key)
             
-            # If we have cached data, check if it has the new structure
+            # If we have cached data, check if it has the new structure and is not expired
             if cached_data:
                 required_fields = ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']
-                if all(field in cached_data for field in required_fields):
+                is_valid = all(field in cached_data for field in required_fields)
+                is_fresh = (time.time() - cached_data.get('timestamp', 0)) < self.cache_ttl
+                
+                if is_valid and is_fresh:
                     logger.debug(f"Using cached market data for {symbol}")
                     return cached_data
                 else:
-                    # Cache has old structure, remove it
-                    logger.debug(f"Clearing outdated cache for {symbol}")
+                    logger.debug(f"Clearing outdated/invalid cache for {symbol}. Valid: {is_valid}, Fresh: {is_fresh}")
                     if cache_key in self.cache:
                         del self.cache[cache_key]
 
@@ -204,8 +206,26 @@ class SymbolDiscovery:
             orderbook = await self.exchange_client.get_orderbook(symbol, limit=10)
             open_interest = await self.exchange_client.get_open_interest(symbol)
 
+            # Validate fetched data components
+            if klines is None or not klines:
+                logger.warning(f"Missing or empty klines for {symbol}")
+                return None
+            if funding_rate is None:
+                logger.warning(f"Missing funding rate for {symbol}")
+                return None
+            if ticker is None:
+                logger.warning(f"Missing 24h ticker for {symbol}")
+                return None
+            if orderbook is None or not orderbook.get('bids') or not orderbook.get('asks'):
+                logger.warning(f"Missing or incomplete orderbook for {symbol}")
+                return None
+            if open_interest is None:
+                logger.warning(f"Missing open interest for {symbol}")
+                return None
+
             # Structure the data
             market_data = {
+                'symbol': symbol, # Add symbol to market data
                 'klines': klines,
                 'funding_rate': funding_rate,
                 'ticker_24h': ticker,
@@ -695,33 +715,27 @@ class SymbolDiscovery:
                     logger.debug(f"Using cached signal for {symbol}")
                     signal = cached_signal
                 else:
-                    # Generate signal using the fresh market_data and indicators
-                    # The signal_generator is expected to return a confidence score based on its logic.
-                    # We pass a placeholder/default if not available from market data, but the generator should override it.
-                    initial_confidence = market_data.get('confidence', 0.5) # Use confidence from market data or default
+                    # Calculate initial confidence score
+                    initial_confidence = self._calculate_confidence_score(market_data, {})
 
+                    # Generate signals using the signal generator
                     signal = self.signal_generator.generate_signals(
                         symbol,
-                        indicators,
-                        initial_confidence # Pass initial confidence
+                        market_data,
+                        initial_confidence
                     )
 
                     if not signal:
                         logger.debug(f"No signal generated for {symbol} with fresh data.")
                         return None
 
-                    # Validate the newly generated signal structure and basic values
+                    # Validate the signal
                     validation = self._validate_signal(signal)
                     if not validation.is_valid:
-                        for error in validation.errors:
-                             logger.error(f"Newly generated signal validation failed for {symbol}: {error}. Signal: {signal}")
+                        logger.warning(f"Invalid signal for {symbol}: {validation.errors}")
                         return None
 
-                    if validation.warnings:
-                        for warning in validation.warnings:
-                            logger.warning(f"Newly generated signal validation warning for {symbol}: {warning}")
-
-                    # Cache valid signal (will only cache if validation passed and required keys are present)
+                    # Cache the signal
                     self._cache_signal(symbol, signal)
 
                 # --- Extract and use the levels provided by the signal generator from the validated signal --- #
@@ -1171,27 +1185,13 @@ class SymbolDiscovery:
                 logger.warning(f"No market data available for {symbol}")
                 return None
                 
-            # Ensure market data has all required fields
-            if not all(key in market_data for key in ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']):
-                logger.warning(f"Incomplete market data for {symbol}")
-                return None
-                
-            # Structure market data for signal generation
-            structured_data = {
-                'klines': market_data['klines'],
-                'ticker_24h': market_data['ticker_24h'],
-                'orderbook': market_data['orderbook'],
-                'funding_rate': market_data['funding_rate'],
-                'open_interest': market_data['open_interest']
-            }
-            
             # Calculate initial confidence score
             initial_confidence = self._calculate_confidence_score(market_data, {})
             
             # Generate signals using the signal generator
             signal = self.signal_generator.generate_signals(
                 symbol,
-                structured_data,
+                market_data,
                 initial_confidence
             )
             

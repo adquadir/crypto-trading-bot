@@ -115,7 +115,12 @@ class SignalGenerator:
             if not market_data:
                 logger.warning(f"No market data available for {symbol}")
                 return {}
-                
+            
+            # --- TEMPORARY DEBUGGING PRINT STATEMENT ---
+            logger.info(f"DEBUG: generate_signals received market_data keys for {symbol}: {market_data.keys()}")
+            logger.info(f"DEBUG: generate_signals received full market_data for {symbol}: {market_data}")
+            # --- END TEMPORARY DEBUGGING PRINT STATEMENT ---
+
             # Validate required market data fields
             required_fields = ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']
             missing_fields = [field for field in required_fields if field not in market_data]
