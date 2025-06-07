@@ -208,10 +208,10 @@ class SignalGenerator:
                 reasons.append("CCI bearish")
                 
             # Determine signal type and direction based on final strength
-            if signal_strength >= 3:
+            if signal_strength >= 2:
                 signal_type = "BUY"
                 direction = "LONG"
-            elif signal_strength <= -3:
+            elif signal_strength <= -2:
                 signal_type = "SELL"
                 direction = "SHORT"
             else:
