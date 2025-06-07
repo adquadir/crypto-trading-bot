@@ -88,9 +88,16 @@ class SignalGenerator:
             bb_middle = float(bb.bollinger_mavg().iloc[-1]) if not pd.isna(bb.bollinger_mavg().iloc[-1]) else current_price
             bb_lower = float(bb.bollinger_lband().iloc[-1]) if not pd.isna(bb.bollinger_lband().iloc[-1]) else current_price
             
-            adx_value = float(adx.adx().iloc[-1]) if not pd.isna(adx.adx().iloc[-1]) else 0.0
-            adx_di_plus = float(adx.adx_pos().iloc[-1]) if not pd.isna(adx.adx_pos().iloc[-1]) else 0.0
-            adx_di_minus = float(adx.adx_neg().iloc[-1]) if not pd.isna(adx.adx_neg().iloc[-1]) else 0.0
+            # Handle ADX calculations with zero division protection
+            try:
+                adx_value = float(adx.adx().iloc[-1]) if not pd.isna(adx.adx().iloc[-1]) else 0.0
+                adx_di_plus = float(adx.adx_pos().iloc[-1]) if not pd.isna(adx.adx_pos().iloc[-1]) else 0.0
+                adx_di_minus = float(adx.adx_neg().iloc[-1]) if not pd.isna(adx.adx_neg().iloc[-1]) else 0.0
+            except (ZeroDivisionError, ValueError) as e:
+                logger.warning(f"ADX calculation error for {symbol}: {e}. Using default values.")
+                adx_value = 0.0
+                adx_di_plus = 0.0
+                adx_di_minus = 0.0
             
             atr_value = float(atr.average_true_range().iloc[-1]) if not pd.isna(atr.average_true_range().iloc[-1]) else 0.0
             cci_value = float(cci.cci().iloc[-1]) if not pd.isna(cci.cci().iloc[-1]) else 0.0
@@ -163,39 +170,39 @@ class SignalGenerator:
             
             # MACD Analysis
             if indicators['macd']['value'] > indicators['macd']['signal']:
-                signal_strength += 1
+                signal_strength += 0.5
                 reasons.append("MACD above signal line")
             else:
-                signal_strength -= 1
+                signal_strength -= 0.5
                 reasons.append("MACD below signal line")
                 
             # RSI Analysis
             rsi = indicators['rsi']
-            if rsi < 30:
-                signal_strength += 2
+            if rsi < 35:
+                signal_strength += 1.0
                 reasons.append("RSI oversold")
-            elif rsi > 70:
-                signal_strength -= 2
+            elif rsi > 65:
+                signal_strength -= 1.0
                 reasons.append("RSI overbought")
                 
             # Bollinger Bands Analysis
             current_price = indicators['current_price']
             bb = indicators['bollinger_bands']
             if current_price < bb['lower']:
-                signal_strength += 2
+                signal_strength += 1.0
                 reasons.append("Price below lower Bollinger Band")
             elif current_price > bb['upper']:
-                signal_strength -= 2
+                signal_strength -= 1.0
                 reasons.append("Price above upper Bollinger Band")
                 
             # ADX Analysis
             adx = indicators['adx']
-            if adx['value'] > 25:  # Strong trend
+            if adx['value'] > 20:
                 if adx['di_plus'] > adx['di_minus']:
-                    signal_strength += 1
+                    signal_strength += 0.5
                     reasons.append("Strong uptrend (ADX)")
                 else:
-                    signal_strength -= 1
+                    signal_strength -= 0.5
                     reasons.append("Strong downtrend (ADX)")
                     
             # CCI Analysis
