@@ -189,7 +189,7 @@ class SymbolDiscovery:
             # Fetch data in parallel
             logger.debug(f"Fetching market data for {symbol}")
             tasks = [
-                self.exchange_client.get_historical_klines(symbol, '1m', limit=100),  # Fixed method name
+                self.exchange_client.get_historical_data(symbol, '1m', limit=100),  # Fixed method name
                 self.exchange_client.get_funding_rate(symbol),
                 self.exchange_client.get_ticker_24h(symbol),
                 self.exchange_client.get_orderbook(symbol, limit=10),
