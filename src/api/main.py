@@ -46,7 +46,7 @@ def get_db():
         db.close()
 
 # Get allowed CORS origins from environment variable or use a default
-origins_raw = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')
+origins_raw = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000,http://50.31.0.105:3000')
 CORS_ORIGINS = [origin.strip() for origin in origins_raw.split(',') if origin.strip()]
 
 app.add_middleware(
