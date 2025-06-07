@@ -76,6 +76,23 @@ class SymbolDiscovery:
         self.min_open_interest = float(os.getenv('MIN_OPEN_INTEREST', '100000'))
         self.max_symbols = int(os.getenv('MAX_SYMBOLS', '50'))
         
+        # Log the actual values being used
+        logger.info("SymbolDiscovery filter parameters:")
+        logger.info(f"min_volume_24h: {self.min_volume_24h}")
+        logger.info(f"min_confidence: {self.min_confidence}")
+        logger.info(f"min_risk_reward: {self.min_risk_reward}")
+        logger.info(f"max_leverage: {self.max_leverage}")
+        logger.info(f"min_market_cap: {self.min_market_cap}")
+        logger.info(f"max_spread: {self.max_spread}")
+        logger.info(f"min_liquidity: {self.min_liquidity}")
+        logger.info(f"max_correlation: {self.max_correlation}")
+        logger.info(f"min_volatility: {self.min_volatility}")
+        logger.info(f"max_volatility: {self.max_volatility}")
+        logger.info(f"min_funding_rate: {self.min_funding_rate}")
+        logger.info(f"max_funding_rate: {self.max_funding_rate}")
+        logger.info(f"min_open_interest: {self.min_open_interest}")
+        logger.info(f"max_symbols: {self.max_symbols}")
+        
         # Cache configuration
         self.cache_dir = Path('cache/signals')
         self.cache_dir.mkdir(parents=True, exist_ok=True)
