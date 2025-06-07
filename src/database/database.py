@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -23,9 +23,39 @@ engine = create_engine(
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+def update_db_schema():
+    """Update database schema to match models while preserving data."""
+    inspector = inspect(engine)
+    
+    # Get existing tables
+    existing_tables = inspector.get_table_names()
+    
+    # Create any missing tables
+    Base.metadata.create_all(bind=engine)
+    
+    # Check for missing columns in trading_signals
+    if 'trading_signals' in existing_tables:
+        existing_columns = [col['name'] for col in inspector.get_columns('trading_signals')]
+        missing_columns = []
+        
+        # Check for missing columns
+        if 'action' not in existing_columns:
+            missing_columns.append('action')
+        
+        # Add missing columns if any
+        if missing_columns:
+            with engine.connect() as conn:
+                for column in missing_columns:
+                    try:
+                        conn.execute(f"ALTER TABLE trading_signals ADD COLUMN {column} VARCHAR")
+                        print(f"Added missing column: {column}")
+                    except Exception as e:
+                        print(f"Error adding column {column}: {e}")
+                conn.commit()
+
 # Function to create database tables
 def create_db_tables():
-    Base.metadata.create_all(bind=engine)
+    update_db_schema()  # Use the new update function instead of create_all
 
 # Function to add initial strategies if none exist
 def add_initial_strategies():
