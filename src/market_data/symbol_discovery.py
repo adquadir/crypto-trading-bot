@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import pandas as pd
 from typing import Tuple
-from cachetools import TTLCache
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,8 @@ class SymbolDiscovery:
         self._update_task = None
         self._processing_lock = asyncio.Lock()  # Add lock for concurrent processing
         self._discovery_lock = asyncio.Lock()
-        self.cache = TTLCache(maxsize=100, ttl=300)  # Cache with 5-minute TTL
+        self.cache = {}  # Simple dictionary for caching
+        self.cache_ttl = 300  # 5 minutes TTL
         logger.info("SymbolDiscovery initialized with caching")
         
         # Load configuration from environment
@@ -183,13 +184,17 @@ class SymbolDiscovery:
             cache_key = f"market_data_{symbol}"
             cached_data = self.cache.get(cache_key)
             if cached_data:
-                logger.debug(f"Using cached market data for {symbol}")
-                return cached_data
+                timestamp = cached_data.get('timestamp', 0)
+                if time.time() - timestamp < self.cache_ttl:
+                    logger.debug(f"Using cached market data for {symbol}")
+                    return cached_data
+                else:
+                    del self.cache[cache_key]  # Remove expired cache entry
 
             # Fetch data in parallel
             logger.debug(f"Fetching market data for {symbol}")
             tasks = [
-                self.exchange_client.get_historical_data(symbol, '1m', limit=100),  # Fixed method name
+                self.exchange_client.get_historical_data(symbol, '1m', limit=100),
                 self.exchange_client.get_funding_rate(symbol),
                 self.exchange_client.get_ticker_24h(symbol),
                 self.exchange_client.get_orderbook(symbol, limit=10),
@@ -207,7 +212,7 @@ class SymbolDiscovery:
                 return None
                 
             # Process klines
-            if not klines or len(klines) < 100:  # Reduced from 200 to 100
+            if not klines or len(klines) < 100:
                 logger.warning(f"Insufficient kline data for {symbol}")
                 return None
                 
@@ -219,11 +224,11 @@ class SymbolDiscovery:
                 'ticker': ticker,
                 'orderbook': orderbook,
                 'open_interest': open_interest,
-                'timestamp': datetime.now().timestamp()
+                'timestamp': time.time()
             }
             
-            # Cache the data for 5 minutes
-            self.cache.set(cache_key, market_data, ttl=300)
+            # Cache the data
+            self.cache[cache_key] = market_data
             
             return market_data
             
