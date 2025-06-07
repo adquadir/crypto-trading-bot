@@ -413,15 +413,15 @@ class SymbolDiscovery:
             # Volatility indicators
             if 'bb' in indicators:
                 bb = indicators['bb']
-                # Ensure bb['middle'] is not zero before division
-                if bb.get('middle', 0) != 0:
+                # Ensure bb['middle'] is not zero or extremely close to zero before division
+                if abs(bb.get('middle', 0)) > 1e-9: # Use a small epsilon to check for near-zero
                     bb_width = (bb['upper'] - bb['lower']) / bb['middle']
                     if bb_width < 0.02:  # Tight bands
                         score += weights['volatility'] * 1.0
                     elif bb_width < 0.05:  # Moderate bands
                         score += weights['volatility'] * 0.5
                 else:
-                    logger.warning(f"Bollinger Band middle is zero for {market_data.get('symbol', 'UNKNOWN')}, skipping BB width calculation for technical score.")
+                    logger.warning(f"Bollinger Band middle is zero or near-zero, skipping BB width calculation for technical score.")
                     
             if 'atr' in indicators:
                 atr = indicators['atr']
