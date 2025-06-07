@@ -1009,6 +1009,7 @@ class SymbolDiscovery:
                     'signal': float(signal_line[-1]),
                     'histogram': float(macd_histogram[-1])
                 },
+                'macd_signal': float(signal_line[-1]),  # Add this for signal generator
                 'rsi': float(rsi[-1]),
                 'bollinger_bands': {
                     'upper': float(bb_upper[-1]),
@@ -1024,16 +1025,16 @@ class SymbolDiscovery:
                     'value': float(obv[-1]),
                     'trend': 'up' if obv[-1] > obv[-2] else 'down'
                 },
-                'vwap': {
-                    'value': float(vwap[-1]),
-                    'price': float(closes[-1])
+                'vwap': float(vwap[-1]),
+                'adx': {
+                    'value': float(adx[-1]),
+                    'di_plus': float(di_plus[-1]),
+                    'di_minus': float(di_minus[-1])
                 },
-                'adx': float(adx[-1]),
-                'di_plus': float(di_plus[-1]),
-                'di_minus': float(di_minus[-1]),
                 'cci': float(cci[-1]),
-                'volatility': float(np.std(closes[-20:]) / np.mean(closes[-20:]))
+                'current_price': float(closes[-1])
             }
+            
         except Exception as e:
             logger.error(f"Error calculating indicators: {e}")
             return {}
