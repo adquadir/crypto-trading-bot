@@ -78,30 +78,47 @@ class SignalGenerator:
             # Get current price
             current_price = float(df['close'].iloc[-1])
             
+            # Handle potential NaN values from ta calculations
+            macd_value = float(macd.macd().iloc[-1]) if not pd.isna(macd.macd().iloc[-1]) else 0.0
+            macd_signal = float(macd.macd_signal().iloc[-1]) if not pd.isna(macd.macd_signal().iloc[-1]) else 0.0
+            macd_histogram = float(macd.macd_diff().iloc[-1]) if not pd.isna(macd.macd_diff().iloc[-1]) else 0.0
+            rsi_value = float(rsi.rsi().iloc[-1]) if not pd.isna(rsi.rsi().iloc[-1]) else 50.0 # RSI default to 50
+            
+            bb_upper = float(bb.bollinger_hband().iloc[-1]) if not pd.isna(bb.bollinger_hband().iloc[-1]) else current_price
+            bb_middle = float(bb.bollinger_mavg().iloc[-1]) if not pd.isna(bb.bollinger_mavg().iloc[-1]) else current_price
+            bb_lower = float(bb.bollinger_lband().iloc[-1]) if not pd.isna(bb.bollinger_lband().iloc[-1]) else current_price
+            
+            adx_value = float(adx.adx().iloc[-1]) if not pd.isna(adx.adx().iloc[-1]) else 0.0
+            adx_di_plus = float(adx.adx_pos().iloc[-1]) if not pd.isna(adx.adx_pos().iloc[-1]) else 0.0
+            adx_di_minus = float(adx.adx_neg().iloc[-1]) if not pd.isna(adx.adx_neg().iloc[-1]) else 0.0
+            
+            atr_value = float(atr.average_true_range().iloc[-1]) if not pd.isna(atr.average_true_range().iloc[-1]) else 0.0
+            cci_value = float(cci.cci().iloc[-1]) if not pd.isna(cci.cci().iloc[-1]) else 0.0
+
             return {
                 'macd': {
-                    'value': float(macd.macd().iloc[-1]),
-                    'signal': float(macd.macd_signal().iloc[-1]),
-                    'histogram': float(macd.macd_diff().iloc[-1])
+                    'value': macd_value,
+                    'signal': macd_signal,
+                    'histogram': macd_histogram
                 },
-                'macd_signal': float(macd.macd_signal().iloc[-1]),
-                'rsi': float(rsi.rsi().iloc[-1]),
+                'macd_signal': macd_signal,
+                'rsi': rsi_value,
                 'bollinger_bands': {
-                    'upper': float(bb.bollinger_hband().iloc[-1]),
-                    'middle': float(bb.bollinger_mavg().iloc[-1]),
-                    'lower': float(bb.bollinger_lband().iloc[-1])
+                    'upper': bb_upper,
+                    'middle': bb_middle,
+                    'lower': bb_lower
                 },
-                'bb_upper': float(bb.bollinger_hband().iloc[-1]),
-                'bb_lower': float(bb.bollinger_lband().iloc[-1]),
+                'bb_upper': bb_upper,
+                'bb_lower': bb_lower,
                 'adx': {
-                    'value': float(adx.adx().iloc[-1]),
-                    'di_plus': float(adx.adx_pos().iloc[-1]),
-                    'di_minus': float(adx.adx_neg().iloc[-1])
+                    'value': adx_value,
+                    'di_plus': adx_di_plus,
+                    'di_minus': adx_di_minus
                 },
-                'plus_di': float(adx.adx_pos().iloc[-1]),
-                'minus_di': float(adx.adx_neg().iloc[-1]),
-                'atr': float(atr.average_true_range().iloc[-1]),
-                'cci': float(cci.cci().iloc[-1]),
+                'plus_di': adx_di_plus,
+                'minus_di': adx_di_minus,
+                'atr': atr_value,
+                'cci': cci_value,
                 'current_price': current_price
             }
             
@@ -116,11 +133,6 @@ class SignalGenerator:
                 logger.warning(f"No market data available for {symbol}")
                 return {}
             
-            # --- TEMPORARY DEBUGGING PRINT STATEMENT ---
-            logger.info(f"DEBUG: generate_signals received market_data keys for {symbol}: {market_data.keys()}")
-            logger.info(f"DEBUG: generate_signals received full market_data for {symbol}: {market_data}")
-            # --- END TEMPORARY DEBUGGING PRINT STATEMENT ---
-
             # Validate required market data fields
             required_fields = ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']
             missing_fields = [field for field in required_fields if field not in market_data]
@@ -205,10 +217,18 @@ class SignalGenerator:
             else:
                 signal_type = "NEUTRAL"
                 direction = "NEUTRAL"
+                logger.debug(f"Generated NEUTRAL signal for {symbol} with strength {signal_strength}. Returning None.")
+                return None # Return None for neutral signals
                 
             # Calculate entry, take profit, and stop loss levels
             atr = indicators.get('atr', 0)
-            if atr > 0 and direction != "NEUTRAL":
+            # Ensure ATR is a valid number
+            if pd.isna(atr) or atr <= 0:
+                logger.warning(f"Invalid or zero ATR for {symbol}. Setting default trading levels.")
+                entry = current_price
+                take_profit = current_price * (1.0 + 0.005) if direction == "LONG" else current_price * (1.0 - 0.005)
+                stop_loss = current_price * (1.0 - 0.002) if direction == "LONG" else current_price * (1.0 + 0.002)
+            else:
                 if direction == "LONG":
                     entry = current_price
                     take_profit = entry + (atr * 2)  # 2 ATR for take profit
@@ -217,10 +237,6 @@ class SignalGenerator:
                     entry = current_price
                     take_profit = entry - (atr * 2)  # 2 ATR for take profit
                     stop_loss = entry + (atr * 1)    # 1 ATR for stop loss
-            else:
-                entry = current_price
-                take_profit = current_price
-                stop_loss = current_price
                 
             logger.debug(f"Generated signal for {symbol}: {signal_type} ({direction}) with strength {signal_strength}")
             
@@ -240,7 +256,7 @@ class SignalGenerator:
                     'macd': indicators['macd'],
                     'rsi': rsi,
                     'bollinger_bands': bb,
-                    'adx': adx,
+                    'adx': indicators['adx'], # Use the full adx dictionary
                     'cci': cci,
                     'atr': atr
                 }
