@@ -1183,13 +1183,22 @@ class SymbolDiscovery:
                 logger.warning(f"No market data available for {symbol}")
                 return None
                 
+            # Structure market data for signal generation
+            structured_data = {
+                'klines': market_data['klines'],
+                'ticker_24h': market_data['ticker'],
+                'orderbook': market_data['orderbook'],
+                'funding_rate': market_data['funding_rate'],
+                'open_interest': market_data['open_interest']
+            }
+            
             # Calculate initial confidence score
             initial_confidence = self._calculate_confidence_score(market_data, {})
             
             # Generate signals using the signal generator
             signal = self.signal_generator.generate_signals(
                 symbol,
-                market_data,
+                structured_data,
                 initial_confidence
             )
             

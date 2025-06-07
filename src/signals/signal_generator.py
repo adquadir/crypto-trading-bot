@@ -116,6 +116,13 @@ class SignalGenerator:
                 logger.warning(f"No market data available for {symbol}")
                 return {}
                 
+            # Convert klines to DataFrame for indicator calculation
+            df = pd.DataFrame(market_data['klines'])
+            df['close'] = pd.to_numeric(df['close'])
+            df['high'] = pd.to_numeric(df['high'])
+            df['low'] = pd.to_numeric(df['low'])
+            df['volume'] = pd.to_numeric(df['volume'])
+            
             # Calculate indicators
             indicators = self.calculate_indicators(market_data, {})
             if not indicators:
