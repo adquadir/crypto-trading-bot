@@ -109,127 +109,90 @@ class SignalGenerator:
             logger.error(f"Error calculating indicators: {e}")
             return {}
             
-    def generate_signals(self, symbol: str, indicators: Dict, confidence_score: float) -> Dict:
-        """Generate trading signals with dynamic parameters."""
+    def generate_signals(self, symbol: str, indicators: Dict, initial_confidence: float = 0.0) -> Dict:
+        """Generate trading signals based on technical indicators."""
         try:
-            # Get symbol-specific parameters based on confidence score
-            params = self.strategy_config.get_symbol_specific_params(symbol, confidence_score)
-            if not params:
-                logger.warning(f"No parameters found for {symbol}")
+            if not indicators:
+                logger.warning(f"No indicators available for {symbol}")
                 return {}
                 
-            # Validate required indicators
-            required_indicators = ['macd', 'macd_signal', 'rsi', 'current_price', 'bb_upper', 'bb_lower', 'adx', 'plus_di', 'minus_di', 'cci']
-            missing_indicators = [ind for ind in required_indicators if ind not in indicators]
-            if missing_indicators:
-                logger.warning(f"Missing required indicators for {symbol}: {missing_indicators}")
-                return {}
-                
-            # Calculate signal strength
-            signal_strength = 0
+            signal_strength = initial_confidence
             signal_type = None
+            reasons = []
             
-            # MACD Signal
-            if indicators['macd']['value'] > indicators['macd_signal']:
+            # MACD Analysis
+            if indicators['macd']['value'] > indicators['macd']['signal']:
                 signal_strength += 1
+                reasons.append("MACD above signal line")
             else:
                 signal_strength -= 1
+                reasons.append("MACD below signal line")
                 
-            # RSI Signal
-            if indicators['rsi'] < params['rsi_oversold']:
+            # RSI Analysis
+            rsi = indicators['rsi']
+            if rsi < 30:
                 signal_strength += 2
-            elif indicators['rsi'] > params['rsi_overbought']:
+                reasons.append("RSI oversold")
+            elif rsi > 70:
                 signal_strength -= 2
+                reasons.append("RSI overbought")
                 
-            # Bollinger Bands Signal
-            if indicators['current_price'] < indicators['bb_lower']:
-                signal_strength += 1
-            elif indicators['current_price'] > indicators['bb_upper']:
-                signal_strength -= 1
+            # Bollinger Bands Analysis
+            current_price = indicators['current_price']
+            bb = indicators['bollinger_bands']
+            if current_price < bb['lower']:
+                signal_strength += 2
+                reasons.append("Price below lower Bollinger Band")
+            elif current_price > bb['upper']:
+                signal_strength -= 2
+                reasons.append("Price above upper Bollinger Band")
                 
-            # ADX Signal
-            if indicators['adx']['value'] > 25:  # Strong trend
-                if indicators['adx']['di_plus'] > indicators['adx']['di_minus']:
+            # ADX Analysis
+            adx = indicators['adx']
+            if adx['value'] > 25:  # Strong trend
+                if adx['di_plus'] > adx['di_minus']:
                     signal_strength += 1
+                    reasons.append("Strong uptrend (ADX)")
                 else:
                     signal_strength -= 1
+                    reasons.append("Strong downtrend (ADX)")
                     
-            # CCI Signal
-            if indicators['cci'] > 100:
-                signal_strength -= 1
-            elif indicators['cci'] < -100:
+            # CCI Analysis
+            cci = indicators['cci']
+            if cci > 100:
                 signal_strength += 1
-                
-            # Ichimoku Signal
-            if (indicators['current_price'] > indicators['senkou_span_a'] and 
-                indicators['current_price'] > indicators['senkou_span_b']):
-                signal_strength += 1
-            elif (indicators['current_price'] < indicators['senkou_span_a'] and 
-                  indicators['current_price'] < indicators['senkou_span_b']):
+                reasons.append("CCI bullish")
+            elif cci < -100:
                 signal_strength -= 1
+                reasons.append("CCI bearish")
                 
-            # Check for hovering opportunity (new strategy)
-            hovering_opportunity = self.candle_detector.detect(symbol, indicators, params)
-            if hovering_opportunity:
-                # Override with the new signal type and structure if found
-                return {
-                    "symbol": symbol,
-                    "price": indicators['current_price'],
-                    "direction": "LONG" if hovering_opportunity['signal_type'] == 'SAFE_BUY' else "SHORT",
-                    "confidence": hovering_opportunity['confidence_score'],
-                    "entry": hovering_opportunity['entry'],
-                    "take_profit": hovering_opportunity['take_profit'],
-                    "stop_loss": hovering_opportunity['stop_loss'],
-                    "signal_type": hovering_opportunity['signal_type'],
-                    "indicators": indicators,
-                    "reasoning": hovering_opportunity.get('reasoning', [])
-                }
-
-            # For standard signals, determine direction from strength and include required fields
-            direction = "LONG" if signal_strength > 0 else ("SHORT" if signal_strength < 0 else "NEUTRAL")
-
-            # Determine signal_type based on signal_strength for standard signals
-            if signal_strength > 3:  # Example threshold for STRONG signals
-                signal_type = "STRONG_BUY" if direction == "LONG" else "STRONG_SELL"
-            elif signal_strength > 0:
-                signal_type = "BUY" if direction == "LONG" else "SELL"
+            # Determine signal type based on final strength
+            if signal_strength >= 3:
+                signal_type = "BUY"
+            elif signal_strength <= -3:
+                signal_type = "SELL"
             else:
                 signal_type = "NEUTRAL"
-
-            # Only generate a signal if there's a clear direction
-            if direction == "NEUTRAL":
-                logger.debug(f"Generated NEUTRAL signal for {symbol}.")
-                return {}
-
-            # For standard signals, calculate entry/TP/SL based on price and volatility
-            entry_price = indicators['current_price']
-            atr = indicators.get('atr', 0)
-            
-            # Calculate take profit and stop loss based on ATR
-            if direction == "LONG":
-                take_profit = entry_price + (atr * 2)  # 2 ATR for take profit
-                stop_loss = entry_price - (atr * 1)    # 1 ATR for stop loss
-            else:  # SHORT
-                take_profit = entry_price - (atr * 2)  # 2 ATR for take profit
-                stop_loss = entry_price + (atr * 1)    # 1 ATR for stop loss
-
+                
             return {
                 'symbol': symbol,
-                'direction': direction,
-                'price': indicators['current_price'],
-                'confidence': confidence_score,
-                'entry': entry_price,
-                'take_profit': take_profit,
-                'stop_loss': stop_loss,
                 'signal_type': signal_type,
-                'signal_strength': abs(signal_strength),
+                'strength': signal_strength,
+                'confidence': abs(signal_strength) / 5.0,  # Normalize to 0-1 range
+                'reasons': reasons,
                 'timestamp': datetime.now().isoformat(),
-                'indicators': indicators,
-                'parameters': params
+                'price': current_price,
+                'indicators': {
+                    'macd': indicators['macd'],
+                    'rsi': rsi,
+                    'bollinger_bands': bb,
+                    'adx': adx,
+                    'cci': cci
+                }
             }
             
         except Exception as e:
-            logger.error(f"Error generating signals for {symbol}: {e}")
+            logger.error(f"Error generating signals for {symbol}: {str(e)}")
             return {}
             
     def update_volatility(self, symbol: str, volatility: float):
