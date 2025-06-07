@@ -307,21 +307,56 @@ async def get_market_data(symbol: str):
 # REST endpoints
 @app.get("/api/trading/signals")
 async def get_signals():
-    return {
-        "signals": [
-            {
-                "timestamp": datetime.now().isoformat(),
-                "symbol": "BTCUSDT",
-                "signal": "BUY",
-                "confidence": 0.85,
-                "indicators": {
-                    "macd": {"value": 0.5, "signal": 0.3},
-                    "rsi": 65,
-                    "bb": {"upper": 50000, "middle": 48000, "lower": 46000}
+    """Get real-time trading signals."""
+    try:
+        # In a real implementation, this would come from the trading bot's signal generator
+        # For now, return mock data with the expected structure
+        return {
+            "signals": [
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "symbol": "BTCUSDT",
+                    "signal": "BUY", # This could be 'LONG', 'SHORT', 'NEUTRAL'
+                    "action": "OPEN_LONG", # Specific action like 'OPEN_LONG', 'CLOSE_LONG', 'OPEN_SHORT', 'CLOSE_SHORT'
+                    "confidence": 0.85,
+                    "strategy": "MACD Crossover",
+                    "price": 65000.00,
+                    "indicators": {
+                        "macd": {"value": 0.5, "signal": 0.3},
+                        "rsi": 65,
+                        "bb": {"upper": 50000, "middle": 48000, "lower": 46000}
+                    }
+                },
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "symbol": "ETHUSDT",
+                    "signal": "SELL",
+                    "action": "OPEN_SHORT",
+                    "confidence": 0.78,
+                    "strategy": "RSI Divergence",
+                    "price": 3200.50,
+                    "indicators": {
+                        "rsi": 72,
+                        "stochastic": {"k": 85, "d": 80}
+                    }
+                },
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "symbol": "ADAUSDT",
+                    "signal": "NEUTRAL",
+                    "action": "HOLD",
+                    "confidence": 0.55,
+                    "strategy": "Ichimoku Cloud",
+                    "price": 0.45,
+                    "indicators": {
+                        "ichimoku": {"tenkan": 0.44, "kijun": 0.46, "senkou_span_a": 0.45, "senkou_span_b": 0.47}
+                    }
                 }
-            }
-        ]
-    }
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error getting signals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/trading/pnl")
 async def get_pnl():
@@ -418,37 +453,341 @@ async def get_positions():
 
 @app.get("/api/trading/strategies")
 async def get_strategies():
-    return {
-        "strategies": [
-            {
-                "name": "MACD Crossover",
-                "active": True,
-                "performance": {
-                    "win_rate": 0.65,
-                    "profit_factor": 1.89,
-                    "sharpe_ratio": 1.5
+    """Get list of trading strategies with their parameters and performance."""
+    try:
+        # In a real implementation, this would come from a database
+        # For now, return mock data with the expected structure
+        return {
+            "strategies": [
+                {
+                    "name": "MACD Crossover",
+                    "active": True,
+                    "performance": {
+                        "win_rate": 0.65,
+                        "profit_factor": 1.89,
+                        "sharpe_ratio": 1.5
+                    },
+                    "parameters": {
+                        "macd_fast_period": 12,
+                        "macd_slow_period": 26,
+                        "macd_signal_period": 9,
+                        "rsi_period": 14,
+                        "rsi_overbought": 70,
+                        "rsi_oversold": 30,
+                        "max_position_size": 0.1,
+                        "max_leverage": 3,
+                        "risk_per_trade": 0.02,
+                        "confidence_threshold": 0.7,
+                        "volatility_factor": 0.5
+                    }
+                },
+                {
+                    "name": "RSI Strategy",
+                    "active": True,
+                    "performance": {
+                        "win_rate": 0.58,
+                        "profit_factor": 1.45,
+                        "sharpe_ratio": 1.2
+                    },
+                    "parameters": {
+                        "rsi_period": 14,
+                        "rsi_overbought": 70,
+                        "rsi_oversold": 30,
+                        "max_position_size": 0.1,
+                        "max_leverage": 2,
+                        "risk_per_trade": 0.02,
+                        "confidence_threshold": 0.7,
+                        "volatility_factor": 0.4
+                    }
                 }
-            }
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error getting strategies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/trading/strategies/{strategy_name}")
+async def update_strategy(strategy_name: str, strategy: dict):
+    """Update a trading strategy's parameters."""
+    try:
+        # Validate required fields
+        required_fields = ["name", "active", "performance", "parameters"]
+        for field in required_fields:
+            if field not in strategy:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Missing required field: {field}"
+                )
+        
+        # Validate parameters
+        required_params = [
+            "macd_fast_period", "macd_slow_period", "macd_signal_period",
+            "rsi_period", "rsi_overbought", "rsi_oversold",
+            "max_position_size", "max_leverage", "risk_per_trade",
+            "confidence_threshold", "volatility_factor"
         ]
-    }
+        
+        for param in required_params:
+            if param not in strategy["parameters"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Missing required parameter: {param}"
+                )
+        
+        # Validate numeric ranges
+        param_ranges = {
+            "macd_fast_period": (5, 20),
+            "macd_slow_period": (15, 40),
+            "macd_signal_period": (5, 15),
+            "rsi_period": (5, 30),
+            "rsi_overbought": (60, 90),
+            "rsi_oversold": (10, 40),
+            "max_position_size": (0.01, 0.5),
+            "max_leverage": (1, 20),
+            "risk_per_trade": (0.01, 0.05),
+            "confidence_threshold": (0.5, 0.9),
+            "volatility_factor": (0.1, 1.0)
+        }
+        
+        for param, (min_val, max_val) in param_ranges.items():
+            value = strategy["parameters"].get(param)
+            if not isinstance(value, (int, float)) or value < min_val or value > max_val:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid value for {param}: must be between {min_val} and {max_val}"
+                )
+        
+        # In a real implementation, this would update a database
+        # For now, just return success
+        return {
+            "success": True,
+            "message": f"Strategy {strategy_name} updated successfully",
+            "strategy": strategy
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating strategy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/trading/strategies/{strategy_name}/toggle")
+async def toggle_strategy(strategy_name: str, active: bool):
+    """Toggle a strategy's active state."""
+    try:
+        # In a real implementation, this would update a database
+        # For now, just return success
+        return {
+            "success": True,
+            "message": f"Strategy {strategy_name} {'activated' if active else 'deactivated'} successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error toggling strategy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/trading/settings")
 async def get_settings():
-    return {
-        "maxPositionSize": 0.1,
-        "maxLeverage": 3.0,
-        "riskPerTrade": 0.02,
-        "maxOpenTrades": 5,
-        "maxCorrelation": 0.7,
-        "minRiskReward": 2.0,
-        "maxDailyLoss": 0.05,
-        "maxDrawdown": 0.15
-    }
+    """Get current trading settings."""
+    try:
+        # Load settings from environment variables and config
+        settings = {
+            "maxPositionSize": float(os.getenv('MAX_POSITION_SIZE', '0.1')),
+            "maxLeverage": float(os.getenv('MAX_LEVERAGE', '3.0')),
+            "riskPerTrade": float(os.getenv('RISK_PER_TRADE', '0.02')),
+            "maxOpenTrades": int(os.getenv('MAX_OPEN_TRADES', '5')),
+            "maxCorrelation": float(os.getenv('MAX_CORRELATION', '0.7')),
+            "minRiskReward": float(os.getenv('MIN_RISK_REWARD', '2.0')),
+            "maxDailyLoss": float(os.getenv('MAX_DAILY_LOSS', '0.05')),
+            "maxDrawdown": float(os.getenv('MAX_DRAWDOWN', '0.15')),
+            "tradingEnabled": os.getenv('TRADING_ENABLED', 'true').lower() == 'true',
+            "autoRebalance": os.getenv('AUTO_REBALANCE', 'false').lower() == 'true',
+            "stopLossEnabled": os.getenv('STOP_LOSS_ENABLED', 'true').lower() == 'true',
+            "takeProfitEnabled": os.getenv('TAKE_PROFIT_ENABLED', 'true').lower() == 'true',
+            "volatilityAdaptation": {
+                "enabled": os.getenv('VOLATILITY_ADAPTATION_ENABLED', 'true').lower() == 'true',
+                "sensitivity": float(os.getenv('VOLATILITY_SENSITIVITY', '0.5')),
+                "maxAdjustment": float(os.getenv('VOLATILITY_MAX_ADJUSTMENT', '0.3'))
+            },
+            "performanceAdaptation": {
+                "enabled": os.getenv('PERFORMANCE_ADAPTATION_ENABLED', 'true').lower() == 'true',
+                "winRateThreshold": float(os.getenv('WIN_RATE_THRESHOLD', '0.6')),
+                "adjustmentFactor": float(os.getenv('ADJUSTMENT_FACTOR', '0.1'))
+            },
+            "confidenceThresholds": {
+                "high": float(os.getenv('CONFIDENCE_HIGH', '0.8')),
+                "medium": float(os.getenv('CONFIDENCE_MEDIUM', '0.6')),
+                "low": float(os.getenv('CONFIDENCE_LOW', '0.4'))
+            }
+        }
+        return {"settings": settings}
+    except Exception as e:
+        logger.error(f"Error getting settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/trading/settings")
+@app.put("/api/trading/settings")
 async def update_settings(settings: dict):
-    # In a real implementation, you would save these settings
-    return {"status": "success", "message": "Settings updated"}
+    """Update trading settings."""
+    try:
+        # Validate required fields
+        required_fields = [
+            "maxPositionSize", "maxLeverage", "riskPerTrade", "maxOpenTrades",
+            "maxCorrelation", "minRiskReward", "maxDailyLoss", "maxDrawdown",
+            "tradingEnabled", "autoRebalance", "stopLossEnabled", "takeProfitEnabled",
+            "volatilityAdaptation", "performanceAdaptation", "confidenceThresholds"
+        ]
+        
+        for field in required_fields:
+            if field not in settings:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Missing required field: {field}"
+                )
+        
+        # Validate nested objects
+        if not isinstance(settings.get("volatilityAdaptation"), dict):
+            raise HTTPException(
+                status_code=400,
+                detail="volatilityAdaptation must be an object"
+            )
+            
+        if not isinstance(settings.get("performanceAdaptation"), dict):
+            raise HTTPException(
+                status_code=400,
+                detail="performanceAdaptation must be an object"
+            )
+            
+        if not isinstance(settings.get("confidenceThresholds"), dict):
+            raise HTTPException(
+                status_code=400,
+                detail="confidenceThresholds must be an object"
+            )
+        
+        # Validate numeric values
+        numeric_fields = {
+            "maxPositionSize": (0, float('inf')),
+            "maxLeverage": (0, float('inf')),
+            "riskPerTrade": (0, 1),
+            "maxOpenTrades": (1, float('inf')),
+            "maxCorrelation": (0, 1),
+            "minRiskReward": (0, float('inf')),
+            "maxDailyLoss": (0, 1),
+            "maxDrawdown": (0, 1)
+        }
+        
+        for field, (min_val, max_val) in numeric_fields.items():
+            value = settings.get(field)
+            if not isinstance(value, (int, float)) or value < min_val or value > max_val:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid value for {field}: must be between {min_val} and {max_val}"
+                )
+        
+        # Validate boolean values
+        boolean_fields = [
+            "tradingEnabled", "autoRebalance", "stopLossEnabled", "takeProfitEnabled"
+        ]
+        
+        for field in boolean_fields:
+            if not isinstance(settings.get(field), bool):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field} must be a boolean"
+                )
+        
+        # Validate volatility adaptation
+        va = settings["volatilityAdaptation"]
+        if not isinstance(va.get("enabled"), bool):
+            raise HTTPException(
+                status_code=400,
+                detail="volatilityAdaptation.enabled must be a boolean"
+            )
+        if not isinstance(va.get("sensitivity"), (int, float)) or not 0 <= va["sensitivity"] <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="volatilityAdaptation.sensitivity must be between 0 and 1"
+            )
+        if not isinstance(va.get("maxAdjustment"), (int, float)) or not 0 <= va["maxAdjustment"] <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="volatilityAdaptation.maxAdjustment must be between 0 and 1"
+            )
+        
+        # Validate performance adaptation
+        pa = settings["performanceAdaptation"]
+        if not isinstance(pa.get("enabled"), bool):
+            raise HTTPException(
+                status_code=400,
+                detail="performanceAdaptation.enabled must be a boolean"
+            )
+        if not isinstance(pa.get("winRateThreshold"), (int, float)) or not 0 <= pa["winRateThreshold"] <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="performanceAdaptation.winRateThreshold must be between 0 and 1"
+            )
+        if not isinstance(pa.get("adjustmentFactor"), (int, float)) or not 0 <= pa["adjustmentFactor"] <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="performanceAdaptation.adjustmentFactor must be between 0 and 1"
+            )
+        
+        # Validate confidence thresholds
+        ct = settings["confidenceThresholds"]
+        for level in ["high", "medium", "low"]:
+            if not isinstance(ct.get(level), (int, float)) or not 0 <= ct[level] <= 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"confidenceThresholds.{level} must be between 0 and 1"
+                )
+        
+        # Update environment variables
+        os.environ['MAX_POSITION_SIZE'] = str(settings['maxPositionSize'])
+        os.environ['MAX_LEVERAGE'] = str(settings['maxLeverage'])
+        os.environ['RISK_PER_TRADE'] = str(settings['riskPerTrade'])
+        os.environ['MAX_OPEN_TRADES'] = str(settings['maxOpenTrades'])
+        os.environ['MAX_CORRELATION'] = str(settings['maxCorrelation'])
+        os.environ['MIN_RISK_REWARD'] = str(settings['minRiskReward'])
+        os.environ['MAX_DAILY_LOSS'] = str(settings['maxDailyLoss'])
+        os.environ['MAX_DRAWDOWN'] = str(settings['maxDrawdown'])
+        os.environ['TRADING_ENABLED'] = str(settings['tradingEnabled']).lower()
+        os.environ['AUTO_REBALANCE'] = str(settings['autoRebalance']).lower()
+        os.environ['STOP_LOSS_ENABLED'] = str(settings['stopLossEnabled']).lower()
+        os.environ['TAKE_PROFIT_ENABLED'] = str(settings['takeProfitEnabled']).lower()
+        
+        # Update nested settings
+        os.environ['VOLATILITY_ADAPTATION_ENABLED'] = str(settings['volatilityAdaptation']['enabled']).lower()
+        os.environ['VOLATILITY_SENSITIVITY'] = str(settings['volatilityAdaptation']['sensitivity'])
+        os.environ['VOLATILITY_MAX_ADJUSTMENT'] = str(settings['volatilityAdaptation']['maxAdjustment'])
+        
+        os.environ['PERFORMANCE_ADAPTATION_ENABLED'] = str(settings['performanceAdaptation']['enabled']).lower()
+        os.environ['WIN_RATE_THRESHOLD'] = str(settings['performanceAdaptation']['winRateThreshold'])
+        os.environ['ADJUSTMENT_FACTOR'] = str(settings['performanceAdaptation']['adjustmentFactor'])
+        
+        os.environ['CONFIDENCE_HIGH'] = str(settings['confidenceThresholds']['high'])
+        os.environ['CONFIDENCE_MEDIUM'] = str(settings['confidenceThresholds']['medium'])
+        os.environ['CONFIDENCE_LOW'] = str(settings['confidenceThresholds']['low'])
+        
+        # Update config objects
+        RISK_CONFIG.update({
+            'max_position_size': settings['maxPositionSize'],
+            'max_leverage': settings['maxLeverage'],
+            'risk_per_trade': settings['riskPerTrade'],
+            'max_open_trades': settings['maxOpenTrades'],
+            'max_correlation': settings['maxCorrelation'],
+            'min_risk_reward': settings['minRiskReward'],
+            'max_daily_loss': settings['maxDailyLoss'],
+            'max_drawdown': settings['maxDrawdown']
+        })
+        
+        return {
+            "success": True,
+            "message": "Settings updated successfully",
+            "settings": settings
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/trading/opportunities")
 async def get_opportunities(
