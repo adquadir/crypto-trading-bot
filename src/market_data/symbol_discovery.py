@@ -1175,53 +1175,42 @@ class SymbolDiscovery:
         return cci 
 
     async def _process_symbol(self, symbol: str) -> Optional[Dict]:
-        """Process a single symbol and generate signals if conditions are met."""
+        """Process a single symbol and generate trading signals."""
         try:
-            # Fetch market data
-            logger.debug(f"Fetching market data for {symbol}")
-            market_data = await self._fetch_market_data(symbol)
+            # Get market data
+            market_data = await self.get_market_data(symbol)
             if not market_data:
-                logger.debug(f"No market data available for {symbol}")
+                logger.warning(f"No market data available for {symbol}")
                 return None
                 
-            # Calculate indicators
-            logger.debug(f"Calculating indicators for {symbol}")
-            indicators = self._calculate_indicators(market_data['klines'])
-            if not indicators:
-                logger.debug(f"Failed to calculate indicators for {symbol}")
-                return None
-                
-            # Calculate confidence score
-            logger.debug(f"Calculating confidence score for {symbol}")
-            confidence_score = self._calculate_confidence_score(market_data, indicators)
-            if confidence_score < self.min_confidence_score:
-                logger.debug(f"Confidence score too low for {symbol}: {confidence_score}")
-                return None
-                
-            # Generate signals
-            logger.debug(f"Generating signals for {symbol}")
-            signal = self.signal_generator.generate_signals(symbol, indicators, confidence_score)
-            if not signal:
-                logger.debug(f"No signal generated for {symbol}")
-                return None
-                
-            # Create opportunity
-            logger.debug(f"Creating opportunity for {symbol}")
-            opportunity = {
-                'symbol': symbol,
-                'signal': signal,
-                'market_data': market_data,
-                'indicators': indicators,
-                'confidence_score': confidence_score,
-                'timestamp': datetime.now().isoformat()
-            }
+            # Calculate initial confidence score
+            initial_confidence = self._calculate_confidence_score(market_data, {})
             
-            logger.info(f"Created opportunity for {symbol} with confidence {confidence_score}")
-            return opportunity
+            # Generate signals using the signal generator
+            signal = self.signal_generator.generate_signals(
+                symbol,
+                market_data,
+                initial_confidence
+            )
+            
+            if not signal:
+                logger.debug(f"No signal generated for {symbol} with fresh data.")
+                return None
+                
+            # Validate the signal
+            validation = self._validate_signal(signal)
+            if not validation.is_valid:
+                logger.warning(f"Invalid signal for {symbol}: {validation.errors}")
+                return None
+                
+            # Cache the signal
+            self._cache_signal(symbol, signal)
+            
+            return signal
             
         except Exception as e:
-            logger.error(f"Error processing symbol {symbol}: {e}")
-            return None 
+            logger.error(f"Error processing {symbol}: {e}")
+            return None
 
     def _calculate_confidence_score(self, market_data: Dict, indicators: Dict) -> float:
         """Calculate confidence score based on market data and indicators."""
