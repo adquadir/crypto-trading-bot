@@ -184,56 +184,33 @@ class SymbolDiscovery:
             cache_key = f"market_data_{symbol}"
             cached_data = self.cache.get(cache_key)
             if cached_data:
-                timestamp = cached_data.get('timestamp', 0)
-                if time.time() - timestamp < self.cache_ttl:
-                    logger.debug(f"Using cached market data for {symbol}")
-                    return cached_data
-                else:
-                    del self.cache[cache_key]  # Remove expired cache entry
+                logger.debug(f"Using cached market data for {symbol}")
+                return cached_data
 
-            # Fetch data in parallel
-            logger.debug(f"Fetching market data for {symbol}")
-            tasks = [
-                self.exchange_client.get_historical_data(symbol, '1m', limit=100),
-                self.exchange_client.get_funding_rate(symbol),
-                self.exchange_client.get_ticker_24h(symbol),
-                self.exchange_client.get_orderbook(symbol, limit=10),
-                self.exchange_client.get_open_interest(symbol)
-            ]
-            
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results
-            klines, funding_rate, ticker, orderbook, open_interest = results
-            
-            # Check for errors
-            if any(isinstance(r, Exception) for r in results):
-                logger.error(f"Error fetching market data for {symbol}")
-                return None
-                
-            # Process klines
-            if not klines or len(klines) < 100:
-                logger.warning(f"Insufficient kline data for {symbol}")
-                return None
-                
-            # Create market data dictionary
+            # Fetch fresh data
+            klines = await self.exchange_client.get_historical_data(symbol, '1m', limit=100)
+            funding_rate = await self.exchange_client.get_funding_rate(symbol)
+            ticker = await self.exchange_client.get_ticker_24h(symbol)
+            orderbook = await self.exchange_client.get_orderbook(symbol, limit=10)
+            open_interest = await self.exchange_client.get_open_interest(symbol)
+
+            # Structure the data
             market_data = {
-                'symbol': symbol,
                 'klines': klines,
                 'funding_rate': funding_rate,
-                'ticker': ticker,
+                'ticker_24h': ticker,  # Changed from 'ticker' to 'ticker_24h'
                 'orderbook': orderbook,
-                'open_interest': open_interest,
-                'timestamp': time.time()
+                'open_interest': open_interest
             }
-            
+
             # Cache the data
             self.cache[cache_key] = market_data
-            
+            logger.debug(f"Cached fresh market data for {symbol}")
+
             return market_data
-            
+
         except Exception as e:
-            logger.error(f"Error getting market data for {symbol}: {e}")
+            logger.error(f"Error fetching market data for {symbol}: {str(e)}")
             return None
             
     def _calculate_spread(self, orderbook: Dict) -> float:
@@ -749,7 +726,7 @@ class SymbolDiscovery:
                     reasoning = signal.get('reasoning', []) # Use reasoning from signal
 
                     # Use volume_24h and volatility from the fresh market_data (fetched earlier)
-                    volume_24h = market_data.get('ticker', {}).get('volume', 0.0)
+                    volume_24h = market_data.get('ticker_24h', {}).get('volume', 0.0)
                     volatility = self.calculate_volatility(market_data.get('klines', []))
 
                 except KeyError as e:
@@ -834,7 +811,7 @@ class SymbolDiscovery:
             reasons = []
 
             # Volume filter
-            volume_24h = market_data.get('ticker', {}).get('volume', 0)
+            volume_24h = market_data.get('ticker_24h', {}).get('volume', 0)
             if volume_24h < self.min_volume_24h:
                 reasons.append(f"Low volume: {volume_24h} < {self.min_volume_24h}")
 
@@ -849,7 +826,7 @@ class SymbolDiscovery:
                 reasons.append(f"Low liquidity: {liquidity} < {self.min_liquidity}")
 
             # Market cap filter
-            market_cap = self._calculate_market_cap(market_data.get('ticker', {}))
+            market_cap = self._calculate_market_cap(market_data.get('ticker_24h', {}))
             if market_cap < self.min_market_cap:
                 reasons.append(f"Low market cap: {market_cap} < {self.min_market_cap}")
 
