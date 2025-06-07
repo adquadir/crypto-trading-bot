@@ -52,7 +52,7 @@ CORS_ORIGINS = [origin.strip() for origin in origins_raw.split(',') if origin.st
 # Add CORS middleware with explicit configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=["http://50.31.0.105:3000"],  # Explicitly allow your frontend domain
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
