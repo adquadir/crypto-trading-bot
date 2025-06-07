@@ -352,4 +352,8 @@ class DynamicStrategyConfig:
         if changes:
             self.update_profile(profile, changes)
             return changes
-        return None 
+        return None
+
+    def get_profiles(self):
+        """Return a list of available strategy profile names."""
+        return list(self.profiles.keys()) 

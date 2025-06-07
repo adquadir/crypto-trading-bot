@@ -1247,14 +1247,17 @@ class SymbolDiscovery:
             # Trend score (0-1)
             adx = indicators.get('adx', {}).get('value', 0)
             if adx > 0:
-                trend_score = min(1.0, adx / 50.0)  # Normalize to ADX of 50
+                trend_score = min(1.0, adx / 50.0)  # Normalize to ADX 50
                 
             # Momentum score (0-1)
             rsi = indicators.get('rsi', 50)
             if rsi > 0:
-                # Score based on RSI distance from neutral (50)
-                momentum_score = min(1.0, abs(rsi - 50) / 30.0)
-                
+                # RSI extremes indicate strong momentum
+                if rsi > 70 or rsi < 30:
+                    momentum_score = 1.0
+                else:
+                    momentum_score = 0.5
+                    
             # Calculate weighted average
             weights = {
                 'volume': 0.3,
@@ -1281,4 +1284,21 @@ class SymbolDiscovery:
             
         except Exception as e:
             logger.error(f"Error calculating confidence score: {e}")
+            return 0.0 
+
+    def get_current_volatility(self):
+        """Return a simple current volatility metric (average ATR of top symbols)."""
+        try:
+            atrs = []
+            for symbol in list(self.cache.keys())[:10]:
+                data = self.cache[symbol]
+                indicators = data.get('indicators', {})
+                atr = indicators.get('atr')
+                if atr:
+                    atrs.append(atr)
+            if atrs:
+                return sum(atrs) / len(atrs)
+            return 0.0
+        except Exception as e:
+            logger.error(f"Error in get_current_volatility: {e}")
             return 0.0 

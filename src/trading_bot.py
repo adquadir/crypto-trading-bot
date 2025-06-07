@@ -24,7 +24,7 @@ from src.utils.config import load_config
 logger = logging.getLogger(__name__)
 
 class TradingBot:
-    def __init__(self, config_path: str = "config/config.yaml"):
+    def __init__(self, config_path: str = "config/config.yaml", market_data=None):
         # Load environment variables
         load_dotenv()
         
@@ -46,6 +46,9 @@ class TradingBot:
         self.risk_manager = RiskManager(
             account_balance=self.config['risk']['initial_balance'],
         )
+        
+        # Ensure market_data is always set
+        self.market_data = market_data if market_data is not None else self.symbol_discovery
         
         # Initialize database
         self._init_database()
