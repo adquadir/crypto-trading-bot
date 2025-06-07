@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from typing import List, Dict, Optional
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import traceback
 import os
@@ -18,6 +18,7 @@ from src.database.database import SessionLocal
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 import numpy as np
+from functools import lru_cache
 
 # Load environment variables
 load_dotenv()
@@ -121,6 +122,10 @@ class ConnectionManager:
                 await self.disconnect(connection, client_id)
 
 manager = ConnectionManager()
+
+# Add after other global variables
+OPPORTUNITIES_CACHE = {}
+OPPORTUNITIES_CACHE_DURATION = 60  # Cache for 60 seconds
 
 @app.on_event("startup")
 async def startup_event():
@@ -790,6 +795,16 @@ async def get_opportunities(
 ):
     """Get top trading opportunities."""
     try:
+        # Check cache first
+        cache_key = f"{min_confidence}_{min_risk_reward}_{min_volume}_{limit}"
+        if cache_key in OPPORTUNITIES_CACHE:
+            cache_time, cached_data = OPPORTUNITIES_CACHE[cache_key]
+            if datetime.now() - cache_time < timedelta(seconds=OPPORTUNITIES_CACHE_DURATION):
+                logger.info("Returning cached opportunities")
+                return cached_data
+
+        # If not in cache or expired, fetch new opportunities
+        logger.info("Fetching new opportunities")
         opportunities = await symbol_discovery.scan_opportunities()
         
         # Filter opportunities
@@ -804,34 +819,8 @@ async def get_opportunities(
         filtered.sort(key=lambda x: x.score, reverse=True)
         top_opportunities = filtered[:limit]
         
-        # Broadcast to WebSocket clients
-        await manager.broadcast({
-            "type": "opportunities_update",
-            "data": {
-                "opportunities": [
-                    {
-                        "symbol": opp.symbol,
-                        "direction": opp.direction,
-                        "entry": opp.entry_price,
-                        "take_profit": opp.take_profit,
-                        "stop_loss": opp.stop_loss,
-                        "confidence_score": opp.confidence,
-                        "leverage": opp.leverage,
-                        "risk_reward": opp.risk_reward,
-                        "volume_24h": opp.volume_24h,
-                        "volatility": opp.volatility,
-                        "score": opp.score,
-                        "indicators": opp.indicators,
-                        "reasoning": opp.reasoning
-                    }
-                    for opp in top_opportunities
-                ],
-                "total": len(filtered),
-                "timestamp": datetime.now().timestamp()
-            }
-        }, "all")
-        
-        return {
+        # Prepare response data
+        response_data = {
             "opportunities": [
                 {
                     "symbol": opp.symbol,
@@ -853,9 +842,21 @@ async def get_opportunities(
             "total": len(filtered),
             "timestamp": datetime.now().timestamp()
         }
+        
+        # Update cache
+        OPPORTUNITIES_CACHE[cache_key] = (datetime.now(), response_data)
+        
+        return response_data
+        
     except Exception as e:
         logger.error(f"Error getting opportunities: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return empty response instead of error to prevent frontend from breaking
+        return {
+            "opportunities": [],
+            "total": 0,
+            "timestamp": datetime.now().timestamp(),
+            "error": "Failed to fetch opportunities"
+        }
 
 @app.get("/api/trading/opportunities/{symbol}")
 async def get_symbol_opportunity(symbol: str):

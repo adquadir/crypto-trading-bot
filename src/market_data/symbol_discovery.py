@@ -123,6 +123,12 @@ class SymbolDiscovery:
                 
                 logger.debug(f"Initial perpetual trading symbols found: {len(futures_symbols)}")
                 
+                # Limit the number of symbols to process
+                MAX_SYMBOLS = 20  # Process only top 20 symbols
+                if len(futures_symbols) > MAX_SYMBOLS:
+                    logger.info(f"Limiting symbol processing to top {MAX_SYMBOLS} symbols")
+                    futures_symbols = futures_symbols[:MAX_SYMBOLS]
+                
                 # Apply filters
                 filtered_symbols = []
                 for symbol in futures_symbols:
@@ -138,10 +144,6 @@ class SymbolDiscovery:
                     else:
                         logger.debug(f"Failed to fetch market data for {symbol}.")
                 
-                # Limit number of symbols if configured
-                if len(filtered_symbols) > self.max_symbols:
-                    filtered_symbols = filtered_symbols[:self.max_symbols]
-                    
                 logger.info(f"Discovered {len(filtered_symbols)} trading pairs after filtering")
                 return filtered_symbols
                 
@@ -423,11 +425,17 @@ class SymbolDiscovery:
             # Get all available symbols
             symbols = await self.discover_symbols()
             
+            # Limit the number of symbols to process
+            MAX_SYMBOLS_TO_PROCESS = 20  # Process only top 20 symbols
+            if len(symbols) > MAX_SYMBOLS_TO_PROCESS:
+                logger.info(f"Limiting symbol processing to top {MAX_SYMBOLS_TO_PROCESS} symbols")
+                symbols = symbols[:MAX_SYMBOLS_TO_PROCESS]
+            
             # Constants for rate limiting and concurrency control
             BATCH_SIZE = 5  # Number of symbols to process in parallel
             RATE_LIMIT_DELAY = 1.0  # Delay between batches in seconds
-            MAX_RETRIES = 3  # Maximum number of retries for failed requests
-            MAX_CONCURRENT_TASKS = 10  # Maximum number of concurrent tasks
+            MAX_RETRIES = 2  # Reduced from 3 to 2
+            MAX_CONCURRENT_TASKS = 5  # Reduced from 10 to 5
             
             opportunities = []
             total_symbols = len(symbols)
@@ -451,8 +459,15 @@ class SymbolDiscovery:
                     task = asyncio.create_task(process_with_semaphore(symbol))
                     tasks.append(task)
                 
-                # Process batch concurrently
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Process batch concurrently with timeout
+                try:
+                    batch_results = await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=30.0  # 30 second timeout per batch
+                    )
+                except asyncio.TimeoutError:
+                    logger.error("Batch processing timed out")
+                    continue
                 
                 # Filter out exceptions and add valid opportunities
                 for result in batch_results:
@@ -465,11 +480,6 @@ class SymbolDiscovery:
                 # Add delay between batches to respect rate limits
                 if i + BATCH_SIZE < total_symbols:
                     await asyncio.sleep(RATE_LIMIT_DELAY)
-                    
-                    # Check if we need to pause for rate limiting
-                    if len(opportunities) > 0 and len(opportunities) % 50 == 0:
-                        logger.info("Rate limit pause: waiting 5 seconds...")
-                        await asyncio.sleep(5)  # Additional pause every 50 opportunities
             
             # Sort opportunities by score
             opportunities.sort(key=lambda x: x.score, reverse=True)
