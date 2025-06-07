@@ -1183,10 +1183,15 @@ class SymbolDiscovery:
                 logger.warning(f"No market data available for {symbol}")
                 return None
                 
+            # Ensure market data has all required fields
+            if not all(key in market_data for key in ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']):
+                logger.warning(f"Incomplete market data for {symbol}")
+                return None
+                
             # Structure market data for signal generation
             structured_data = {
                 'klines': market_data['klines'],
-                'ticker_24h': market_data['ticker'],
+                'ticker_24h': market_data['ticker_24h'],
                 'orderbook': market_data['orderbook'],
                 'funding_rate': market_data['funding_rate'],
                 'open_interest': market_data['open_interest']
@@ -1231,7 +1236,7 @@ class SymbolDiscovery:
             momentum_score = 0.0
             
             # Volume score (0-1)
-            volume_24h = float(market_data['ticker'].get('volume', 0))
+            volume_24h = float(market_data['ticker_24h'].get('volume', 0))
             if volume_24h > 0:
                 volume_score = min(1.0, volume_24h / 1000000)  # Normalize to 1M volume
                 

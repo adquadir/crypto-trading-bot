@@ -112,12 +112,23 @@ class SignalGenerator:
     def generate_signals(self, symbol: str, market_data: Dict, initial_confidence: float = 0.0) -> Dict:
         """Generate trading signals based on technical indicators."""
         try:
-            if not market_data or 'klines' not in market_data:
+            if not market_data:
                 logger.warning(f"No market data available for {symbol}")
+                return {}
+                
+            # Validate required market data fields
+            required_fields = ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']
+            missing_fields = [field for field in required_fields if field not in market_data]
+            if missing_fields:
+                logger.warning(f"Missing required market data fields for {symbol}: {missing_fields}")
                 return {}
                 
             # Convert klines to DataFrame for indicator calculation
             df = pd.DataFrame(market_data['klines'])
+            if df.empty:
+                logger.warning(f"Empty klines data for {symbol}")
+                return {}
+                
             df['close'] = pd.to_numeric(df['close'])
             df['high'] = pd.to_numeric(df['high'])
             df['low'] = pd.to_numeric(df['low'])
@@ -206,6 +217,8 @@ class SignalGenerator:
                 take_profit = current_price
                 stop_loss = current_price
                 
+            logger.debug(f"Generated signal for {symbol}: {signal_type} ({direction}) with strength {signal_strength}")
+            
             return {
                 'symbol': symbol,
                 'signal_type': signal_type,
