@@ -133,6 +133,14 @@ class SignalGenerator:
             # Get symbol-specific parameters based on confidence score
             params = self.strategy_config.get_symbol_specific_params(symbol, confidence_score)
             if not params:
+                logger.warning(f"No parameters found for {symbol}")
+                return {}
+                
+            # Validate required indicators
+            required_indicators = ['macd', 'macd_signal', 'rsi', 'current_price', 'bb_upper', 'bb_lower', 'adx', 'plus_di', 'minus_di', 'cci']
+            missing_indicators = [ind for ind in required_indicators if ind not in indicators]
+            if missing_indicators:
+                logger.warning(f"Missing required indicators for {symbol}: {missing_indicators}")
                 return {}
                 
             # Calculate signal strength
@@ -140,7 +148,7 @@ class SignalGenerator:
             signal_type = None
             
             # MACD Signal
-            if indicators['macd'] > indicators['macd_signal']:
+            if indicators['macd']['value'] > indicators['macd_signal']:
                 signal_strength += 1
             else:
                 signal_strength -= 1
@@ -158,8 +166,8 @@ class SignalGenerator:
                 signal_strength -= 1
                 
             # ADX Signal
-            if indicators['adx'] > 25:  # Strong trend
-                if indicators['plus_di'] > indicators['minus_di']:
+            if indicators['adx']['value'] > 25:  # Strong trend
+                if indicators['adx']['di_plus'] > indicators['adx']['di_minus']:
                     signal_strength += 1
                 else:
                     signal_strength -= 1
@@ -184,22 +192,22 @@ class SignalGenerator:
                 # Override with the new signal type and structure if found
                 return {
                     "symbol": symbol,
-                    "price": indicators['current_price'], # Use current price as the signal price for validation
+                    "price": indicators['current_price'],
                     "direction": "LONG" if hovering_opportunity['signal_type'] == 'SAFE_BUY' else "SHORT",
                     "confidence": hovering_opportunity['confidence_score'],
-                    "entry": hovering_opportunity['entry'], # Include strategy's calculated entry
-                    "take_profit": hovering_opportunity['take_profit'], # Include strategy's calculated TP
-                    "stop_loss": hovering_opportunity['stop_loss'], # Include strategy's calculated SL
-                    "signal_type": hovering_opportunity['signal_type'], # Keep signal_type for downstream logic
-                    "indicators": indicators, # Include indicators
-                    "reasoning": hovering_opportunity.get('reasoning', []) # Include reasoning if available
+                    "entry": hovering_opportunity['entry'],
+                    "take_profit": hovering_opportunity['take_profit'],
+                    "stop_loss": hovering_opportunity['stop_loss'],
+                    "signal_type": hovering_opportunity['signal_type'],
+                    "indicators": indicators,
+                    "reasoning": hovering_opportunity.get('reasoning', [])
                 }
 
             # For standard signals, determine direction from strength and include required fields
             direction = "LONG" if signal_strength > 0 else ("SHORT" if signal_strength < 0 else "NEUTRAL")
 
             # Determine signal_type based on signal_strength for standard signals
-            if signal_strength > 3: # Example threshold for STRONG signals
+            if signal_strength > 3:  # Example threshold for STRONG signals
                 signal_type = "STRONG_BUY" if direction == "LONG" else "STRONG_SELL"
             elif signal_strength > 0:
                 signal_type = "BUY" if direction == "LONG" else "SELL"
@@ -211,23 +219,28 @@ class SignalGenerator:
                 logger.debug(f"Generated NEUTRAL signal for {symbol}.")
                 return {}
 
-            # For standard signals, SymbolDiscovery will calculate entry/TP/SL based on price and volatility.
-            # We still include these keys but potentially with None or placeholder values if the strategy doesn't provide them,
-            # or set entry to current price for clarity.
-            entry_price = indicators['current_price'] # Use current price for standard signal entry
-            take_profit = None # SignalGenerator doesn't calculate for standard signals currently
-            stop_loss = None # SignalGenerator doesn't calculate for standard signals currently
+            # For standard signals, calculate entry/TP/SL based on price and volatility
+            entry_price = indicators['current_price']
+            atr = indicators.get('atr', 0)
+            
+            # Calculate take profit and stop loss based on ATR
+            if direction == "LONG":
+                take_profit = entry_price + (atr * 2)  # 2 ATR for take profit
+                stop_loss = entry_price - (atr * 1)    # 1 ATR for stop loss
+            else:  # SHORT
+                take_profit = entry_price - (atr * 2)  # 2 ATR for take profit
+                stop_loss = entry_price + (atr * 1)    # 1 ATR for stop loss
 
             return {
                 'symbol': symbol,
-                'direction': direction, # Map signal_type/strength to direction
-                'price': indicators['current_price'], # Include current price as signal price for validation
-                'confidence': confidence_score, # Rename confidence_score to confidence
-                'entry': entry_price, # Include entry price (current price for standard signals)
-                'take_profit': take_profit, # Include placeholder TP
-                'stop_loss': stop_loss, # Include placeholder SL
-                'signal_type': signal_type, # Keep original signal_type
-                'signal_strength': abs(signal_strength), # Keep original signal_strength
+                'direction': direction,
+                'price': indicators['current_price'],
+                'confidence': confidence_score,
+                'entry': entry_price,
+                'take_profit': take_profit,
+                'stop_loss': stop_loss,
+                'signal_type': signal_type,
+                'signal_strength': abs(signal_strength),
                 'timestamp': datetime.now().isoformat(),
                 'indicators': indicators,
                 'parameters': params
