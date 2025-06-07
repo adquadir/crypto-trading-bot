@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import pandas as pd
 from typing import Tuple
+from cachetools import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,9 @@ class SymbolDiscovery:
         self.update_interval = int(os.getenv('SYMBOL_UPDATE_INTERVAL', '3600'))  # Default 1 hour
         self._update_task = None
         self._processing_lock = asyncio.Lock()  # Add lock for concurrent processing
+        self._discovery_lock = asyncio.Lock()
+        self.cache = TTLCache(maxsize=100, ttl=300)  # Cache with 5-minute TTL
+        logger.info("SymbolDiscovery initialized with caching")
         
         # Load configuration from environment
         self.min_volume_24h = float(os.getenv('MIN_24H_VOLUME', '1000000'))
