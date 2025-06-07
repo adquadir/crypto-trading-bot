@@ -193,7 +193,8 @@ class SymbolDiscovery:
                 else:
                     # Cache has old structure, remove it
                     logger.debug(f"Clearing outdated cache for {symbol}")
-                    self.cache.delete(cache_key)
+                    if cache_key in self.cache:
+                        del self.cache[cache_key]
 
             # Fetch fresh data
             logger.debug(f"Fetching fresh market data for {symbol}")
@@ -209,11 +210,12 @@ class SymbolDiscovery:
                 'funding_rate': funding_rate,
                 'ticker_24h': ticker,
                 'orderbook': orderbook,
-                'open_interest': open_interest
+                'open_interest': open_interest,
+                'timestamp': time.time()  # Add timestamp for cache expiration
             }
 
             # Cache the data
-            self.cache.set(cache_key, market_data, ttl=60)  # Cache for 1 minute
+            self.cache[cache_key] = market_data
             logger.debug(f"Cached fresh market data for {symbol}")
 
             return market_data
