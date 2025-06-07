@@ -928,15 +928,15 @@ class SymbolDiscovery:
             vol_ma20 = np.mean(volumes[-20:])
             
             # Volume should be increasing or stable
-            # Relaxing the threshold from 0.8 to 0.5
-            if vol_ma5 < vol_ma20 * 0.5:  # Allow recent volume to be as low as 50% of the 20-period average
+            # Relaxing the threshold from 0.5 to 0.3 or 0.2
+            if vol_ma5 < vol_ma20 * 0.2:  # Adjusted to allow recent volume to be as low as 20% of the 20-period average
                 return False
                 
             # Check for volume consistency (lower coefficient of variation indicates more consistent volume)
-            # Relaxing the threshold from 0.5 to 1.0
+            # Relaxing the threshold from 1.0 to 1.5
             vol_std = np.std(volumes[-20:])
             vol_mean = np.mean(volumes[-20:])
-            if vol_mean > 0 and (vol_std / vol_mean) > 1.0:  # Allow higher coefficient of variation (more inconsistency)
+            if vol_mean > 0 and (vol_std / vol_mean) > 1.5:  # Adjusted to allow higher coefficient of variation (more inconsistency)
                 return False
                 
             return True
