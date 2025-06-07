@@ -214,18 +214,13 @@ class SignalGenerator:
                 signal_strength -= 1
                 reasons.append("CCI bearish")
                 
-            # Determine signal type and direction based on final strength
-            if signal_strength >= 2:
-                signal_type = "BUY"
-                direction = "LONG"
-            elif signal_strength <= -2:
-                signal_type = "SELL"
-                direction = "SHORT"
+            # Determine signal direction based on strength
+            if signal_strength >= 1.5:
+                direction = 'LONG'
+            elif signal_strength <= -1.5:
+                direction = 'SHORT'
             else:
-                # If signal is NEUTRAL, we explicitly return None.
-                # This prevents NEUTRAL signals from ever reaching validation.
-                logger.debug(f"Generated NEUTRAL signal for {symbol} with strength {signal_strength}. Skipping signal generation and returning None.")
-                return None
+                direction = 'NEUTRAL'
                 
             # If we reach here, it means a BUY or SELL signal was generated.
             # Calculate entry, take profit, and stop loss levels

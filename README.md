@@ -155,6 +155,11 @@ ORDERBOOK_DEPTH=10
 # TRADING_SYMBOLS is ignored when SYMBOL_DISCOVERY_MODE is 'dynamic'.
 SYMBOL_DISCOVERY_MODE=dynamic # or 'static'
 TRADING_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT # Comma-separated list (only used if SYMBOL_DISCOVERY_MODE is 'static')
+
+# Signal Filtering
+# The minimum confidence required for a signal to be considered a valid opportunity.
+# Default is 0.4. Can be set at runtime via API or by setting MIN_CONFIDENCE in the environment.
+MIN_CONFIDENCE=0.4
 ```
 
 B. **YAML Configuration (Alternative)**
@@ -349,6 +354,35 @@ The system sends alerts for:
 - Risk limit breaches
 - API failures
 - System resource issues
+
+## Debugging Advanced Filtering
+
+To understand why symbols are excluded by advanced filters (such as volume trend, price stability, or liquidity), enable DEBUG logging. This will show detailed reasons for exclusion in your logs for each symbol that fails advanced filtering.
+
+**How to enable DEBUG logging:**
+
+- **Via environment variable:**
+  Add to your `.env` file:
+  ```env
+  LOG_LEVEL=DEBUG
+  ```
+- **Or at runtime:**
+  ```bash
+  export LOG_LEVEL=DEBUG
+  ```
+
+- **Or by editing your logging configuration in `src/api/main.py` or your entrypoint:**
+  ```python
+  logging.basicConfig(level=logging.DEBUG, ...)
+  ```
+
+**Where to look:**
+- Logs will include lines like:
+  ```
+  DEBUG:src.market_data.symbol_discovery:Symbol BTCUSDT excluded by advanced filters: Unhealthy volume trend; Price instability
+  INFO:src.market_data.symbol_discovery:Excluded BTCUSDT: Unhealthy volume trend; Price instability
+  ```
+- These messages will help you tune your environment thresholds and understand which filters are most restrictive.
 
 ### Page Availability Verification
 The system includes automated health checks for all pages and API endpoints. Run the verification script to ensure all components are responding correctly:

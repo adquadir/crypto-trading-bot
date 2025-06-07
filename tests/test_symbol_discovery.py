@@ -166,6 +166,27 @@ async def test_get_market_data_returns_expected_structure(symbol_discovery, mock
     # assert market_data['funding_rate'] == 0.0001 # Value from mock, might be processed into float
     # assert market_data['open_interest'] == 100000 # Value from mock, might be processed into float
 
+@pytest.mark.asyncio
+async def test_opportunity_with_confidence_0_5_is_accepted(symbol_discovery, mock_signal_generator):
+    # Set min_confidence to 0.5
+    symbol_discovery.min_confidence = 0.5
+    # Mock generate_signals to return a signal with confidence 0.5
+    def mock_generate_signals(symbol, indicators, initial_confidence):
+        return {
+            'signal_type': 'BUY',
+            'entry': 100,
+            'take_profit': 110,
+            'stop_loss': 95,
+            'confidence_score': 0.5,
+            'reasoning': 'Test confidence 0.5'
+        }
+    symbol_discovery.signal_generator.generate_signals.side_effect = mock_generate_signals
+    # Should not be discarded
+    opportunity = await symbol_discovery._process_symbol_with_retry('BTCUSDT')
+    assert opportunity is not None
+    assert opportunity.confidence == 0.5
+    assert opportunity.symbol == 'BTCUSDT'
+
 # Add more tests here for specific filtering logic, scoring calculations, edge cases, etc.
 # Example: test_scan_opportunities_with_min_score_filter
 # Example: test_scan_opportunities_with_min_risk_reward_filter

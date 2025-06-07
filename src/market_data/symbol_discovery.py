@@ -60,7 +60,12 @@ class SymbolDiscovery:
         
         # Load configuration from environment
         self.min_volume_24h = float(os.getenv('MIN_24H_VOLUME', '1000000'))
-        self.min_confidence = float(os.getenv('MIN_CONFIDENCE', '0.5'))
+        self.min_volume_24h = max(self.min_volume_24h, 1.0)  # Ensure non-zero minimum
+        if float(os.getenv('MIN_24H_VOLUME', '1000000')) <= 0:
+            logger.debug(f"MIN_24H_VOLUME was <= 0, using minimum threshold of {self.min_volume_24h}")
+            
+        # Minimum confidence for accepting a signal (default 0.4, can be set at runtime or via API)
+        self.min_confidence = float(os.getenv('MIN_CONFIDENCE', '0.4'))
         self.min_risk_reward = float(os.getenv('MIN_RISK_REWARD', '1.5'))
         self.max_leverage = float(os.getenv('MAX_LEVERAGE', '20.0'))
         
@@ -313,29 +318,37 @@ class SymbolDiscovery:
             score = opportunity.confidence * 0.3
             
             # Volume factor (15%)
-            volume_score = min(opportunity.volume_24h / self.min_volume_24h, 2.0)
+            volume_threshold = self.min_volume_24h if self.min_volume_24h > 0 else 1.0
+            volume_score = min(opportunity.volume_24h / volume_threshold, 2.0)
+            logger.debug(f"Volume score for {opportunity.symbol}: {volume_score:.2f} (volume: {opportunity.volume_24h:.2f}, threshold: {volume_threshold:.2f})")
             score += volume_score * 0.15
             
             # Risk-reward factor (15%)
             rr_score = min(opportunity.risk_reward / self.min_risk_reward, 3.0)
+            logger.debug(f"Risk-reward score for {opportunity.symbol}: {rr_score:.2f} (RR: {opportunity.risk_reward:.2f}, min: {self.min_risk_reward:.2f})")
             score += rr_score * 0.15
             
             # Volatility factor (10%)
             vol_score = 1.0 - abs(opportunity.volatility - 0.03) / 0.03  # Target 3% volatility
+            logger.debug(f"Volatility score for {opportunity.symbol}: {vol_score:.2f} (vol: {opportunity.volatility:.4f})")
             score += vol_score * 0.1
             
             # Leverage factor (5%)
             lev_score = 1.0 - (opportunity.leverage / self.max_leverage)
+            logger.debug(f"Leverage score for {opportunity.symbol}: {lev_score:.2f} (lev: {opportunity.leverage:.2f}, max: {self.max_leverage:.2f})")
             score += lev_score * 0.05
             
             # Technical indicators (25%)
             tech_score = self._calculate_technical_score(opportunity.indicators)
+            logger.debug(f"Technical score for {opportunity.symbol}: {tech_score:.2f}")
             score += tech_score * 0.25
             
-            return min(score, 1.0)
+            final_score = min(score, 1.0)
+            logger.debug(f"Final opportunity score for {opportunity.symbol}: {final_score:.2f}")
+            return final_score
             
         except Exception as e:
-            logger.error(f"Error calculating opportunity score: {e}")
+            logger.error(f"Error calculating opportunity score for {opportunity.symbol}: {e}")
             return 0.0
             
     def _calculate_technical_score(self, indicators: Dict) -> float:
@@ -913,7 +926,8 @@ class SymbolDiscovery:
             reasons.append("Unhealthy volume trend")
 
         if reasons:
-            logger.info(f"Excluded {symbol}: {'; '.join(reasons)}") # Change to INFO level
+            logger.debug(f"Symbol {symbol} excluded by advanced filters: {'; '.join(reasons)}")
+            logger.info(f"Excluded {symbol}: {'; '.join(reasons)}")
             return False, reasons
 
         return True, []
