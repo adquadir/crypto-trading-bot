@@ -1017,16 +1017,36 @@ class SymbolDiscovery:
         avg_gain = self._calculate_sma(gain, period)
         avg_loss = self._calculate_sma(loss, period)
         
-        rs = avg_gain / avg_loss
+        rs = np.zeros_like(avg_gain) # Initialize rs array
+        
+        # Handle division by zero for avg_loss
+        # If avg_loss is 0, RSI is 100 (if avg_gain > 0) or undefined (if avg_gain is also 0).
+        # If avg_gain is 0 and avg_loss is not 0, RSI is 0.
+
+        # Use np.errstate to suppress warnings for division by zero temporarily
+        with np.errstate(divide='ignore', invalid='ignore'):
+            # Where avg_loss is 0:
+            #   If avg_gain is > 0, rs is inf (RSI=100)
+            #   If avg_gain is 0, rs is nan (RSI=50 traditionally, or undefined)
+            rs = np.where(avg_loss == 0, 
+                          np.where(avg_gain == 0, np.nan, np.inf), 
+                          avg_gain / avg_loss)
+        
         rsi = 100 - (100 / (1 + rs))
-        return np.concatenate(([np.nan], rsi))
+        
+        # Handle cases where rs is inf (RSI should be 100)
+        rsi = np.where(rs == np.inf, 100.0, rsi)
+        
+        return np.concatenate(([np.nan] * (period + 1), rsi[period:])) # Adjust length for initial NaNs
         
     def _calculate_stochastic(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> np.ndarray:
         """Calculate Stochastic Oscillator."""
         lowest_low = self._calculate_sma(lows, period)
         highest_high = self._calculate_sma(highs, period)
         
-        k = 100 * ((closes - lowest_low) / (highest_high - lowest_low))
+        # Avoid division by zero when highest_high - lowest_low is zero
+        denominator = highest_high - lowest_low
+        k = np.where(denominator == 0, np.nan, 100 * ((closes - lowest_low) / denominator))
         return k
         
     def _calculate_atr(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> np.ndarray:
@@ -1037,20 +1057,21 @@ class SymbolDiscovery:
         
         tr = np.maximum(np.maximum(tr1, tr2), tr3)
         atr = self._calculate_sma(tr, period)
-        return np.concatenate(([np.nan], atr))
+        return np.concatenate(([np.nan], atr)) # Add nan for the first period
         
     def _calculate_obv(self, closes: np.ndarray, volumes: np.ndarray) -> np.ndarray:
         """Calculate On-Balance Volume."""
-        obv = np.zeros_like(closes)
-        obv[0] = volumes[0]
-        
-        for i in range(1, len(closes)):
-            if closes[i] > closes[i-1]:
-                obv[i] = obv[i-1] + volumes[i]
-            elif closes[i] < closes[i-1]:
-                obv[i] = obv[i-1] - volumes[i]
-            else:
-                obv[i] = obv[i-1]
+        obv = np.zeros_like(closes, dtype=float) # Ensure float type
+        if len(closes) > 0:
+            obv[0] = volumes[0]
+            
+            for i in range(1, len(closes)):
+                if closes[i] > closes[i-1]:
+                    obv[i] = obv[i-1] + volumes[i]
+                elif closes[i] < closes[i-1]:
+                    obv[i] = obv[i-1] - volumes[i]
+                else:
+                    obv[i] = obv[i-1]
                 
         return obv
         
@@ -1062,7 +1083,10 @@ class SymbolDiscovery:
         ])
         volumes = np.array([float(candle['volume']) for candle in ohlcv])
         
-        vwap = np.cumsum(typical_prices * volumes) / np.cumsum(volumes)
+        cumulative_volumes = np.cumsum(volumes)
+        
+        # Handle division by zero for cumulative_volumes
+        vwap = np.where(cumulative_volumes == 0, np.nan, np.cumsum(typical_prices * volumes) / cumulative_volumes)
         return vwap
         
     def _calculate_adx(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -1071,7 +1095,9 @@ class SymbolDiscovery:
         tr1 = np.abs(highs[1:] - lows[1:])
         tr2 = np.abs(highs[1:] - closes[:-1])
         tr3 = np.abs(lows[1:] - closes[:-1])
+        
         tr = np.maximum(np.maximum(tr1, tr2), tr3)
+        tr_smoothed = self._calculate_sma(tr, period)
         
         # Calculate Directional Movement
         up_move = highs[1:] - highs[:-1]
@@ -1080,13 +1106,13 @@ class SymbolDiscovery:
         plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
         minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
         
-        # Calculate smoothed values
-        tr_smoothed = self._calculate_sma(tr, period)
-        plus_di = 100 * self._calculate_sma(plus_dm, period) / tr_smoothed
-        minus_di = 100 * self._calculate_sma(minus_dm, period) / tr_smoothed
+        plus_di = np.where(tr_smoothed == 0, np.nan, 100 * self._calculate_sma(plus_dm, period) / tr_smoothed)
+        minus_di = np.where(tr_smoothed == 0, np.nan, 100 * self._calculate_sma(minus_dm, period) / tr_smoothed)
         
         # Calculate ADX
-        dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+        # Avoid division by zero for plus_di + minus_di
+        di_sum = plus_di + minus_di
+        dx = np.where(di_sum == 0, np.nan, 100 * np.abs(plus_di - minus_di) / di_sum)
         adx = self._calculate_sma(dx, period)
         
         return adx, plus_di, minus_di
@@ -1098,5 +1124,6 @@ class SymbolDiscovery:
         mean_deviation = np.abs(typical_price - sma)
         mean_deviation_sma = self._calculate_sma(mean_deviation, period)
         
-        cci = (typical_price - sma) / (0.015 * mean_deviation_sma)
+        # Avoid division by zero for mean_deviation_sma
+        cci = np.where(mean_deviation_sma == 0, np.nan, (typical_price - sma) / (0.015 * mean_deviation_sma))
         return cci 
