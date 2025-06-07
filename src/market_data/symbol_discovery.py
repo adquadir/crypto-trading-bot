@@ -1222,3 +1222,63 @@ class SymbolDiscovery:
         except Exception as e:
             logger.error(f"Error processing symbol {symbol}: {e}")
             return None 
+
+    def _calculate_confidence_score(self, market_data: Dict, indicators: Dict) -> float:
+        """Calculate confidence score based on market data and indicators."""
+        try:
+            # Initialize score components
+            volume_score = 0.0
+            volatility_score = 0.0
+            trend_score = 0.0
+            momentum_score = 0.0
+            
+            # Volume score (0-1)
+            volume_24h = float(market_data['ticker'].get('volume', 0))
+            if volume_24h > 0:
+                volume_score = min(1.0, volume_24h / 1000000)  # Normalize to 1M volume
+                
+            # Volatility score (0-1)
+            atr = indicators.get('atr', 0)
+            current_price = indicators.get('current_price', 0)
+            if current_price > 0 and atr > 0:
+                volatility = (atr / current_price) * 100  # ATR as percentage of price
+                volatility_score = min(1.0, volatility / 5.0)  # Normalize to 5% volatility
+                
+            # Trend score (0-1)
+            adx = indicators.get('adx', {}).get('value', 0)
+            if adx > 0:
+                trend_score = min(1.0, adx / 50.0)  # Normalize to ADX of 50
+                
+            # Momentum score (0-1)
+            rsi = indicators.get('rsi', 50)
+            if rsi > 0:
+                # Score based on RSI distance from neutral (50)
+                momentum_score = min(1.0, abs(rsi - 50) / 30.0)
+                
+            # Calculate weighted average
+            weights = {
+                'volume': 0.3,
+                'volatility': 0.2,
+                'trend': 0.3,
+                'momentum': 0.2
+            }
+            
+            confidence_score = (
+                volume_score * weights['volume'] +
+                volatility_score * weights['volatility'] +
+                trend_score * weights['trend'] +
+                momentum_score * weights['momentum']
+            )
+            
+            logger.debug(f"Confidence score components for {market_data['symbol']}:")
+            logger.debug(f"  Volume score: {volume_score:.2f}")
+            logger.debug(f"  Volatility score: {volatility_score:.2f}")
+            logger.debug(f"  Trend score: {trend_score:.2f}")
+            logger.debug(f"  Momentum score: {momentum_score:.2f}")
+            logger.debug(f"  Final confidence score: {confidence_score:.2f}")
+            
+            return confidence_score
+            
+        except Exception as e:
+            logger.error(f"Error calculating confidence score: {e}")
+            return 0.0 
