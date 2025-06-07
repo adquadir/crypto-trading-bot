@@ -126,6 +126,7 @@ manager = ConnectionManager()
 # Add after other global variables
 OPPORTUNITIES_CACHE = {}
 OPPORTUNITIES_CACHE_DURATION = 60  # Cache for 60 seconds
+OPPORTUNITIES_LOCK = asyncio.Lock()  # Add lock for concurrent access
 
 @app.on_event("startup")
 async def startup_event():
@@ -803,50 +804,58 @@ async def get_opportunities(
                 logger.info("Returning cached opportunities")
                 return cached_data
 
-        # If not in cache or expired, fetch new opportunities
-        logger.info("Fetching new opportunities")
-        opportunities = await symbol_discovery.scan_opportunities()
-        
-        # Filter opportunities
-        filtered = [
-            opp for opp in opportunities
-            if opp.confidence >= min_confidence
-            and opp.risk_reward >= min_risk_reward
-            and opp.volume_24h >= min_volume
-        ]
-        
-        # Sort by score and limit
-        filtered.sort(key=lambda x: x.score, reverse=True)
-        top_opportunities = filtered[:limit]
-        
-        # Prepare response data
-        response_data = {
-            "opportunities": [
-                {
-                    "symbol": opp.symbol,
-                    "direction": opp.direction,
-                    "entry": opp.entry_price,
-                    "take_profit": opp.take_profit,
-                    "stop_loss": opp.stop_loss,
-                    "confidence_score": opp.confidence,
-                    "leverage": opp.leverage,
-                    "risk_reward": opp.risk_reward,
-                    "volume_24h": opp.volume_24h,
-                    "volatility": opp.volatility,
-                    "score": opp.score,
-                    "indicators": opp.indicators,
-                    "reasoning": opp.reasoning
-                }
-                for opp in top_opportunities
-            ],
-            "total": len(filtered),
-            "timestamp": datetime.now().timestamp()
-        }
-        
-        # Update cache
-        OPPORTUNITIES_CACHE[cache_key] = (datetime.now(), response_data)
-        
-        return response_data
+        # If not in cache or expired, fetch new opportunities with lock
+        async with OPPORTUNITIES_LOCK:
+            # Double check cache after acquiring lock
+            if cache_key in OPPORTUNITIES_CACHE:
+                cache_time, cached_data = OPPORTUNITIES_CACHE[cache_key]
+                if datetime.now() - cache_time < timedelta(seconds=OPPORTUNITIES_CACHE_DURATION):
+                    logger.info("Returning cached opportunities after lock")
+                    return cached_data
+
+            logger.info("Fetching new opportunities")
+            opportunities = await symbol_discovery.scan_opportunities()
+            
+            # Filter opportunities
+            filtered = [
+                opp for opp in opportunities
+                if opp.confidence >= min_confidence
+                and opp.risk_reward >= min_risk_reward
+                and opp.volume_24h >= min_volume
+            ]
+            
+            # Sort by score and limit
+            filtered.sort(key=lambda x: x.score, reverse=True)
+            top_opportunities = filtered[:limit]
+            
+            # Prepare response data
+            response_data = {
+                "opportunities": [
+                    {
+                        "symbol": opp.symbol,
+                        "direction": opp.direction,
+                        "entry": opp.entry_price,
+                        "take_profit": opp.take_profit,
+                        "stop_loss": opp.stop_loss,
+                        "confidence_score": opp.confidence,
+                        "leverage": opp.leverage,
+                        "risk_reward": opp.risk_reward,
+                        "volume_24h": opp.volume_24h,
+                        "volatility": opp.volatility,
+                        "score": opp.score,
+                        "indicators": opp.indicators,
+                        "reasoning": opp.reasoning
+                    }
+                    for opp in top_opportunities
+                ],
+                "total": len(filtered),
+                "timestamp": datetime.now().timestamp()
+            }
+            
+            # Update cache
+            OPPORTUNITIES_CACHE[cache_key] = (datetime.now(), response_data)
+            
+            return response_data
         
     except Exception as e:
         logger.error(f"Error getting opportunities: {e}")

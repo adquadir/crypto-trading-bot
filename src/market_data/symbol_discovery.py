@@ -51,6 +51,7 @@ class SymbolDiscovery:
         self.last_update = datetime.now()
         self.update_interval = int(os.getenv('SYMBOL_UPDATE_INTERVAL', '3600'))  # Default 1 hour
         self._update_task = None
+        self._processing_lock = asyncio.Lock()  # Add lock for concurrent processing
         
         # Load configuration from environment
         self.min_volume_24h = float(os.getenv('MIN_24H_VOLUME', '1000000'))
@@ -421,78 +422,82 @@ class SymbolDiscovery:
             
     async def scan_opportunities(self, risk_per_trade: float = 50.0) -> List[TradingOpportunity]:
         """Scan all symbols for trading opportunities with rate limiting and batch processing."""
-        try:
-            # Get all available symbols
-            symbols = await self.discover_symbols()
+        if not hasattr(self, '_processing_lock'):
+            self._processing_lock = asyncio.Lock()
             
-            # Limit the number of symbols to process
-            MAX_SYMBOLS_TO_PROCESS = 20  # Process only top 20 symbols
-            if len(symbols) > MAX_SYMBOLS_TO_PROCESS:
-                logger.info(f"Limiting symbol processing to top {MAX_SYMBOLS_TO_PROCESS} symbols")
-                symbols = symbols[:MAX_SYMBOLS_TO_PROCESS]
-            
-            # Constants for rate limiting and concurrency control
-            BATCH_SIZE = 5  # Number of symbols to process in parallel
-            RATE_LIMIT_DELAY = 1.0  # Delay between batches in seconds
-            MAX_RETRIES = 2  # Reduced from 3 to 2
-            MAX_CONCURRENT_TASKS = 5  # Reduced from 10 to 5
-            
-            opportunities = []
-            total_symbols = len(symbols)
-            
-            # Create a semaphore to limit concurrent tasks
-            semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
-            
-            async def process_with_semaphore(symbol: str) -> Optional[TradingOpportunity]:
-                """Process a symbol with semaphore control."""
-                async with semaphore:
-                    return await self._process_symbol_with_retry(symbol, risk_per_trade, MAX_RETRIES)
-            
-            # Process symbols in batches
-            for i in range(0, total_symbols, BATCH_SIZE):
-                batch_symbols = symbols[i:i + BATCH_SIZE]
-                logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(total_symbols + BATCH_SIZE - 1)//BATCH_SIZE}")
+        async with self._processing_lock:  # Add lock to prevent concurrent processing
+            try:
+                # Get all available symbols
+                symbols = await self.discover_symbols()
                 
-                # Create tasks for the current batch with semaphore control
-                tasks = []
-                for symbol in batch_symbols:
-                    task = asyncio.create_task(process_with_semaphore(symbol))
-                    tasks.append(task)
+                # Limit the number of symbols to process
+                MAX_SYMBOLS_TO_PROCESS = 20  # Process only top 20 symbols
+                if len(symbols) > MAX_SYMBOLS_TO_PROCESS:
+                    logger.info(f"Limiting symbol processing to top {MAX_SYMBOLS_TO_PROCESS} symbols")
+                    symbols = symbols[:MAX_SYMBOLS_TO_PROCESS]
                 
-                # Process batch concurrently with timeout
-                try:
-                    batch_results = await asyncio.wait_for(
-                        asyncio.gather(*tasks, return_exceptions=True),
-                        timeout=30.0  # 30 second timeout per batch
-                    )
-                except asyncio.TimeoutError:
-                    logger.error("Batch processing timed out")
-                    continue
+                # Constants for rate limiting and concurrency control
+                BATCH_SIZE = 5  # Number of symbols to process in parallel
+                RATE_LIMIT_DELAY = 1.0  # Delay between batches in seconds
+                MAX_RETRIES = 2  # Reduced from 3 to 2
+                MAX_CONCURRENT_TASKS = 5  # Reduced from 10 to 5
                 
-                # Filter out exceptions and add valid opportunities
-                for result in batch_results:
-                    if isinstance(result, Exception):
-                        logger.error(f"Error processing symbol: {result}")
+                opportunities = []
+                total_symbols = len(symbols)
+                
+                # Create a semaphore to limit concurrent tasks
+                semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+                
+                async def process_with_semaphore(symbol: str) -> Optional[TradingOpportunity]:
+                    """Process a symbol with semaphore control."""
+                    async with semaphore:
+                        return await self._process_symbol_with_retry(symbol, risk_per_trade, MAX_RETRIES)
+                
+                # Process symbols in batches
+                for i in range(0, total_symbols, BATCH_SIZE):
+                    batch_symbols = symbols[i:i + BATCH_SIZE]
+                    logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(total_symbols + BATCH_SIZE - 1)//BATCH_SIZE}")
+                    
+                    # Create tasks for the current batch with semaphore control
+                    tasks = []
+                    for symbol in batch_symbols:
+                        task = asyncio.create_task(process_with_semaphore(symbol))
+                        tasks.append(task)
+                    
+                    # Process batch concurrently with timeout
+                    try:
+                        batch_results = await asyncio.wait_for(
+                            asyncio.gather(*tasks, return_exceptions=True),
+                            timeout=30.0  # 30 second timeout per batch
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error("Batch processing timed out")
                         continue
-                    if result:
-                        opportunities.append(result)
+                    
+                    # Filter out exceptions and add valid opportunities
+                    for result in batch_results:
+                        if isinstance(result, Exception):
+                            logger.error(f"Error processing symbol: {result}")
+                            continue
+                        if result:
+                            opportunities.append(result)
+                    
+                    # Add delay between batches to respect rate limits
+                    if i + BATCH_SIZE < total_symbols:
+                        await asyncio.sleep(RATE_LIMIT_DELAY)
                 
-                # Add delay between batches to respect rate limits
-                if i + BATCH_SIZE < total_symbols:
-                    await asyncio.sleep(RATE_LIMIT_DELAY)
-            
-            # Sort opportunities by score
-            opportunities.sort(key=lambda x: x.score, reverse=True)
-            
-            # Update opportunities dictionary
-            self.opportunities = {opp.symbol: opp for opp in opportunities}
-            
-            logger.info(f"Found {len(opportunities)} opportunities out of {total_symbols} symbols")
-            return opportunities
-            
-        except Exception as e:
-            logger.error(f"Error scanning opportunities: {e}")
-            return []
+                # Sort opportunities by score
+                opportunities.sort(key=lambda x: x.score, reverse=True)
+                
+                # Update opportunities dictionary
+                self.opportunities = {opp.symbol: opp for opp in opportunities}
+                
+                logger.info(f"Found {len(opportunities)} opportunities out of {total_symbols} symbols")
+                return opportunities
+                
+            except Exception as e:
+                logger.error(f"Error scanning opportunities: {e}")
+                return []
             
     def _validate_signal(self, signal: Dict) -> SignalValidationResult:
         """Validate a trading signal."""
