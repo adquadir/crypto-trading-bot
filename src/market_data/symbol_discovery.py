@@ -427,6 +427,7 @@ class SymbolDiscovery:
             
         async with self._processing_lock:  # Add lock to prevent concurrent processing
             try:
+                logger.info("Starting opportunity scan")
                 # Get all available symbols
                 symbols = await self.discover_symbols()
                 
@@ -435,6 +436,8 @@ class SymbolDiscovery:
                 if len(symbols) > MAX_SYMBOLS_TO_PROCESS:
                     logger.info(f"Limiting symbol processing to top {MAX_SYMBOLS_TO_PROCESS} symbols")
                     symbols = symbols[:MAX_SYMBOLS_TO_PROCESS]
+                
+                logger.info(f"Processing {len(symbols)} symbols: {', '.join(symbols)}")
                 
                 # Constants for rate limiting and concurrency control
                 BATCH_SIZE = 5  # Number of symbols to process in parallel
@@ -451,12 +454,16 @@ class SymbolDiscovery:
                 async def process_with_semaphore(symbol: str) -> Optional[TradingOpportunity]:
                     """Process a symbol with semaphore control."""
                     async with semaphore:
-                        return await self._process_symbol_with_retry(symbol, risk_per_trade, MAX_RETRIES)
+                        logger.debug(f"Processing symbol: {symbol}")
+                        result = await self._process_symbol_with_retry(symbol, risk_per_trade, MAX_RETRIES)
+                        if result:
+                            logger.info(f"Found opportunity for {symbol}: {result.direction} at {result.entry_price}")
+                        return result
                 
                 # Process symbols in batches
                 for i in range(0, total_symbols, BATCH_SIZE):
                     batch_symbols = symbols[i:i + BATCH_SIZE]
-                    logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(total_symbols + BATCH_SIZE - 1)//BATCH_SIZE}")
+                    logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(total_symbols + BATCH_SIZE - 1)//BATCH_SIZE}: {', '.join(batch_symbols)}")
                     
                     # Create tasks for the current batch with semaphore control
                     tasks = []
@@ -471,7 +478,7 @@ class SymbolDiscovery:
                             timeout=30.0  # 30 second timeout per batch
                         )
                     except asyncio.TimeoutError:
-                        logger.error("Batch processing timed out")
+                        logger.error(f"Batch processing timed out for symbols: {', '.join(batch_symbols)}")
                         continue
                     
                     # Filter out exceptions and add valid opportunities
@@ -493,6 +500,8 @@ class SymbolDiscovery:
                 self.opportunities = {opp.symbol: opp for opp in opportunities}
                 
                 logger.info(f"Found {len(opportunities)} opportunities out of {total_symbols} symbols")
+                if opportunities:
+                    logger.info(f"Top opportunities: {', '.join([f'{opp.symbol}({opp.score:.2f})' for opp in opportunities[:3]])}")
                 return opportunities
                 
             except Exception as e:
