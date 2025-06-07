@@ -1,9 +1,14 @@
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
 from .models import Base, Strategy # Import Base and Strategy
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -25,33 +30,61 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def update_db_schema():
     """Update database schema to match models while preserving data."""
-    inspector = inspect(engine)
-    
-    # Get existing tables
-    existing_tables = inspector.get_table_names()
-    
-    # Create any missing tables
-    Base.metadata.create_all(bind=engine)
-    
-    # Check for missing columns in trading_signals
-    if 'trading_signals' in existing_tables:
-        existing_columns = [col['name'] for col in inspector.get_columns('trading_signals')]
-        missing_columns = []
+    try:
+        inspector = inspect(engine)
         
-        # Check for missing columns
-        if 'action' not in existing_columns:
-            missing_columns.append('action')
+        # Get existing tables
+        existing_tables = inspector.get_table_names()
+        logger.info(f"Existing tables: {existing_tables}")
         
-        # Add missing columns if any
-        if missing_columns:
-            with engine.connect() as conn:
-                for column in missing_columns:
-                    try:
-                        conn.execute(f"ALTER TABLE trading_signals ADD COLUMN {column} VARCHAR")
-                        print(f"Added missing column: {column}")
-                    except Exception as e:
-                        print(f"Error adding column {column}: {e}")
-                conn.commit()
+        # Create any missing tables
+        Base.metadata.create_all(bind=engine)
+        
+        # Check for missing columns in trading_signals
+        if 'trading_signals' in existing_tables:
+            existing_columns = [col['name'] for col in inspector.get_columns('trading_signals')]
+            logger.info(f"Existing columns in trading_signals: {existing_columns}")
+            
+            missing_columns = []
+            
+            # Check for missing columns
+            if 'action' not in existing_columns:
+                missing_columns.append('action')
+            
+            # Add missing columns if any
+            if missing_columns:
+                with engine.connect() as conn:
+                    for column in missing_columns:
+                        try:
+                            # PostgreSQL specific ALTER TABLE
+                            conn.execute(text(f"ALTER TABLE trading_signals ADD COLUMN IF NOT EXISTS {column} VARCHAR"))
+                            logger.info(f"Added missing column: {column}")
+                        except Exception as e:
+                            logger.error(f"Error adding column {column}: {e}")
+                            # Try alternative approach for PostgreSQL
+                            try:
+                                conn.execute(text(f"""
+                                    DO $$ 
+                                    BEGIN
+                                        IF NOT EXISTS (
+                                            SELECT 1 
+                                            FROM information_schema.columns 
+                                            WHERE table_name = 'trading_signals' 
+                                            AND column_name = '{column}'
+                                        ) THEN
+                                            ALTER TABLE trading_signals ADD COLUMN {column} VARCHAR;
+                                        END IF;
+                                    END $$;
+                                """))
+                                logger.info(f"Added missing column using alternative approach: {column}")
+                            except Exception as e2:
+                                logger.error(f"Alternative approach also failed for column {column}: {e2}")
+                    conn.commit()
+        
+        logger.info("Database schema update completed successfully")
+    except Exception as e:
+        logger.error(f"Error updating database schema: {e}")
+        raise
 
 # Function to create database tables
 def create_db_tables():
