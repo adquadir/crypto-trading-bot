@@ -1173,3 +1173,52 @@ class SymbolDiscovery:
         # Avoid division by zero for mean_deviation_sma
         cci = np.where(mean_deviation_sma == 0, np.nan, (typical_price - sma) / (0.015 * mean_deviation_sma))
         return cci 
+
+    async def _process_symbol(self, symbol: str) -> Optional[Dict]:
+        """Process a single symbol and generate signals if conditions are met."""
+        try:
+            # Fetch market data
+            logger.debug(f"Fetching market data for {symbol}")
+            market_data = await self._fetch_market_data(symbol)
+            if not market_data:
+                logger.debug(f"No market data available for {symbol}")
+                return None
+                
+            # Calculate indicators
+            logger.debug(f"Calculating indicators for {symbol}")
+            indicators = self._calculate_indicators(market_data['klines'])
+            if not indicators:
+                logger.debug(f"Failed to calculate indicators for {symbol}")
+                return None
+                
+            # Calculate confidence score
+            logger.debug(f"Calculating confidence score for {symbol}")
+            confidence_score = self._calculate_confidence_score(market_data, indicators)
+            if confidence_score < self.min_confidence_score:
+                logger.debug(f"Confidence score too low for {symbol}: {confidence_score}")
+                return None
+                
+            # Generate signals
+            logger.debug(f"Generating signals for {symbol}")
+            signal = self.signal_generator.generate_signals(symbol, indicators, confidence_score)
+            if not signal:
+                logger.debug(f"No signal generated for {symbol}")
+                return None
+                
+            # Create opportunity
+            logger.debug(f"Creating opportunity for {symbol}")
+            opportunity = {
+                'symbol': symbol,
+                'signal': signal,
+                'market_data': market_data,
+                'indicators': indicators,
+                'confidence_score': confidence_score,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            logger.info(f"Created opportunity for {symbol} with confidence {confidence_score}")
+            return opportunity
+            
+        except Exception as e:
+            logger.error(f"Error processing symbol {symbol}: {e}")
+            return None 
