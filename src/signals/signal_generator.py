@@ -215,11 +215,12 @@ class SignalGenerator:
                 signal_type = "SELL"
                 direction = "SHORT"
             else:
-                signal_type = "NEUTRAL"
-                direction = "NEUTRAL"
-                logger.debug(f"Generated NEUTRAL signal for {symbol} with strength {signal_strength}. Returning None.")
-                return None # Return None for neutral signals
+                # If signal is NEUTRAL, we explicitly return None.
+                # This prevents NEUTRAL signals from ever reaching validation.
+                logger.debug(f"Generated NEUTRAL signal for {symbol} with strength {signal_strength}. Skipping signal generation and returning None.")
+                return None
                 
+            # If we reach here, it means a BUY or SELL signal was generated.
             # Calculate entry, take profit, and stop loss levels
             atr = indicators.get('atr', 0)
             # Ensure ATR is a valid number
