@@ -183,11 +183,20 @@ class SymbolDiscovery:
             # Check cache first
             cache_key = f"market_data_{symbol}"
             cached_data = self.cache.get(cache_key)
+            
+            # If we have cached data, check if it has the new structure
             if cached_data:
-                logger.debug(f"Using cached market data for {symbol}")
-                return cached_data
+                required_fields = ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']
+                if all(field in cached_data for field in required_fields):
+                    logger.debug(f"Using cached market data for {symbol}")
+                    return cached_data
+                else:
+                    # Cache has old structure, remove it
+                    logger.debug(f"Clearing outdated cache for {symbol}")
+                    self.cache.delete(cache_key)
 
             # Fetch fresh data
+            logger.debug(f"Fetching fresh market data for {symbol}")
             klines = await self.exchange_client.get_historical_data(symbol, '1m', limit=100)
             funding_rate = await self.exchange_client.get_funding_rate(symbol)
             ticker = await self.exchange_client.get_ticker_24h(symbol)
@@ -198,13 +207,13 @@ class SymbolDiscovery:
             market_data = {
                 'klines': klines,
                 'funding_rate': funding_rate,
-                'ticker_24h': ticker,  # Changed from 'ticker' to 'ticker_24h'
+                'ticker_24h': ticker,
                 'orderbook': orderbook,
                 'open_interest': open_interest
             }
 
             # Cache the data
-            self.cache[cache_key] = market_data
+            self.cache.set(cache_key, market_data, ttl=60)  # Cache for 1 minute
             logger.debug(f"Cached fresh market data for {symbol}")
 
             return market_data
