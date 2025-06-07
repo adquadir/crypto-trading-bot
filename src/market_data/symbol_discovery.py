@@ -1003,19 +1003,24 @@ class SymbolDiscovery:
             # Calculate CCI
             cci = self._calculate_cci(highs, lows, closes)
             
+            # Get current price
+            current_price = float(closes[-1])
+            
             return {
                 'macd': {
                     'value': float(macd_line[-1]),
                     'signal': float(signal_line[-1]),
                     'histogram': float(macd_histogram[-1])
                 },
-                'macd_signal': float(signal_line[-1]),  # Add this for signal generator
+                'macd_signal': float(signal_line[-1]),
                 'rsi': float(rsi[-1]),
                 'bollinger_bands': {
                     'upper': float(bb_upper[-1]),
                     'middle': float(bb_middle[-1]),
                     'lower': float(bb_lower[-1])
                 },
+                'bb_upper': float(bb_upper[-1]),  # Add these for signal generator
+                'bb_lower': float(bb_lower[-1]),  # Add these for signal generator
                 'stochastic': {
                     'k': float(stoch_k[-1]),
                     'd': float(stoch_d[-1])
@@ -1031,8 +1036,10 @@ class SymbolDiscovery:
                     'di_plus': float(di_plus[-1]),
                     'di_minus': float(di_minus[-1])
                 },
+                'plus_di': float(di_plus[-1]),  # Add these for signal generator
+                'minus_di': float(di_minus[-1]),  # Add these for signal generator
                 'cci': float(cci[-1]),
-                'current_price': float(closes[-1])
+                'current_price': current_price
             }
             
         except Exception as e:
