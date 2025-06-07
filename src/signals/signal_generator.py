@@ -109,11 +109,17 @@ class SignalGenerator:
             logger.error(f"Error calculating indicators: {e}")
             return {}
             
-    def generate_signals(self, symbol: str, indicators: Dict, initial_confidence: float = 0.0) -> Dict:
+    def generate_signals(self, symbol: str, market_data: Dict, initial_confidence: float = 0.0) -> Dict:
         """Generate trading signals based on technical indicators."""
         try:
+            if not market_data or 'klines' not in market_data:
+                logger.warning(f"No market data available for {symbol}")
+                return {}
+                
+            # Calculate indicators
+            indicators = self.calculate_indicators(market_data, {})
             if not indicators:
-                logger.warning(f"No indicators available for {symbol}")
+                logger.warning(f"Failed to calculate indicators for {symbol}")
                 return {}
                 
             signal_strength = initial_confidence
@@ -166,28 +172,52 @@ class SignalGenerator:
                 signal_strength -= 1
                 reasons.append("CCI bearish")
                 
-            # Determine signal type based on final strength
+            # Determine signal type and direction based on final strength
             if signal_strength >= 3:
                 signal_type = "BUY"
+                direction = "LONG"
             elif signal_strength <= -3:
                 signal_type = "SELL"
+                direction = "SHORT"
             else:
                 signal_type = "NEUTRAL"
+                direction = "NEUTRAL"
+                
+            # Calculate entry, take profit, and stop loss levels
+            atr = indicators.get('atr', 0)
+            if atr > 0 and direction != "NEUTRAL":
+                if direction == "LONG":
+                    entry = current_price
+                    take_profit = entry + (atr * 2)  # 2 ATR for take profit
+                    stop_loss = entry - (atr * 1)    # 1 ATR for stop loss
+                else:  # SHORT
+                    entry = current_price
+                    take_profit = entry - (atr * 2)  # 2 ATR for take profit
+                    stop_loss = entry + (atr * 1)    # 1 ATR for stop loss
+            else:
+                entry = current_price
+                take_profit = current_price
+                stop_loss = current_price
                 
             return {
                 'symbol': symbol,
                 'signal_type': signal_type,
+                'direction': direction,
                 'strength': signal_strength,
                 'confidence': abs(signal_strength) / 5.0,  # Normalize to 0-1 range
                 'reasons': reasons,
                 'timestamp': datetime.now().isoformat(),
                 'price': current_price,
+                'entry': entry,
+                'take_profit': take_profit,
+                'stop_loss': stop_loss,
                 'indicators': {
                     'macd': indicators['macd'],
                     'rsi': rsi,
                     'bollinger_bands': bb,
                     'adx': adx,
-                    'cci': cci
+                    'cci': cci,
+                    'atr': atr
                 }
             }
             
