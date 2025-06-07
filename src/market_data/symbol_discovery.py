@@ -173,68 +173,58 @@ class SymbolDiscovery:
             return symbols
 
     async def get_market_data(self, symbol: str) -> Optional[Dict]:
-        """Fetch comprehensive market data for a symbol."""
+        """Get market data for a symbol with caching."""
         try:
-            # Get OHLCV data
-            ohlcv = await self.exchange_client.get_historical_data(
-                symbol, interval="1m", limit=200
-            )
+            # Check cache first
+            cache_key = f"market_data_{symbol}"
+            cached_data = self.cache.get(cache_key)
+            if cached_data:
+                logger.debug(f"Using cached market data for {symbol}")
+                return cached_data
+
+            # Fetch data in parallel
+            logger.debug(f"Fetching market data for {symbol}")
+            tasks = [
+                self.exchange_client.get_klines(symbol, '1m', limit=100),  # Reduced from 200 to 100
+                self.exchange_client.get_funding_rate(symbol),
+                self.exchange_client.get_ticker_24h(symbol),
+                self.exchange_client.get_orderbook(symbol, limit=10),
+                self.exchange_client.get_open_interest(symbol)
+            ]
             
-            # Get funding rate
-            funding_rate = await self.exchange_client.get_funding_rate(symbol)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Get 24h statistics
-            ticker_24h = await self.exchange_client.get_ticker_24h(symbol)
+            # Process results
+            klines, funding_rate, ticker, orderbook, open_interest = results
             
-            # Get order book
-            orderbook = await self.exchange_client.get_orderbook(symbol, limit=10)
-            
-            # Calculate spread from orderbook
-            spread = self._calculate_spread(orderbook)
-            
-            # Calculate liquidity from orderbook
-            liquidity = self._calculate_liquidity(orderbook)
-            
-            # Calculate market cap (approximate)
-            market_cap = self._calculate_market_cap(ticker_24h)
-            
-            # Calculate open interest
-            open_interest = await self.exchange_client.get_open_interest(symbol)
-            
-            # Calculate volatility
-            volatility = self.calculate_volatility(ohlcv)
-            
-            # Calculate price stability
-            price_stability = self._check_price_stability(ohlcv)
-            
-            # Calculate volume trend
-            volume_trend = self._check_volume_trend(ohlcv)
-            
-            # Calculate technical indicators
-            indicators = self._calculate_indicators(ohlcv)
-            
-            return {
+            # Check for errors
+            if any(isinstance(r, Exception) for r in results):
+                logger.error(f"Error fetching market data for {symbol}")
+                return None
+                
+            # Process klines
+            if not klines or len(klines) < 100:  # Reduced from 200 to 100
+                logger.warning(f"Insufficient kline data for {symbol}")
+                return None
+                
+            # Create market data dictionary
+            market_data = {
                 'symbol': symbol,
-                'ohlcv': ohlcv,
+                'klines': klines,
                 'funding_rate': funding_rate,
-                'volume_24h': float(ticker_24h['volume']),
-                'price_change_24h': float(ticker_24h['priceChangePercent']),
+                'ticker': ticker,
                 'orderbook': orderbook,
-                'spread': spread,
-                'liquidity': liquidity,
-                'market_cap': market_cap,
                 'open_interest': open_interest,
-                'volatility': volatility,
-                'price_stability': price_stability,
-                'volume_trend': volume_trend,
-                'last_price': float(ticker_24h['lastPrice']),
-                'high_24h': float(ticker_24h['highPrice']),
-                'low_24h': float(ticker_24h['lowPrice']),
-                'quote_volume': float(ticker_24h['quoteVolume']),
-                'indicators': indicators
+                'timestamp': datetime.now().timestamp()
             }
+            
+            # Cache the data for 5 minutes
+            self.cache.set(cache_key, market_data, ttl=300)
+            
+            return market_data
+            
         except Exception as e:
-            logger.error(f"Error fetching market data for {symbol}: {e}")
+            logger.error(f"Error getting market data for {symbol}: {e}")
             return None
             
     def _calculate_spread(self, orderbook: Dict) -> float:
