@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Optional
@@ -793,10 +793,10 @@ async def update_settings(settings: dict):
 
 @app.get("/api/trading/opportunities")
 async def get_opportunities(
-    min_confidence: float = 0.7,
-    min_risk_reward: float = 2.0,
+    min_confidence: float = Query(0.5, ge=0.0, le=1.0, description="Minimum confidence score for opportunities"),
+    min_risk_reward: float = Query(1.5, ge=0.0, description="Minimum risk-reward ratio for opportunities"),
     min_volume: float = 1000000,
-    limit: int = 10
+    limit: int = Query(50, ge=1, le=100, description="Limit the number of opportunities returned")
 ):
     """Get top trading opportunities."""
     try:

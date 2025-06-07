@@ -60,12 +60,12 @@ class SymbolDiscovery:
         
         # Load configuration from environment
         self.min_volume_24h = float(os.getenv('MIN_24H_VOLUME', '1000000'))
-        self.min_confidence = float(os.getenv('MIN_CONFIDENCE', '0.7'))
-        self.min_risk_reward = float(os.getenv('MIN_RISK_REWARD', '2.0'))
+        self.min_confidence = float(os.getenv('MIN_CONFIDENCE', '0.5'))
+        self.min_risk_reward = float(os.getenv('MIN_RISK_REWARD', '1.5'))
         self.max_leverage = float(os.getenv('MAX_LEVERAGE', '20.0'))
         
         # Advanced filtering parameters
-        self.min_market_cap = float(os.getenv('MIN_MARKET_CAP', '100000000'))
+        self.min_market_cap = float(os.getenv('MIN_MARKET_CAP', '10000000'))
         self.max_spread = float(os.getenv('MAX_SPREAD', '0.002'))
         self.min_liquidity = float(os.getenv('MIN_LIQUIDITY', '500000'))
         self.max_correlation = float(os.getenv('MAX_CORRELATION', '0.7'))
@@ -73,7 +73,7 @@ class SymbolDiscovery:
         self.max_volatility = float(os.getenv('MAX_VOLATILITY', '0.05'))
         self.min_funding_rate = float(os.getenv('MIN_FUNDING_RATE', '-0.0001'))
         self.max_funding_rate = float(os.getenv('MAX_FUNDING_RATE', '0.0001'))
-        self.min_open_interest = float(os.getenv('MIN_OPEN_INTEREST', '1000000'))
+        self.min_open_interest = float(os.getenv('MIN_OPEN_INTEREST', '100000'))
         self.max_symbols = int(os.getenv('MAX_SYMBOLS', '50'))
         
         # Cache configuration
@@ -790,7 +790,7 @@ class SymbolDiscovery:
 
                 # Discard if risk-reward is below minimum
                 if risk_reward < self.min_risk_reward:
-                    logger.debug(f"Opportunity for {symbol_name} discarded due to low risk-reward ({risk_reward} < {self.min_risk_reward})")
+                    logger.info(f"Opportunity for {symbol_name} discarded due to low risk-reward ({risk_reward:.2f} < {self.min_risk_reward:.2f})")
                     return None
 
                 # Calculate leverage for the opportunity object (display/scoring)
@@ -831,7 +831,7 @@ class SymbolDiscovery:
                 # Check if the calculated score meets the minimum confidence requirement
                 # This is a redundancy if min_confidence filter is applied earlier, but good for clarity
                 if opportunity.confidence < self.min_confidence:
-                     logger.debug(f"Opportunity for {symbol_name} discarded after scoring due to low confidence ({opportunity.confidence} < {self.min_confidence})")
+                     logger.info(f"Opportunity for {symbol_name} discarded after scoring due to low confidence ({opportunity.confidence:.2f} < {self.min_confidence:.2f})")
                      return None
 
                 return opportunity
@@ -847,66 +847,59 @@ class SymbolDiscovery:
 
         return None
 
-    def _apply_advanced_filters(self, market_data: Dict) -> bool:
-        """Apply advanced filters to market data."""
-        try:
-            symbol = market_data.get('symbol', 'UNKNOWN')
-            reasons = []
+    def _apply_advanced_filters(self, market_data: Dict) -> Tuple[bool, List[str]]:
+        """Apply advanced filters to market data, returning reasons for exclusion."""
+        symbol = market_data.get('symbol', 'UNKNOWN')
+        reasons = []
 
-            # Volume filter
-            volume_24h = market_data.get('ticker_24h', {}).get('volume', 0)
-            if volume_24h < self.min_volume_24h:
-                reasons.append(f"Low volume: {volume_24h} < {self.min_volume_24h}")
+        # Volume filter
+        volume_24h = market_data.get('ticker_24h', {}).get('volume', 0)
+        if volume_24h < self.min_volume_24h:
+            reasons.append(f"Low volume: {volume_24h:.2f} < {self.min_volume_24h:.2f}")
 
-            # Spread filter
-            spread = self._calculate_spread(market_data.get('orderbook', {}))
-            if spread > self.max_spread:
-                reasons.append(f"Spread too high: {spread} > {self.max_spread}")
+        # Spread filter
+        spread = self._calculate_spread(market_data.get('orderbook', {}))
+        if spread > self.max_spread:
+            reasons.append(f"Spread too high: {spread:.4f} > {self.max_spread:.4f}")
 
-            # Liquidity filter
-            liquidity = self._calculate_liquidity(market_data.get('orderbook', {}))
-            if liquidity < self.min_liquidity:
-                reasons.append(f"Low liquidity: {liquidity} < {self.min_liquidity}")
+        # Liquidity filter
+        liquidity = self._calculate_liquidity(market_data.get('orderbook', {}))
+        if liquidity < self.min_liquidity:
+            reasons.append(f"Low liquidity: {liquidity:.2f} < {self.min_liquidity:.2f}")
 
-            # Market cap filter
-            market_cap = self._calculate_market_cap(market_data.get('ticker_24h', {}))
-            if market_cap < self.min_market_cap:
-                reasons.append(f"Low market cap: {market_cap} < {self.min_market_cap}")
+        # Market cap filter
+        market_cap = self._calculate_market_cap(market_data.get('ticker_24h', {}))
+        if market_cap < self.min_market_cap:
+            reasons.append(f"Low market cap: {market_cap:.2f} < {self.min_market_cap:.2f}")
 
-            # Volatility filter
-            volatility = self.calculate_volatility(market_data.get('klines', []))
-            if not (self.min_volatility <= volatility <= self.max_volatility):
-                reasons.append(f"Volatility out of range: {volatility} ({self.min_volatility}-{self.max_volatility})")
+        # Volatility filter
+        volatility = self.calculate_volatility(market_data.get('klines', []))
+        if not (self.min_volatility <= volatility <= self.max_volatility):
+            reasons.append(f"Volatility out of range: {volatility:.4f} ({self.min_volatility:.4f}-{self.max_volatility:.4f})")
 
-            # Funding rate filter
-            funding_rate = market_data.get('funding_rate', 0)
-            if not (self.min_funding_rate <= funding_rate <= self.max_funding_rate):
-                reasons.append(f"Funding rate out of range: {funding_rate} ({self.min_funding_rate}-{self.max_funding_rate})")
+        # Funding rate filter
+        funding_rate = market_data.get('funding_rate', 0)
+        if not (self.min_funding_rate <= funding_rate <= self.max_funding_rate):
+            reasons.append(f"Funding rate out of range: {funding_rate:.6f} ({self.min_funding_rate:.6f}-{self.max_funding_rate:.6f})")
 
-            # Open interest filter
-            open_interest = market_data.get('open_interest', 0)
-            if open_interest < self.min_open_interest:
-                reasons.append(f"Low open interest: {open_interest} < {self.min_open_interest}")
+        # Open interest filter
+        open_interest = market_data.get('open_interest', 0)
+        if open_interest < self.min_open_interest:
+            reasons.append(f"Low open interest: {open_interest:.2f} < {self.min_open_interest:.2f}")
 
-            # Price stability filter
-            if not self._check_price_stability(market_data.get('klines', [])):
-                reasons.append("Price instability")
+        # Price stability filter
+        if not self._check_price_stability(market_data.get('klines', [])):
+            reasons.append("Price instability")
 
-            # Volume trend filter
-            if not self._check_volume_trend(market_data.get('klines', [])):
-                reasons.append("Unhealthy volume trend")
+        # Volume trend filter
+        if not self._check_volume_trend(market_data.get('klines', [])):
+            reasons.append("Unhealthy volume trend")
 
-            if reasons:
-                logger.debug(f"Excluded {symbol}: {'; '.join(reasons)}")
-                return False
+        if reasons:
+            logger.info(f"Excluded {symbol}: {'; '.join(reasons)}") # Change to INFO level
+            return False, reasons
 
-            return True
-
-        except Exception as e:
-            logger.error(f"Error applying advanced filters for {symbol}: {e}")
-            # If an error occurs during filtering a symbol, we should probably exclude it
-            logger.debug(f"Excluded {symbol} due to error during filtering.")
-            return False
+        return True, []
             
     def _check_price_stability(self, ohlcv: List[Dict]) -> bool:
         """Check if price is stable enough for trading."""
