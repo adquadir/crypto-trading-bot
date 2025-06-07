@@ -45,10 +45,13 @@ def get_db():
     finally:
         db.close()
 
-# Add CORS middleware with specific origins
+# Get allowed CORS origins from environment variable or use a default
+origins_raw = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')
+CORS_ORIGINS = [origin.strip() for origin in origins_raw.split(',') if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://50.31.0.105:3000"],  # Your frontend URL
+    allow_origins=CORS_ORIGINS,  # Your frontend URL(s) from env var
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
