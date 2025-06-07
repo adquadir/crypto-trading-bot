@@ -121,6 +121,9 @@ BINANCE_API_KEY=your_api_key_here
 BINANCE_API_SECRET=your_api_secret_here
 USE_TESTNET=True
 
+# Frontend/Backend Communication
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000 # Comma-separated list of allowed frontend origins (e.g., http://yourfrontend.com)
+
 # Database Configuration
 DATABASE_URL=postgresql://user:password@localhost:5432/crypto_trading
 DB_POOL_SIZE=5
@@ -160,9 +163,9 @@ Create configuration files in the `config/` directory:
 - `config/production.yaml` - Production-specific settings
 
 4. **Initialize Database**
-   ```bash
-   python scripts/init_db.py
-   ```
+The database tables are automatically created and initial strategies are populated when the backend API service (`src/api/main.py`) starts for the first time. There is no separate `init_db.py` script to run.
+
+   If you need to perform database migrations for schema changes, it is recommended to use a dedicated migration tool like Alembic.
 
 5. **Setup Services**
 Choose one of the following methods:

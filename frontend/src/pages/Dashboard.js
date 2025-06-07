@@ -55,10 +55,19 @@ const Dashboard = () => {
   const maxRetries = 3;
 
   const handleError = (error) => {
-    console.error('Error:', error);
+    console.error('Error (raw):', error);
     let errorMessage = 'Failed to fetch dashboard data';
 
-    if (error.response) {
+    // FIRST AND FOREMOST: Ensure 'error' is a non-null object.
+    // If not, convert it to a string for display and stop processing.
+    if (typeof error !== 'object' || error === null) {
+      errorMessage = `An unexpected error occurred: ${String(error)}`;
+      setError(errorMessage);
+      return;
+    }
+
+    // Safely access error.response and its status
+    if (error.response && typeof error.response === 'object' && typeof error.response.status !== 'undefined') {
       switch (error.response.status) {
         case 401:
           errorMessage = 'Authentication required. Please log in.';
@@ -76,9 +85,15 @@ const Dashboard = () => {
           errorMessage = `Server error: ${error.response.status}`;
       }
     } else if (error.request) {
+      // error.request exists, which means a request was made but no response was received (e.g., network error, timeout)
       errorMessage = 'No response from server. Please check your connection.';
-    } else if (error.code === 'ECONNABORTED') {
+    } else if (typeof error.code !== 'undefined' && error.code === 'ECONNABORTED') {
+      // Specific check for Axios timeout code
       errorMessage = 'Request timed out. Please try again.';
+    } else {
+      // Fallback for any other unexpected error formats (objects that lack specific properties, or custom errors)
+      // Use error.message if available, otherwise try to stringify the object, or default to 'unknown'.
+      errorMessage = `An unexpected error occurred: ${error.message || (error.toString ? error.toString() : JSON.stringify(error)) || 'unknown'}`;
     }
 
     setError(errorMessage);
