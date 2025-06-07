@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, ForeignKey, JSON
+from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -45,6 +45,7 @@ class TradingSignal(Base):
     symbol = Column(String, index=True)
     timestamp = Column(DateTime, index=True)
     signal_type = Column(String)  # 'LONG' or 'SHORT'
+    action = Column(String) # e.g., 'OPEN_LONG', 'CLOSE_SHORT', 'HOLD'
     confidence = Column(Float)
     price = Column(Float)
     indicators = Column(JSON)  # Store indicators used for signal generation
@@ -92,4 +93,15 @@ class PerformanceMetrics(Base):
     max_drawdown = Column(Float)
     
     def __repr__(self):
-        return f"<PerformanceMetrics(symbol='{self.symbol}', strategy='{self.strategy}', win_rate={self.win_rate})>" 
+        return f"<PerformanceMetrics(symbol='{self.symbol}', strategy='{self.strategy}', win_rate={self.win_rate})>"
+
+class Strategy(Base):
+    __tablename__ = 'strategies'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, index=True)
+    active = Column(Boolean, default=True)
+    parameters = Column(JSON) # Store strategy-specific parameters
+
+    def __repr__(self):
+        return f"<Strategy(name='{self.name}', active={self.active})>" 

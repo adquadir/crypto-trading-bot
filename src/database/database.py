@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
+from .models import Base, Strategy # Import Base and Strategy
 
 # Load environment variables
 load_dotenv()
@@ -22,8 +23,64 @@ engine = create_engine(
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create Base class
-Base = declarative_base()
+# Function to create database tables
+def create_db_tables():
+    Base.metadata.create_all(bind=engine)
+
+# Function to add initial strategies if none exist
+def add_initial_strategies():
+    db = SessionLocal()
+    try:
+        # Check if strategies already exist
+        if db.query(Strategy).count() == 0:
+            print("Adding initial strategies...")
+            default_strategies = [
+                Strategy(
+                    name="MACD Crossover", 
+                    active=True, 
+                    parameters={
+                        "macd_fast_period": 12,
+                        "macd_slow_period": 26,
+                        "macd_signal_period": 9,
+                        "rsi_period": 14,
+                        "rsi_overbought": 70,
+                        "rsi_oversold": 30,
+                        "max_position_size": 0.1,
+                        "max_leverage": 3,
+                        "risk_per_trade": 0.02,
+                        "confidence_threshold": 0.7,
+                        "volatility_factor": 0.5
+                    }
+                ),
+                Strategy(
+                    name="RSI Divergence", 
+                    active=True, 
+                    parameters={
+                        "rsi_period": 14,
+                        "rsi_overbought": 70,
+                        "rsi_oversold": 30,
+                        "max_position_size": 0.05,
+                        "max_leverage": 5,
+                        "risk_per_trade": 0.01,
+                        "confidence_threshold": 0.6,
+                        "volatility_factor": 0.6
+                    }
+                )
+            ]
+            db.add_all(default_strategies)
+            db.commit()
+            print("Initial strategies added.")
+        else:
+            print("Strategies already exist, skipping initial data population.")
+    except Exception as e:
+        print(f"Error adding initial strategies: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+# Call these functions when the module is imported
+create_db_tables()
+add_initial_strategies()
 
 # Dependency to get DB session
 def get_db():

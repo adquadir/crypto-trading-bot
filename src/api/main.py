@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Optional
@@ -13,9 +13,10 @@ from src.market_data.exchange_client import ExchangeClient
 from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
 from src.signals.signal_generator import SignalGenerator
 from src.config import EXCHANGE_CONFIG
-from src.database.models import Trade
+from src.database.models import Trade, TradingSignal, Strategy, PerformanceMetrics
 from src.database.database import SessionLocal
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 import numpy as np
 
 # Load environment variables
@@ -35,6 +36,14 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # Add CORS middleware with specific origins
 app.add_middleware(
@@ -203,8 +212,9 @@ async def market_data_stream(client_id: str):
                     logger.error(f"Error closing websocket for client {client_id}: {e}")
             del manager.active_connections[client_id]
 
-@app.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str):
+@app.websocket("/ws/signals")
+async def websocket_endpoint(websocket: WebSocket):
+    client_id = "signals_client" # Use a fixed client_id for this endpoint
     try:
         await manager.connect(websocket, client_id)
         
@@ -306,54 +316,25 @@ async def get_market_data(symbol: str):
 
 # REST endpoints
 @app.get("/api/trading/signals")
-async def get_signals():
+async def get_signals(db: Session = Depends(get_db)):
     """Get real-time trading signals."""
     try:
-        # In a real implementation, this would come from the trading bot's signal generator
-        # For now, return mock data with the expected structure
-        return {
-            "signals": [
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "symbol": "BTCUSDT",
-                    "signal": "BUY", # This could be 'LONG', 'SHORT', 'NEUTRAL'
-                    "action": "OPEN_LONG", # Specific action like 'OPEN_LONG', 'CLOSE_LONG', 'OPEN_SHORT', 'CLOSE_SHORT'
-                    "confidence": 0.85,
-                    "strategy": "MACD Crossover",
-                    "price": 65000.00,
-                    "indicators": {
-                        "macd": {"value": 0.5, "signal": 0.3},
-                        "rsi": 65,
-                        "bb": {"upper": 50000, "middle": 48000, "lower": 46000}
-                    }
-                },
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "symbol": "ETHUSDT",
-                    "signal": "SELL",
-                    "action": "OPEN_SHORT",
-                    "confidence": 0.78,
-                    "strategy": "RSI Divergence",
-                    "price": 3200.50,
-                    "indicators": {
-                        "rsi": 72,
-                        "stochastic": {"k": 85, "d": 80}
-                    }
-                },
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "symbol": "ADAUSDT",
-                    "signal": "NEUTRAL",
-                    "action": "HOLD",
-                    "confidence": 0.55,
-                    "strategy": "Ichimoku Cloud",
-                    "price": 0.45,
-                    "indicators": {
-                        "ichimoku": {"tenkan": 0.44, "kijun": 0.46, "senkou_span_a": 0.45, "senkou_span_b": 0.47}
-                    }
-                }
-            ]
-        }
+        signals = db.query(TradingSignal).order_by(TradingSignal.timestamp.desc()).limit(100).all()
+        return {"signals": [
+            {
+                "timestamp": signal.timestamp.isoformat(),
+                "symbol": signal.symbol,
+                "signal": signal.signal_type,
+                "action": signal.action,
+                "confidence": signal.confidence,
+                "strategy": signal.strategy,
+                "price": signal.price,
+                "indicators": signal.indicators
+            } for signal in signals
+        ]}
+    except SQLAlchemyError as e:
+        logger.error(f"Database error getting signals: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
     except Exception as e:
         logger.error(f"Error getting signals: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -452,66 +433,50 @@ async def get_positions():
     }
 
 @app.get("/api/trading/strategies")
-async def get_strategies():
+async def get_strategies(db: Session = Depends(get_db)):
     """Get list of trading strategies with their parameters and performance."""
     try:
-        # In a real implementation, this would come from a database
-        # For now, return mock data with the expected structure
-        return {
-            "strategies": [
-                {
-                    "name": "MACD Crossover",
-                    "active": True,
-                    "performance": {
-                        "win_rate": 0.65,
-                        "profit_factor": 1.89,
-                        "sharpe_ratio": 1.5
-                    },
-                    "parameters": {
-                        "macd_fast_period": 12,
-                        "macd_slow_period": 26,
-                        "macd_signal_period": 9,
-                        "rsi_period": 14,
-                        "rsi_overbought": 70,
-                        "rsi_oversold": 30,
-                        "max_position_size": 0.1,
-                        "max_leverage": 3,
-                        "risk_per_trade": 0.02,
-                        "confidence_threshold": 0.7,
-                        "volatility_factor": 0.5
-                    }
-                },
-                {
-                    "name": "RSI Strategy",
-                    "active": True,
-                    "performance": {
-                        "win_rate": 0.58,
-                        "profit_factor": 1.45,
-                        "sharpe_ratio": 1.2
-                    },
-                    "parameters": {
-                        "rsi_period": 14,
-                        "rsi_overbought": 70,
-                        "rsi_oversold": 30,
-                        "max_position_size": 0.1,
-                        "max_leverage": 2,
-                        "risk_per_trade": 0.02,
-                        "confidence_threshold": 0.7,
-                        "volatility_factor": 0.4
-                    }
-                }
-            ]
-        }
+        strategies_from_db = db.query(Strategy).all()
+        all_strategies_data = []
+
+        for strategy_db in strategies_from_db:
+            performance = db.query(PerformanceMetrics).filter(
+                PerformanceMetrics.strategy == strategy_db.name
+            ).first()
+            
+            performance_data = {
+                "win_rate": performance.win_rate if performance else 0.0,
+                "profit_factor": performance.profit_factor if performance else 0.0,
+                "sharpe_ratio": performance.sharpe_ratio if performance else 0.0
+            }
+            
+            strategy_data = {
+                "name": strategy_db.name,
+                "active": strategy_db.active,
+                "performance": performance_data,
+                "parameters": strategy_db.parameters if strategy_db.parameters else {}
+            }
+            all_strategies_data.append(strategy_data)
+
+        return {"strategies": all_strategies_data}
+    except SQLAlchemyError as e:
+        logger.error(f"Database error getting strategies: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
     except Exception as e:
         logger.error(f"Error getting strategies: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/trading/strategies/{strategy_name}")
-async def update_strategy(strategy_name: str, strategy: dict):
+async def update_strategy(strategy_name: str, strategy: dict, db: Session = Depends(get_db)):
     """Update a trading strategy's parameters."""
     try:
+        # Find the strategy in the database
+        strategy_to_update = db.query(Strategy).filter(Strategy.name == strategy_name).first()
+        if not strategy_to_update:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
         # Validate required fields
-        required_fields = ["name", "active", "performance", "parameters"]
+        required_fields = ["name", "active", "parameters"]
         for field in required_fields:
             if field not in strategy:
                 raise HTTPException(
@@ -519,7 +484,7 @@ async def update_strategy(strategy_name: str, strategy: dict):
                     detail=f"Missing required field: {field}"
                 )
         
-        # Validate parameters
+        # Validate parameters (as before, but against the incoming dict)
         required_params = [
             "macd_fast_period", "macd_slow_period", "macd_signal_period",
             "rsi_period", "rsi_overbought", "rsi_oversold",
@@ -534,7 +499,7 @@ async def update_strategy(strategy_name: str, strategy: dict):
                     detail=f"Missing required parameter: {param}"
                 )
         
-        # Validate numeric ranges
+        # Validate numeric ranges (as before)
         param_ranges = {
             "macd_fast_period": (5, 20),
             "macd_slow_period": (15, 40),
@@ -557,29 +522,50 @@ async def update_strategy(strategy_name: str, strategy: dict):
                     detail=f"Invalid value for {param}: must be between {min_val} and {max_val}"
                 )
         
-        # In a real implementation, this would update a database
-        # For now, just return success
+        # Update the strategy in the database
+        strategy_to_update.active = strategy["active"]
+        strategy_to_update.parameters = strategy["parameters"]
+        db.commit()
+        db.refresh(strategy_to_update)
+        
         return {
             "success": True,
             "message": f"Strategy {strategy_name} updated successfully",
-            "strategy": strategy
+            "strategy": {
+                "name": strategy_to_update.name,
+                "active": strategy_to_update.active,
+                "performance": strategy["performance"], # Use the performance from the incoming dict
+                "parameters": strategy_to_update.parameters
+            }
         }
     except HTTPException:
         raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error updating strategy: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
     except Exception as e:
         logger.error(f"Error updating strategy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/trading/strategies/{strategy_name}/toggle")
-async def toggle_strategy(strategy_name: str, active: bool):
+async def toggle_strategy(strategy_name: str, active: bool, db: Session = Depends(get_db)):
     """Toggle a strategy's active state."""
     try:
-        # In a real implementation, this would update a database
-        # For now, just return success
+        strategy_to_toggle = db.query(Strategy).filter(Strategy.name == strategy_name).first()
+        if not strategy_to_toggle:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        strategy_to_toggle.active = active
+        db.commit()
+        db.refresh(strategy_to_toggle)
+
         return {
             "success": True,
             "message": f"Strategy {strategy_name} {'activated' if active else 'deactivated'} successfully"
         }
+    except SQLAlchemyError as e:
+        logger.error(f"Database error toggling strategy: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
     except Exception as e:
         logger.error(f"Error toggling strategy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -820,10 +806,10 @@ async def get_opportunities(
                     {
                         "symbol": opp.symbol,
                         "direction": opp.direction,
-                        "entry_price": opp.entry_price,
+                        "entry": opp.entry_price,
                         "take_profit": opp.take_profit,
                         "stop_loss": opp.stop_loss,
-                        "confidence": opp.confidence,
+                        "confidence_score": opp.confidence,
                         "leverage": opp.leverage,
                         "risk_reward": opp.risk_reward,
                         "volume_24h": opp.volume_24h,
@@ -844,10 +830,10 @@ async def get_opportunities(
                 {
                     "symbol": opp.symbol,
                     "direction": opp.direction,
-                    "entry_price": opp.entry_price,
+                    "entry": opp.entry_price,
                     "take_profit": opp.take_profit,
                     "stop_loss": opp.stop_loss,
-                    "confidence": opp.confidence,
+                    "confidence_score": opp.confidence,
                     "leverage": opp.leverage,
                     "risk_reward": opp.risk_reward,
                     "volume_24h": opp.volume_24h,
@@ -890,7 +876,7 @@ async def get_symbol_opportunity(symbol: str):
         'overall_score': opportunity.overall_score,
         'signal_strength': opportunity.signal_strength,
         'signal_type': opportunity.signal_type,
-        'entry_price': opportunity.entry_price,
+        'entry': opportunity.entry_price,
         'take_profit': opportunity.take_profit,
         'stop_loss': opportunity.stop_loss
     })
