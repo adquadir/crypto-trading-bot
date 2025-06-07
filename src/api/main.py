@@ -25,10 +25,14 @@ load_dotenv()
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Change to DEBUG level
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Set all loggers to DEBUG level
+for logger_name in ['src.market_data.symbol_discovery', 'src.market_data.exchange_client', 'src.strategy.dynamic_config']:
+    logging.getLogger(logger_name).setLevel(logging.DEBUG)
 
 app = FastAPI(
     title="Crypto Trading Bot API",

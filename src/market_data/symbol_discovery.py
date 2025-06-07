@@ -107,22 +107,33 @@ class SymbolDiscovery:
     async def discover_symbols(self) -> List[str]:
         """Fetch available futures trading pairs based on configuration mode."""
         try:
+            logger.debug("Starting symbol discovery")
             discovery_mode = os.getenv('SYMBOL_DISCOVERY_MODE', 'static')
+            logger.debug(f"Using discovery mode: {discovery_mode}")
             
             if discovery_mode == 'static':
                 # Use symbols from configuration
                 symbols = os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
-                logger.info(f"Using {len(symbols)} static symbols from configuration")
+                logger.info(f"Using {len(symbols)} static symbols from configuration: {', '.join(symbols)}")
                 return symbols
             else:
                 # Dynamic discovery from exchange
-                exchange_info = await self.exchange_client.get_exchange_info()
+                logger.debug("Fetching exchange info for dynamic discovery")
+                try:
+                    exchange_info = await self.exchange_client.get_exchange_info()
+                    logger.debug("Successfully fetched exchange info")
+                except Exception as e:
+                    logger.error(f"Failed to fetch exchange info: {e}")
+                    raise
+                
                 futures_symbols = [
                     symbol['symbol'] for symbol in exchange_info['symbols']
                     if symbol['status'] == 'TRADING' and symbol['contractType'] == 'PERPETUAL'
                 ]
                 
                 logger.debug(f"Initial perpetual trading symbols found: {len(futures_symbols)}")
+                if futures_symbols:
+                    logger.debug(f"First 5 symbols: {', '.join(futures_symbols[:5])}")
                 
                 # Limit the number of symbols to process
                 MAX_SYMBOLS = 20  # Process only top 20 symbols
@@ -134,18 +145,24 @@ class SymbolDiscovery:
                 filtered_symbols = []
                 for symbol in futures_symbols:
                     logger.debug(f"Processing symbol for advanced filtering: {symbol}")
-                    market_data = await self.get_market_data(symbol)
-                    if market_data:
-                        logger.debug(f"Market data fetched for {symbol}.")
-                        if self._apply_advanced_filters(market_data):
-                            logger.debug(f"Symbol {symbol} passed advanced filters.")
-                            filtered_symbols.append(symbol)
+                    try:
+                        market_data = await self.get_market_data(symbol)
+                        if market_data:
+                            logger.debug(f"Market data fetched for {symbol}")
+                            if self._apply_advanced_filters(market_data):
+                                logger.debug(f"Symbol {symbol} passed advanced filters")
+                                filtered_symbols.append(symbol)
+                            else:
+                                logger.debug(f"Symbol {symbol} failed advanced filters")
                         else:
-                            logger.debug(f"Symbol {symbol} failed advanced filters.")
-                    else:
-                        logger.debug(f"Failed to fetch market data for {symbol}.")
+                            logger.debug(f"Failed to fetch market data for {symbol}")
+                    except Exception as e:
+                        logger.error(f"Error processing {symbol}: {e}")
+                        continue
                 
                 logger.info(f"Discovered {len(filtered_symbols)} trading pairs after filtering")
+                if filtered_symbols:
+                    logger.debug(f"Filtered symbols: {', '.join(filtered_symbols)}")
                 return filtered_symbols
                 
         except Exception as e:
