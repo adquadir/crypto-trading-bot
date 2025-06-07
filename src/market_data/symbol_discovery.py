@@ -834,48 +834,46 @@ class SymbolDiscovery:
             reasons = []
 
             # Volume filter
-            if market_data['volume_24h'] < self.min_volume_24h:
-                reasons.append(f"Low volume: {market_data['volume_24h']} < {self.min_volume_24h}")
+            volume_24h = market_data.get('ticker', {}).get('volume', 0)
+            if volume_24h < self.min_volume_24h:
+                reasons.append(f"Low volume: {volume_24h} < {self.min_volume_24h}")
 
             # Spread filter
-            spread = market_data.get('spread', float('inf')) # Use a high default if missing
+            spread = self._calculate_spread(market_data.get('orderbook', {}))
             if spread > self.max_spread:
                 reasons.append(f"Spread too high: {spread} > {self.max_spread}")
 
             # Liquidity filter
-            liquidity = market_data.get('liquidity', 0) # Use 0 default if missing
+            liquidity = self._calculate_liquidity(market_data.get('orderbook', {}))
             if liquidity < self.min_liquidity:
                 reasons.append(f"Low liquidity: {liquidity} < {self.min_liquidity}")
 
             # Market cap filter
-            market_cap = market_data.get('market_cap', 0) # Use 0 default if missing
+            market_cap = self._calculate_market_cap(market_data.get('ticker', {}))
             if market_cap < self.min_market_cap:
                 reasons.append(f"Low market cap: {market_cap} < {self.min_market_cap}")
 
             # Volatility filter
-            # Note: calculate_volatility handles potential errors internally and returns 0 on failure
-            volatility = self.calculate_volatility(market_data['ohlcv'])
+            volatility = self.calculate_volatility(market_data.get('klines', []))
             if not (self.min_volatility <= volatility <= self.max_volatility):
                 reasons.append(f"Volatility out of range: {volatility} ({self.min_volatility}-{self.max_volatility})")
 
             # Funding rate filter
-            funding_rate = market_data.get('funding_rate', 0) # Use 0 default if missing
+            funding_rate = market_data.get('funding_rate', 0)
             if not (self.min_funding_rate <= funding_rate <= self.max_funding_rate):
                 reasons.append(f"Funding rate out of range: {funding_rate} ({self.min_funding_rate}-{self.max_funding_rate})")
 
             # Open interest filter
-            open_interest = market_data.get('open_interest', 0) # Use 0 default if missing
+            open_interest = market_data.get('open_interest', 0)
             if open_interest < self.min_open_interest:
                 reasons.append(f"Low open interest: {open_interest} < {self.min_open_interest}")
 
             # Price stability filter
-            # Note: _check_price_stability handles potential errors internally and returns False on failure
-            if not self._check_price_stability(market_data['ohlcv']):
+            if not self._check_price_stability(market_data.get('klines', [])):
                 reasons.append("Price instability")
 
             # Volume trend filter
-            # Note: _check_volume_trend handles potential errors internally and returns False on failure
-            if not self._check_volume_trend(market_data['ohlcv']):
+            if not self._check_volume_trend(market_data.get('klines', [])):
                 reasons.append("Unhealthy volume trend")
 
             if reasons:
