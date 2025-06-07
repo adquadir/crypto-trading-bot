@@ -194,6 +194,9 @@ class SymbolDiscovery:
                     logger.debug(f"Using cached market data for {symbol}")
                     return cached_data
                 else:
+                    # Specifically check for old 'ticker' key in outdated cache
+                    if 'ticker' in cached_data and 'ticker_24h' not in cached_data:
+                        logger.error(f"Outdated cache format detected for {symbol}: 'ticker' found, but 'ticker_24h' missing. Clearing cache.")
                     logger.debug(f"Clearing outdated/invalid cache for {symbol}. Valid: {is_valid}, Fresh: {is_fresh}")
                     if cache_key in self.cache:
                         del self.cache[cache_key]
@@ -410,11 +413,15 @@ class SymbolDiscovery:
             # Volatility indicators
             if 'bb' in indicators:
                 bb = indicators['bb']
-                bb_width = (bb['upper'] - bb['lower']) / bb['middle']
-                if bb_width < 0.02:  # Tight bands
-                    score += weights['volatility'] * 1.0
-                elif bb_width < 0.05:  # Moderate bands
-                    score += weights['volatility'] * 0.5
+                # Ensure bb['middle'] is not zero before division
+                if bb.get('middle', 0) != 0:
+                    bb_width = (bb['upper'] - bb['lower']) / bb['middle']
+                    if bb_width < 0.02:  # Tight bands
+                        score += weights['volatility'] * 1.0
+                    elif bb_width < 0.05:  # Moderate bands
+                        score += weights['volatility'] * 0.5
+                else:
+                    logger.warning(f"Bollinger Band middle is zero for {market_data.get('symbol', 'UNKNOWN')}, skipping BB width calculation for technical score.")
                     
             if 'atr' in indicators:
                 atr = indicators['atr']
@@ -623,6 +630,17 @@ class SymbolDiscovery:
                  if entry > 0 and abs(entry - stop_loss) / entry > 0.95:
                      warnings.append(f"SHORT trade stop loss is very far from entry price ({abs(entry - stop_loss) / entry:.2f}%) - potential data issue or wide range")
 
+            # Calculate risk_amount and reward_amount
+            risk_amount = abs(entry - stop_loss)
+            reward_amount = abs(take_profit - entry)
+
+            # Validate risk_amount and reward_amount
+            # Use a small epsilon for floating point comparison if exact zero is too strict
+            if risk_amount <= 1e-9: # Effectively zero
+                errors.append("Risk amount is zero or too small, leading to invalid risk-reward calculation.")
+            if reward_amount <= 1e-9: # Effectively zero
+                errors.append("Reward amount is zero or too small, leading to invalid risk-reward calculation.")
+
             # Check for extreme confidence value (already handled by type/range check, but can add specific warnings)
             if 0.9 <= confidence_value < 1.0:
                  warnings.append("High confidence value detected (>=0.9)")
@@ -635,9 +653,9 @@ class SymbolDiscovery:
                 # Lowering threshold for tight stop loss warning
                 if 0 < stop_loss_percentage < 0.001: # e.g., less than 0.1% from entry
                     warnings.append(f"Very tight stop loss detected ({stop_loss_percentage:.4f}%) - may be prone to slippage or whipsaw")
-                # Check for zero distance stop loss which indicates an error in strategy calculation
-                if stop_loss_percentage == 0:
-                     errors.append("Stop loss is at the entry price, resulting in zero risk distance.")
+                # The existing check for zero distance stop loss is still relevant
+                # if stop_loss_percentage == 0:
+                #      errors.append("Stop loss is at the entry price, resulting in zero risk distance.")
 
         except Exception as e:
             # Catch any unexpected errors during the validation process itself
