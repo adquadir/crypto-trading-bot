@@ -174,6 +174,15 @@ class ExchangeClient:
         self.base_url = "https://testnet.binance.vision/api" if testnet else "https://api.binance.com/api"
         self.ws_base_url = "wss://testnet.binance.vision/ws" if testnet else "wss://stream.binance.com:9443/ws"
 
+        # Initialize WebSocket-related attributes
+        self.ws_clients = {}
+        self.ws_subscriptions = {}
+        self.ws_last_message = {}
+        self.cache_timestamps = {}
+
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+
         # Load proxy configuration from environment variables
         self.proxy_list = proxy_list or os.getenv('PROXY_PORTS', '10001,10002,10003').split(',')
         self.failover_ports = failover_ports or os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(',')
@@ -669,166 +678,29 @@ class ExchangeClient:
 
     async def _reinitialize_websockets(self):
         """Close and reopen all websocket connections."""
-        for symbol, ws in list(self.ws_connections.items()):
+        for symbol, ws in list(self.ws_clients.items()):
             try:
                 await ws.close()
-                del self.ws_connections[symbol]
-                await self._setup_symbol_websocket(symbol)
+                del self.ws_clients[symbol]
+                await self._initialize_websocket(symbol)
             except Exception as e:
                 logger.error(f"Error reinitializing websocket for {symbol}: {e}")
 
-    async def _setup_symbol_websocket(self, symbol: str):
-        """Setup websocket for a specific symbol."""
-        try:
-            ws = await self.session.ws_connect(
-                f"{self.ws_base_url}/{symbol.lower()}@depth",
-                proxy=f"http://{self.proxy_host}:{self.proxy_port}",
-                proxy_auth=self.proxy_auth,
-                timeout=aiohttp.ClientTimeout(total=10)
-            )
-            self.ws_connections[symbol] = ws
-            logger.info(f"Websocket connected for {symbol}")
-        except Exception as e:
-            logger.error(f"Failed to setup websocket for {symbol}: {e}")
-
-    async def _handle_connection_error(self):
-        """Handle connection errors by rotating proxy."""
-        logger.warning("Handling connection error - rotating proxy")
-        await self._rotate_proxy()
-
-    def _find_best_proxy(self) -> str:
-        best_port = self.proxy_port
-        best_score = float('-inf')
-        for port, metrics in self.proxy_metrics.items():
-            if metrics.total_requests < 10:
-                continue
-            error_rate = metrics.error_count / metrics.total_requests
-            avg_resp = statistics.mean(metrics.response_times) if metrics.response_times else float('inf')
-            score = -(error_rate + avg_resp)
-            if score > best_score:
-                best_score = score
-                best_port = port
-        return best_port
-
-    async def _test_proxy_connection(self) -> bool:
-        """Test if the current proxy is working by making a simple HTTP request."""
-        try:
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
-                    f"{self.base_url}/v3/ping",
-                    proxy=f"http://{self.proxy_host}:{self.proxy_port}",
-                    proxy_auth=self.proxy_auth
-                ) as response:
-                    return response.status == 200
-        except Exception as e:
-            logger.error(f"Proxy test failed: {e}")
-            return False
-
-    async def _check_proxy_health(self):
-        start = time.time()
-        success = await self._test_proxy_connection()
-        duration = time.time() - start
-
-        metrics = self.proxy_metrics[self.proxy_port]
-        if success:
-            metrics.response_times.append(duration)
-            metrics.successful_requests += 1
-            metrics.last_success = datetime.now()
-            logger.debug(f"Proxy health check successful (response time: {duration:.2f}s)")
-        else:
-            metrics.error_count += 1
-            metrics.last_error = datetime.now()
-            logger.warning("Proxy health check failed")
-        metrics.total_requests += 1
-
-        if self._should_rotate_proxy():
-            await self._rotate_proxy()
-
-    async def _health_check_loop(self):
-        while not self._shutdown_event.is_set():
-            try:
-                await self._check_proxy_health()
-            except Exception as e:
-                logger.error(f"Health check failed: {e}")
-            await asyncio.sleep(self.health_check_interval)
-
-    async def initialize(self, symbols: List[str]) -> None:
-        """Initialize exchange client with symbols.
-        
-        Args:
-            symbols: List of trading pair symbols to track
-        """
-        try:
-            logger.info(f"Initializing exchange client with {len(symbols)} symbols")
-            self.symbols = set(symbols)
-            
-            # Initialize cache for each symbol
-            for symbol in self.symbols:
-                self.cache.set(symbol, {
-                    'ohlcv': {},
-                    'orderbook': {},
-                    'ticker': {},
-                    'trades': {},
-                    'open_interest': {},
-                    'funding_rate': {},
-                    'volatility': {}
-                })
-            
-            # Setup proxy if configured
-            self._setup_proxy()
-            
-            # Initialize WebSocket clients for each symbol
-            for symbol in self.symbols:
-                await self._initialize_websocket(symbol)
-            
-            # Start background tasks
-            asyncio.create_task(self._update_funding_rates())
-            asyncio.create_task(self._update_volatility_metrics())
-            
-            logger.info("Exchange client initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Error initializing exchange client: {str(e)}")
-            raise
-            
     async def _initialize_websocket(self, symbol: str) -> None:
-        """Initialize WebSocket client for a symbol.
-        
-        Args:
-            symbol: Trading pair symbol
-        """
         try:
-            # Create WebSocket client
-            ws_client = MarketDataWebSocket(
-                symbol=symbol,
-                on_message=self._handle_ws_message,
-                on_error=self._handle_ws_error,
-                on_close=self._handle_ws_close
-            )
+            # Create WebSocket client with the correct parameters
+            ws_client = MarketDataWebSocket(self, [symbol], cache_ttl=5)
+            
+            # Register the unified handler for all event types
+            ws_client.register_callback("kline", self._handle_ws_message)
+            ws_client.register_callback("trade", self._handle_ws_message)
+            ws_client.register_callback("depth", self._handle_ws_message)
             
             # Store client
             self.ws_clients[symbol] = ws_client
             
-            # Initialize subscriptions
-            self.ws_subscriptions[symbol] = set()
-            
             # Connect and subscribe to channels
             await ws_client.connect()
-            await ws_client.subscribe([
-                'ticker',
-                'trades',
-                'orderbook',
-                'kline'
-            ])
-            
-            # Update subscriptions
-            self.ws_subscriptions[symbol].update([
-                'ticker',
-                'trades',
-                'orderbook',
-                'kline'
-            ])
             
             # Start heartbeat monitoring
             self.ws_last_message[symbol] = time.time()
@@ -894,293 +766,112 @@ class ExchangeClient:
         self.current_port_index = (self.current_port_index + 1) % len(self.proxy_list)
         return proxy
 
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
-    async def get_market_data(self, symbol: str) -> Dict:
-        """Fetch comprehensive market data for a symbol."""
+    async def _handle_ws_message(self, message):
         try:
-            # Get OHLCV data
-            ohlcv = await self.get_historical_data(symbol, interval="1m", limit=200)
-            
-            # Get funding rate
-            funding_rate = await self.get_funding_rate(symbol)
-            
-            # Get 24h statistics
-            ticker_24h = await self.get_ticker_24h(symbol)
-            
-            # Get order book
-            orderbook = await self.get_orderbook(symbol, limit=10)
-            
-            # Calculate spread from orderbook
-            spread = 0.0
-            if orderbook['bids'] and orderbook['asks']:
-                best_bid = float(orderbook['bids'][0][0])
-                best_ask = float(orderbook['asks'][0][0])
-                spread = (best_ask - best_bid) / best_bid
-            
-            # Calculate liquidity from orderbook
-            liquidity = 0.0
-            if orderbook['bids'] and orderbook['asks']:
-                bid_liquidity = sum(float(bid[0]) * float(bid[1]) for bid in orderbook['bids'][:10])
-                ask_liquidity = sum(float(ask[0]) * float(ask[1]) for ask in orderbook['asks'][:10])
-                liquidity = (bid_liquidity + ask_liquidity) / 2
-            
-            # Get open interest
-            open_interest = await self.get_open_interest(symbol)
-            
-            # Calculate volatility from OHLCV data
-            volatility = 0.0
-            if ohlcv:
-                closes = [float(candle['close']) for candle in ohlcv]
+            event_type = message.get("e")
+            symbol = message.get("s")
+
+            if event_type == "kline":
+                await self._handle_kline_update(symbol, message["k"])
+            elif event_type == "depthUpdate":
+                self.order_books[symbol] = message  # or parse bids/asks here
+            elif event_type == "trade":
+                self.last_trade_price[symbol] = float(message["p"])
+
+            self.ws_last_message[symbol] = time.time()
+
+        except Exception as e:
+            logger.error(f"Error handling WebSocket message: {e}")
+
+    async def _handle_ws_error(self, error):
+        """Handle WebSocket errors."""
+        logger.error(f"WebSocket error: {error}")
+
+    async def _handle_ws_close(self, close_status_code, close_msg):
+        """Handle WebSocket close events."""
+        logger.info(f"WebSocket closed with status {close_status_code}: {close_msg}")
+
+    async def _monitor_websocket_heartbeat(self, symbol):
+        """Monitor WebSocket heartbeat to ensure connection is alive."""
+        while True:
+            await asyncio.sleep(30)
+            try:
+                # Send a ping message to keep the connection alive
+                await self.ws_client.ping()
+                logger.debug("WebSocket heartbeat ping sent")
+            except Exception as e:
+                logger.error(f"Error sending WebSocket heartbeat: {e}")
+
+    async def _update_volatility(self, symbol):
+        """Update volatility metrics for a symbol."""
+        try:
+            klines = await self._fetch_ohlcv_rest(symbol, '1h')
+            if klines and len(klines) >= 20:
+                closes = [float(k['close']) for k in klines[-20:]]
                 returns = np.diff(closes) / closes[:-1]
-                volatility = np.std(returns) * np.sqrt(24 * 60)  # Annualized volatility
-            
+                vol = np.std(returns) * np.sqrt(24 * 60)  # Annualized
+                self.cache.set(f"{symbol}_volatility", vol, max_age=300)
+        except Exception as e:
+            logger.error(f"Error updating volatility for {symbol}: {e}")
+
+    async def _fetch_ohlcv_rest(self, symbol, timeframe):
+        """Fetch OHLCV data from REST API."""
+        try:
+            klines = await asyncio.to_thread(self.client.futures_klines, symbol=symbol, interval=timeframe, limit=100)
+            formatted_data = [{
+                'timestamp': int(k[0]),
+                'open': float(k[1]),
+                'high': float(k[2]),
+                'low': float(k[3]),
+                'close': float(k[4]),
+                'volume': float(k[5]),
+                'close_time': int(k[6]),
+                'quote_volume': float(k[7]),
+                'trades': int(k[8]),
+                'taker_buy_base': float(k[9]),
+                'taker_buy_quote': float(k[10])
+            } for k in klines]
+            return formatted_data
+        except Exception as e:
+            logger.error(f"Error fetching OHLCV data for {symbol}: {e}")
+            return None
+
+    async def _fetch_ticker_rest(self, symbol):
+        """Fetch ticker data from REST API."""
+        try:
+            ticker = await asyncio.to_thread(self.client.futures_ticker, symbol=symbol)
             return {
-                'symbol': symbol,
-                'ohlcv': ohlcv,
-                'funding_rate': funding_rate,
-                'volume_24h': float(ticker_24h.get('volume', 0)),
-                'price_change_24h': float(ticker_24h.get('priceChangePercent', 0)),
-                'orderbook': orderbook,
-                'spread': spread,
-                'liquidity': liquidity,
-                'open_interest': open_interest,
-                'volatility': volatility,
-                'last_price': float(ticker_24h.get('lastPrice', 0)),
-                'high_24h': float(ticker_24h.get('highPrice', 0)),
-                'low_24h': float(ticker_24h.get('lowPrice', 0)),
-                'quote_volume': float(ticker_24h.get('quoteVolume', 0))
+                'symbol': ticker['symbol'],
+                'priceChange': float(ticker['priceChange']),
+                'priceChangePercent': float(ticker['priceChangePercent']),
+                'weightedAvgPrice': float(ticker['weightedAvgPrice']),
+                'lastPrice': float(ticker['lastPrice']),
+                'lastQty': float(ticker['lastQty']),
+                'openPrice': float(ticker['openPrice']),
+                'highPrice': float(ticker['highPrice']),
+                'lowPrice': float(ticker['lowPrice']),
+                'volume': float(ticker['volume']),
+                'quoteVolume': float(ticker['quoteVolume']),
+                'openTime': int(ticker['openTime']),
+                'closeTime': int(ticker['closeTime']),
+                'firstId': int(ticker['firstId']),
+                'lastId': int(ticker['lastId']),
+                'count': int(ticker['count'])
             }
-            
         except Exception as e:
-            logger.error(f"Error fetching market data for {symbol}: {e}")
-            return {}
-
-    async def _handle_kline_update(self, symbol: str, data: Dict):
-        """Handle WebSocket kline updates."""
-        try:
-            cache_key = f"{symbol}_ohlcv"
-            self.cache.set(symbol, {
-                'ohlcv': data
-            })
-            self.cache_timestamps[cache_key] = time.time()
-            logger.debug(f"Updated OHLCV cache for {symbol}")
-        except Exception as e:
-            logger.error(f"Error handling kline update: {e}")
-
-    async def _handle_trade_update(self, symbol: str, data: Dict):
-        """Handle WebSocket trade updates."""
-        try:
-            cache_key = f"{symbol}_ticker"
-            self.cache.set(symbol, {
-                'ticker': data
-            })
-            self.cache_timestamps[cache_key] = time.time()
-            logger.debug(f"Updated ticker cache for {symbol}")
-        except Exception as e:
-            logger.error(f"Error handling trade update: {e}")
-
-    async def _handle_depth_update(self, symbol: str, data: Dict):
-        """Handle WebSocket order book updates."""
-        try:
-            cache_key = f"{symbol}_orderbook"
-            self.cache.set(symbol, {
-                'orderbook': data
-            })
-            self.cache_timestamps[cache_key] = time.time()
-            logger.debug(f"Updated orderbook cache for {symbol}")
-        except Exception as e:
-            logger.error(f"Error handling depth update: {e}")
-
-    def _get_cache_ttl(self, data_type: str, scalping_mode: bool = False) -> int:
-        """Get cache TTL for a specific data type.
-        
-        Args:
-            data_type: Type of data (ohlcv, orderbook, ticker, etc.)
-            scalping_mode: Whether to use scalping TTLs
-            
-        Returns:
-            int: Cache TTL in seconds
-        """
-        if scalping_mode:
-            return self.cache_ttls.get(data_type, {}).get('scalping', 5)
-        return self.cache_ttls.get(data_type, {}).get('normal', 300)
-
-    def _get_market_volatility(self) -> float:
-        """Calculate current market volatility."""
-        try:
-            if not hasattr(self, '_volatility_cache'):
-                self._volatility_cache = {}
-                self._volatility_timestamp = 0
-                
-            # Update volatility cache every 5 minutes
-            current_time = time.time()
-            if current_time - self._volatility_timestamp > 300:
-                self._volatility_cache = {}
-                self._volatility_timestamp = current_time
-                
-            # Calculate average volatility across tracked symbols
-            volatilities = []
-            for symbol in self.symbols:
-                if symbol in self._volatility_cache:
-                    volatilities.append(self._volatility_cache[symbol])
-                else:
-                    # Calculate volatility from recent price data
-                    klines = self.cache.get(symbol, {}).get('ohlcv', [])
-                    if klines and len(klines) >= 20:
-                        closes = [float(k['close']) for k in klines[-20:]]
-                        returns = np.diff(closes) / closes[:-1]
-                        vol = np.std(returns) * np.sqrt(24 * 60)  # Annualized
-                        self._volatility_cache[symbol] = vol
-                        volatilities.append(vol)
-                        
-            return np.mean(volatilities) if volatilities else 0.01  # Default to 1% if no data
-            
-        except Exception as e:
-            logger.error(f"Error calculating market volatility: {e}")
-            return 0.01  # Default to 1% on error
-            
-    def _validate_data_quality(self, data: Any, data_type: str) -> bool:
-        """Validate data quality based on type."""
-        try:
-            if data_type == 'orderbook':
-                if not isinstance(data, dict) or 'bids' not in data or 'asks' not in data:
-                    return False
-                if not data['bids'] or not data['asks']:
-                    return False
-                # Check spread
-                best_bid = float(data['bids'][0][0])
-                best_ask = float(data['asks'][0][0])
-                spread = (best_ask - best_bid) / best_bid
-                if spread > 0.01:  # 1% spread threshold
-                    return False
-                    
-            elif data_type == 'ticker':
-                if not isinstance(data, dict) or 'lastPrice' not in data:
-                    return False
-                # Check price change sanity
-                if 'priceChangePercent' in data:
-                    change = abs(float(data['priceChangePercent']))
-                    if change > 100:  # 100% change threshold
-                        return False
-                        
-            elif data_type == 'ohlcv':
-                if not isinstance(data, list) or len(data) < 2:
-                    return False
-                # Check for gaps
-                for i in range(1, len(data)):
-                    if data[i][0] - data[i-1][0] > 60000:  # 1 minute gap
-                        return False
-                        
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error validating data quality: {e}")
-            return False
-            
-    def _check_data_consistency(self, data: Any, data_type: str) -> bool:
-        """Check data consistency based on type."""
-        try:
-            if data_type == 'orderbook':
-                # Check bid/ask ordering
-                bids = [float(bid[0]) for bid in data['bids']]
-                asks = [float(ask[0]) for ask in data['asks']]
-                if not all(bids[i] >= bids[i+1] for i in range(len(bids)-1)):
-                    return False
-                if not all(asks[i] <= asks[i+1] for i in range(len(asks)-1)):
-                    return False
-                    
-            elif data_type == 'ticker':
-                # Check price consistency
-                if 'lastPrice' in data and 'highPrice' in data and 'lowPrice' in data:
-                    last = float(data['lastPrice'])
-                    high = float(data['highPrice'])
-                    low = float(data['lowPrice'])
-                    if not (low <= last <= high):
-                        return False
-                        
-            elif data_type == 'ohlcv':
-                # Check OHLC consistency
-                for candle in data:
-                    if not (candle[3] <= candle[1] and candle[4] >= candle[2]):  # High >= Open/Close >= Low
-                        return False
-                        
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error checking data consistency: {e}")
-            return False
-
-    async def get_ohlcv(self, symbol: str, timeframe: str = '1m', is_scalping: bool = False) -> Optional[Dict]:
-        """Get OHLCV data with WebSocket fallback."""
-        cache_key = f"{symbol}_ohlcv"
-        
-        # Check WebSocket cache first
-        if self.ws_client:
-            ws_data = self.ws_client.get_cached_data(symbol, 'kline')
-            if ws_data and self._is_cache_valid(cache_key, 'ohlcv', is_scalping):
-                return ws_data
-        
-        # Fallback to REST API if needed
-        try:
-            # Implement REST API call here
-            data = await self._fetch_ohlcv_rest(symbol, timeframe)
-            if data:
-                self.cache.set(symbol, {
-                    'ohlcv': data
-                })
-                self.cache_timestamps[cache_key] = time.time()
-            return data
-        except Exception as e:
-            logger.error(f"Error fetching OHLCV data: {e}")
+            logger.error(f"Error fetching ticker data for {symbol}: {e}")
             return None
 
-    async def get_ticker(self, symbol: str, is_scalping: bool = False) -> Optional[Dict]:
-        """Get ticker data with WebSocket fallback."""
-        cache_key = f"{symbol}_ticker"
-        
-        # Check WebSocket cache first
-        if self.ws_client:
-            ws_data = self.ws_client.get_cached_data(symbol, 'trade')
-            if ws_data and self._is_cache_valid(cache_key, 'ticker', is_scalping):
-                return ws_data
-        
-        # Fallback to REST API if needed
+    async def _fetch_orderbook_rest(self, symbol):
+        """Fetch orderbook data from REST API."""
         try:
-            # Implement REST API call here
-            data = await self._fetch_ticker_rest(symbol)
-            if data:
-                self.cache.set(symbol, {
-                    'ticker': data
-                })
-                self.cache_timestamps[cache_key] = time.time()
-            return data
+            orderbook = await asyncio.to_thread(self.client.futures_order_book, symbol=symbol, limit=10)
+            return {
+                'bids': [[float(price), float(qty)] for price, qty in orderbook['bids']],
+                'asks': [[float(price), float(qty)] for price, qty in orderbook['asks']]
+            }
         except Exception as e:
-            logger.error(f"Error fetching ticker data: {e}")
-            return None
-
-    async def get_orderbook(self, symbol: str, is_scalping: bool = False) -> Optional[Dict]:
-        """Get order book data with WebSocket fallback."""
-        cache_key = f"{symbol}_orderbook"
-        
-        # Check WebSocket cache first
-        if self.ws_client:
-            ws_data = self.ws_client.get_cached_data(symbol, 'depth')
-            if ws_data and self._is_cache_valid(cache_key, 'orderbook', is_scalping):
-                return ws_data
-        
-        # Fallback to REST API if needed
-        try:
-            # Implement REST API call here
-            data = await self._fetch_orderbook_rest(symbol)
-            if data:
-                self.cache.set(symbol, {
-                    'orderbook': data
-                })
-                self.cache_timestamps[cache_key] = time.time()
-            return data
-        except Exception as e:
-            logger.error(f"Error fetching orderbook data: {e}")
+            logger.error(f"Error fetching orderbook data for {symbol}: {e}")
             return None
 
     def get_data_freshness(self, symbol: str) -> Dict[str, int]:
