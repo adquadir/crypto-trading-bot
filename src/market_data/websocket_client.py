@@ -30,8 +30,8 @@ class MarketDataWebSocket:
         retry_count = 0
         while retry_count < max_retries:
             try:
-                self.connection = await websockets.connect(self.stream_url)
-                logger.info(f"Connected to WebSocket stream: {self.stream_url}")
+                self.connection = await websockets.connect(self.ws_url)
+                logger.info(f"Connected to WebSocket stream: {self.ws_url}")
                 return
             except websockets.exceptions.InvalidStatusCode as e:
                 if e.status_code == 451:
@@ -47,24 +47,19 @@ class MarketDataWebSocket:
         logger.error("Failed to connect to WebSocket after maximum retries.")
 
     async def start(self):
-        """Start processing WebSocket messages."""
-        try:
-            await self.connect()
-            while self.running:
-                try:
-                    message = await self.connection.recv()
-                    await self._process_message(json.loads(message))
-                except websockets.ConnectionClosed:
-                    logger.warning("WebSocket connection closed. Reconnecting...")
-                    await self.connect()
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
-                    await asyncio.sleep(1)  # Prevent tight loop on errors
-
-        except Exception as e:
-            logger.error(f"WebSocket error: {e}")
-            self.running = False
-            raise
+        """Start the WebSocket client."""
+        await self.connect()
+        self.running = True  # Set running to True before entering the loop
+        while self.running:
+            try:
+                message = await self.connection.recv()
+                await self._process_message(json.loads(message))
+            except websockets.exceptions.ConnectionClosed:
+                logger.error("WebSocket connection closed unexpectedly.")
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket message processing: {e}")
+                break
 
     async def _process_message(self, message: Dict):
         """Process incoming WebSocket message."""

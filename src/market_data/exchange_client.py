@@ -231,6 +231,10 @@ class ExchangeClient:
         # Initialize data freshness tracking
         self.data_freshness = {}
 
+        # Initialize order books and last trade price
+        self.order_books = {}
+        self.last_trade_price = {}
+
     def _setup_proxy(self):
         """Setup proxy configuration."""
         if not self.proxy_config:
@@ -704,7 +708,7 @@ class ExchangeClient:
             
             # Start heartbeat monitoring
             self.ws_last_message[symbol] = time.time()
-            asyncio.create_task(self._monitor_websocket_heartbeat(symbol))
+            asyncio.create_task(self._monitor_websocket_heartbeat())
             
             logger.info(f"WebSocket initialized for {symbol}")
             
@@ -791,16 +795,18 @@ class ExchangeClient:
         """Handle WebSocket close events."""
         logger.info(f"WebSocket closed with status {close_status_code}: {close_msg}")
 
-    async def _monitor_websocket_heartbeat(self, symbol):
-        """Monitor WebSocket heartbeat to ensure connection is alive."""
-        while True:
-            await asyncio.sleep(30)
+    async def _monitor_websocket_heartbeat(self):
+        """Monitor WebSocket heartbeat."""
+        while self.running:
             try:
-                # Send a ping message to keep the connection alive
-                await self.ws_client.ping()
-                logger.debug("WebSocket heartbeat ping sent")
+                for symbol, ws_client in self.ws_clients.items():
+                    if ws_client and ws_client.connection:
+                        await ws_client.connection.ping()
+                        logger.debug(f"Sent ping to WebSocket for {symbol}")
+                await asyncio.sleep(30)  # Send ping every 30 seconds
             except Exception as e:
-                logger.error(f"Error sending WebSocket heartbeat: {e}")
+                logger.error(f"Error in WebSocket heartbeat: {e}")
+                await asyncio.sleep(5)  # Wait before retrying
 
     async def _update_volatility(self, symbol):
         """Update volatility metrics for a symbol."""
@@ -1000,3 +1006,9 @@ class ExchangeClient:
         for symbol in symbols:
             await self._initialize_websocket(symbol)
         logger.info(f"Initialized exchange client with {len(symbols)} symbols.")
+
+    async def _handle_kline_update(self, symbol: str, kline_data: dict):
+        """Handle kline update from WebSocket."""
+        # Update the last trade price
+        self.last_trade_price[symbol] = float(kline_data['k']['c'])
+        logger.debug(f"Updated last trade price for {symbol}: {self.last_trade_price[symbol]}")

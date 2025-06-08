@@ -111,7 +111,7 @@ OPPORTUNITIES_LOCK = asyncio.Lock()  # Add lock for concurrent access
 
 # Global instances
 db = Database()
-ws_manager = MarketDataWebSocket()
+ws_client = MarketDataWebSocket(exchange_client=exchange_client, symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"])
 strategy_config = DynamicStrategyConfig()
 risk_manager = RiskManager()
 
@@ -134,7 +134,7 @@ async def startup_event():
         await exchange_client.initialize(symbols)
         
         # Initialize WebSocket manager
-        await ws_manager.initialize(symbols)
+        await ws_client.initialize(symbols)
         
         logger.info("API startup complete")
     except Exception as e:
