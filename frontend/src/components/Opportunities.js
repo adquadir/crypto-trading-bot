@@ -334,17 +334,17 @@ const Opportunities = () => {
                     <SortIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 }, wordBreak: 'break-all', whiteSpace: 'normal' }}>Entry Price</TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 }, wordBreak: 'break-all', whiteSpace: 'normal' }}>Stop Loss</TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 }, wordBreak: 'break-all', whiteSpace: 'normal' }}>Take Profit</TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>Entry</TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>SL</TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>TP</TableCell>
                 <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
                   Confidence
                   <IconButton size="small" onClick={() => handleSort('confidence_score')}>
                     <SortIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 }, wordBreak: 'break-all', whiteSpace: 'normal' }}>
-                  Risk/Reward
+                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
+                  RR
                   <IconButton size="small" onClick={() => handleSort('risk_reward')}>
                     <SortIcon fontSize="small" />
                   </IconButton>
@@ -364,9 +364,9 @@ const Opportunities = () => {
                       size="small"
                     />
                   </TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 }, wordBreak: 'break-all', whiteSpace: 'normal' }}>${opp.entry.toFixed(6)}</TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 }, wordBreak: 'break-all', whiteSpace: 'normal' }}>${opp.stop_loss.toFixed(6)}</TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 }, wordBreak: 'break-all', whiteSpace: 'normal' }}>${opp.take_profit.toFixed(6)}</TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>${opp.entry.toFixed(6)}</TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>${opp.stop_loss.toFixed(6)}</TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>${opp.take_profit.toFixed(6)}</TableCell>
                   <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
                     <Chip
                       label={`${(opp.confidence_score * 100).toFixed(1)}%`}
@@ -374,7 +374,7 @@ const Opportunities = () => {
                       size="small"
                     />
                   </TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 }, wordBreak: 'break-all', whiteSpace: 'normal' }}>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
                     {((opp.take_profit - opp.entry) / (opp.entry - opp.stop_loss)).toFixed(2)}
                   </TableCell>
                   <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
