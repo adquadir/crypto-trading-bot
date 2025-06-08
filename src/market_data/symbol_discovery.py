@@ -356,127 +356,100 @@ class SymbolDiscovery:
         try:
             score = 0.0
             weights = {
-                'trend': 0.25,      # Reduced from 0.3 to accommodate new indicators
-                'momentum': 0.20,   # Reduced from 0.25
-                'volatility': 0.15, # Reduced from 0.2
-                'volume': 0.10,     # Reduced from 0.15
+                'trend': 0.25,
+                'momentum': 0.20,
+                'volatility': 0.15,
+                'volume': 0.10,
                 'support_resistance': 0.10,
-                'trend_strength': 0.10,  # New weight for ADX
-                'oscillators': 0.10      # New weight for CCI and other oscillators
+                'trend_strength': 0.10,
+                'oscillators': 0.10
             }
-            
             # Trend indicators
             if 'macd' in indicators:
                 macd = indicators['macd']
-                if macd['value'] > macd['signal'] and macd['histogram'] > 0:
+                macd_value = macd['value'] if isinstance(macd, dict) else macd
+                macd_signal = macd['signal'] if isinstance(macd, dict) else 0
+                macd_histogram = macd['histogram'] if isinstance(macd, dict) else 0
+                if macd_value > macd_signal and macd_histogram > 0:
                     score += weights['trend'] * 1.0
-                elif macd['value'] < macd['signal'] and macd['histogram'] < 0:
+                elif macd_value < macd_signal and macd_histogram < 0:
                     score += weights['trend'] * 1.0
-                    
             if 'ema' in indicators:
                 ema = indicators['ema']
-                if ema['fast'] > ema['slow']:
+                ema_fast = ema['fast'] if isinstance(ema, dict) else ema
+                ema_slow = ema['slow'] if isinstance(ema, dict) else 0
+                if ema_fast > ema_slow:
                     score += weights['trend'] * 0.5
-                    
-            # Ichimoku Cloud
-            if 'ichimoku' in indicators:
-                ichimoku = indicators['ichimoku']
-                price = ichimoku['price']
-                tenkan = ichimoku['tenkan']
-                kijun = ichimoku['kijun']
-                senkou_a = ichimoku['senkou_a']
-                senkou_b = ichimoku['senkou_b']
-                
-                # Strong bullish signal
-                if (price > tenkan > kijun and 
-                    price > senkou_a > senkou_b):
-                    score += weights['trend'] * 1.0
-                # Strong bearish signal
-                elif (price < tenkan < kijun and 
-                      price < senkou_a < senkou_b):
-                    score += weights['trend'] * 1.0
-                # Moderate signal
-                elif (price > tenkan and price > kijun) or (price < tenkan and price < kijun):
-                    score += weights['trend'] * 0.5
-                    
-            # Momentum indicators
+            # RSI
             if 'rsi' in indicators:
                 rsi = indicators['rsi']
-                if rsi < 30 or rsi > 70:  # Oversold or overbought
+                rsi_value = rsi.get('value') if isinstance(rsi, dict) else rsi
+                if rsi_value < 30 or rsi_value > 70:
                     score += weights['momentum'] * 1.0
-                elif 40 <= rsi <= 60:  # Neutral
+                elif 40 <= rsi_value <= 60:
                     score += weights['momentum'] * 0.5
-                    
-            if 'stoch' in indicators:
-                stoch = indicators['stoch']
-                if stoch['k'] < 20 or stoch['k'] > 80:
-                    score += weights['momentum'] * 0.5
-                    
-            # CCI (Commodity Channel Index)
+            # CCI
             if 'cci' in indicators:
                 cci = indicators['cci']
-                if cci > 100:  # Overbought
+                cci_value = cci.get('value') if isinstance(cci, dict) else cci
+                if cci_value > 100:
                     score += weights['oscillators'] * 1.0
-                elif cci < -100:  # Oversold
+                elif cci_value < -100:
                     score += weights['oscillators'] * 1.0
-                elif abs(cci) < 50:  # Neutral
+                elif abs(cci_value) < 50:
                     score += weights['oscillators'] * 0.3
-                    
-            # ADX (Average Directional Index)
+            # ADX
             if 'adx' in indicators:
                 adx = indicators['adx']
-                di_plus = indicators.get('di_plus', 0)
-                di_minus = indicators.get('di_minus', 0)
-                
-                # Strong trend
-                if adx > 25:
+                adx_value = adx.get('value') if isinstance(adx, dict) else adx
+                di_plus = adx.get('di_plus') if isinstance(adx, dict) else 0
+                di_minus = adx.get('di_minus') if isinstance(adx, dict) else 0
+                if adx_value > 25:
                     score += weights['trend_strength'] * 1.0
-                    # Direction confirmation
                     if di_plus > di_minus:
                         score += weights['trend'] * 0.5
                     elif di_minus > di_plus:
                         score += weights['trend'] * 0.5
-                # Moderate trend
-                elif adx > 20:
+                elif adx_value > 20:
                     score += weights['trend_strength'] * 0.5
-                    
-            # Volatility indicators
+            # BB
             if 'bb' in indicators:
                 bb = indicators['bb']
-                # Ensure bb['middle'] is not zero or extremely close to zero before division
-                if abs(bb.get('middle', 0)) > 1e-9: # Use a small epsilon to check for near-zero
-                    bb_width = (bb['upper'] - bb['lower']) / bb['middle']
-                    if bb_width < 0.02:  # Tight bands
+                bb_upper = bb.get('upper') if isinstance(bb, dict) else 0
+                bb_lower = bb.get('lower') if isinstance(bb, dict) else 0
+                bb_middle = bb.get('middle') if isinstance(bb, dict) else 1
+                if abs(bb_middle) > 1e-9:
+                    bb_width = (bb_upper - bb_lower) / bb_middle
+                    if bb_width < 0.02:
                         score += weights['volatility'] * 1.0
-                    elif bb_width < 0.05:  # Moderate bands
+                    elif bb_width < 0.05:
                         score += weights['volatility'] * 0.5
                 else:
                     logger.warning(f"Bollinger Band middle is zero or near-zero, skipping BB width calculation for technical score.")
-                    
             if 'atr' in indicators:
                 atr = indicators['atr']
-                if 0.01 <= atr <= 0.03:  # Ideal volatility range
+                if 0.01 <= atr <= 0.03:
                     score += weights['volatility'] * 1.0
-                    
-            # Volume indicators
+            # OBV
             if 'obv' in indicators:
                 obv = indicators['obv']
-                if obv['trend'] == 'up':
+                obv_trend = obv.get('trend') if isinstance(obv, dict) else 'down'
+                if obv_trend == 'up':
                     score += weights['volume'] * 1.0
-                    
             if 'vwap' in indicators:
                 vwap = indicators['vwap']
-                if vwap['price'] > vwap['value']:
+                vwap_price = vwap.get('price') if isinstance(vwap, dict) else 0
+                vwap_value = vwap.get('value') if isinstance(vwap, dict) else 0
+                if vwap_price > vwap_value:
                     score += weights['volume'] * 0.5
-                    
-            # Support/Resistance
             if 'sr' in indicators:
                 sr = indicators['sr']
-                if sr['price'] > sr['support'] and sr['price'] < sr['resistance']:
+                sr_price = sr.get('price') if isinstance(sr, dict) else 0
+                sr_support = sr.get('support') if isinstance(sr, dict) else 0
+                sr_resistance = sr.get('resistance') if isinstance(sr, dict) else 0
+                if sr_price > sr_support and sr_price < sr_resistance:
                     score += weights['support_resistance'] * 1.0
-                    
             return min(score, 1.0)
-            
         except Exception as e:
             logger.error(f"Error calculating technical score: {e}")
             return 0.0
@@ -859,9 +832,9 @@ class SymbolDiscovery:
                 opportunity.score = self.calculate_opportunity_score(opportunity)
 
                 # Check if the calculated score meets the minimum confidence requirement
-                # Lowered confidence cutoff for scalping
-                if opportunity.confidence < 0.35:
-                    logger.info(f"Opportunity for {symbol_name} discarded after scoring due to low confidence ({opportunity.confidence:.2f} < 0.35)")
+                # Lower min_confidence to 0.3 for scalping
+                if opportunity.confidence < 0.3:
+                    logger.info(f"Opportunity for {symbol_name} discarded after scoring due to low confidence ({opportunity.confidence:.2f} < 0.3)")
                     return None
 
                 return opportunity
@@ -1264,33 +1237,36 @@ class SymbolDiscovery:
             volatility_score = 0.0
             trend_score = 0.0
             momentum_score = 0.0
-            
+
             # Volume score (0-1)
             volume_24h = float(market_data['ticker_24h'].get('volume', 0))
             if volume_24h > 0:
                 volume_score = min(1.0, volume_24h / 1000000)  # Normalize to 1M volume
-                
-            # Volatility score (0-1)
+
+            # Volatility score (0-1) - boost for scalping
             atr = indicators.get('atr', 0)
             current_price = indicators.get('current_price', 0)
             if current_price > 0 and atr > 0:
                 volatility = (atr / current_price) * 100  # ATR as percentage of price
-                volatility_score = min(1.0, volatility / 5.0)  # Normalize to 5% volatility
-                
-            # Trend score (0-1)
+                volatility_score = 0.5 if volatility < 1.0 else 1.0
+            else:
+                volatility_score = 0.5  # fallback boost
+
+            # Trend score (0-1) - boost for scalping
             adx = indicators.get('adx', {}).get('value', 0)
-            if adx > 0:
-                trend_score = min(1.0, adx / 50.0)  # Normalize to ADX 50
-                
+            if adx > 20:
+                trend_score = 0.5
+            if adx > 25:
+                trend_score = 1.0
+
             # Momentum score (0-1)
             rsi = indicators.get('rsi', 50)
             if rsi > 0:
-                # RSI extremes indicate strong momentum
                 if rsi > 70 or rsi < 30:
                     momentum_score = 1.0
                 else:
                     momentum_score = 0.5
-                    
+
             # Calculate weighted average
             weights = {
                 'volume': 0.3,
@@ -1298,26 +1274,17 @@ class SymbolDiscovery:
                 'trend': 0.3,
                 'momentum': 0.2
             }
-            
+
             confidence_score = (
                 volume_score * weights['volume'] +
                 volatility_score * weights['volatility'] +
                 trend_score * weights['trend'] +
                 momentum_score * weights['momentum']
             )
-            
-            logger.debug(f"Confidence score components for {market_data['symbol']}:")
-            logger.debug(f"  Volume score: {volume_score:.2f}")
-            logger.debug(f"  Volatility score: {volatility_score:.2f}")
-            logger.debug(f"  Trend score: {trend_score:.2f}")
-            logger.debug(f"  Momentum score: {momentum_score:.2f}")
-            logger.debug(f"  Final confidence score: {confidence_score:.2f}")
-            
             return confidence_score
-            
         except Exception as e:
             logger.error(f"Error calculating confidence score: {e}")
-            return 0.0 
+            return 0.0
 
     def get_current_volatility(self):
         """Return a simple current volatility metric (average ATR of top symbols)."""

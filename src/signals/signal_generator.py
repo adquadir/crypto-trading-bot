@@ -219,9 +219,10 @@ class SignalGenerator:
             else:
                 direction = 'NEUTRAL'
 
-            if direction == 'NEUTRAL':
-                return None  # Skip invalid signals early
-                
+            if direction not in ("LONG", "SHORT"):
+                logger.warning(f"Invalid direction generated: {direction}")
+                return {}
+
             # If we reach here, it means a BUY or SELL signal was generated.
             # Calculate entry, take profit, and stop loss levels
             atr = indicators.get('atr', 0)
@@ -241,6 +242,21 @@ class SignalGenerator:
                     take_profit = entry - (atr * 2)  # 2 ATR for take profit
                     stop_loss = entry + (atr * 1)    # 1 ATR for stop loss
                 
+            # Fallback stop loss / take profit
+            if stop_loss is None:
+                stop_loss = entry - entry * 0.005  # 0.5% stop loss
+            if take_profit is None:
+                take_profit = entry + entry * 0.01  # 1% take profit
+
+            # ADX calculation with np.errstate and nan_to_num
+            with np.errstate(divide='ignore', invalid='ignore'):
+                adx_val = adx.adx().iloc[-1]
+                adx_pos = adx.adx_pos().iloc[-1]
+                adx_neg = adx.adx_neg().iloc[-1]
+                adx_val = float(np.nan_to_num(adx_val, nan=0.0))
+                adx_pos = float(np.nan_to_num(adx_pos, nan=0.0))
+                adx_neg = float(np.nan_to_num(adx_neg, nan=0.0))
+
             logger.debug(f"Generated signal for {symbol}: {signal_type} ({direction}) with strength {signal_strength}")
             
             return {
