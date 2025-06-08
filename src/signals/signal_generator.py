@@ -538,6 +538,34 @@ class SignalGenerator:
             logger.error(f"Error calculating swing levels: {e}")
             return {'highs': [], 'lows': []}
 
+    def _resample_dataframe(self, df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+        """Resample OHLCV data to a different timeframe."""
+        try:
+            # Ensure timestamp is datetime
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df.set_index('timestamp', inplace=True)
+            
+            # Resample OHLCV data
+            resampled = df.resample(timeframe).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            })
+            
+            # Drop any rows with NaN values
+            resampled.dropna(inplace=True)
+            
+            # Reset index to make timestamp a column again
+            resampled.reset_index(inplace=True)
+            
+            return resampled
+            
+        except Exception as e:
+            logger.error(f"Error resampling dataframe: {e}")
+            return pd.DataFrame()  # Return empty DataFrame on error
+
     def _calculate_mtf_alignment(self, indicators: Dict) -> Dict:
         """Calculate multi-timeframe alignment with enhanced analysis."""
         try:
@@ -547,6 +575,13 @@ class SignalGenerator:
                 '5m': indicators.get('5m', {}),
                 '15m': indicators.get('15m', {})
             }
+            
+            # Validate minimum data points
+            min_data_points = 20
+            for tf, tf_data in tf_indicators.items():
+                if len(tf_data.get('close', [])) < min_data_points:
+                    logger.warning(f"Insufficient data points for {tf} timeframe")
+                    return {'strength': 0.0, 'trend': 'NEUTRAL', 'details': {}}
             
             # Calculate technical alignment
             technical_alignment = self._calculate_technical_alignment(tf_indicators)
@@ -588,7 +623,7 @@ class SignalGenerator:
                     continue
                     
                 # Calculate individual indicator alignments
-                macd_alignment = self._calculate_macd_alignment(indicators.get('macd', {}))
+                macd_alignment = self._calculate_macd_alignment(indicators.get('macd', {}), indicators.get('macd', {}))
                 rsi_alignment = self._calculate_rsi_alignment(indicators.get('rsi', 50))
                 bb_alignment = self._calculate_bb_alignment(indicators.get('bollinger_bands', {}))
                 adx_alignment = self._calculate_adx_alignment(indicators.get('adx', {}))
