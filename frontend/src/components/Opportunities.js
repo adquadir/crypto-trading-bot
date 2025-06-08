@@ -247,9 +247,6 @@ const Opportunities = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h5" component="h2">
-          Trading Opportunities
-        </Typography>
         <Box display="flex" gap={2}>
           <ToggleButtonGroup
             value={viewMode}
@@ -326,40 +323,40 @@ const Opportunities = () => {
       </Box>
 
       {viewMode === 'table' ? (
-        <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
-          <Table>
+        <TableContainer component={Paper} sx={{ overflowX: 'auto', width: '100%' }}>
+          <Table size="small">
             <TableHead>
               <TableRow>
-                <TableCell>Symbol</TableCell>
-                <TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>Symbol</TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>
                   Signal Type
                   <IconButton size="small" onClick={() => handleSort('signal_type')}>
                     <SortIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
-                <TableCell>Entry Price</TableCell>
-                <TableCell>Stop Loss</TableCell>
-                <TableCell>Take Profit</TableCell>
-                <TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>Entry Price</TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>Stop Loss</TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>Take Profit</TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>
                   Confidence
                   <IconButton size="small" onClick={() => handleSort('confidence_score')}>
                     <SortIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
-                <TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>
                   Risk/Reward
                   <IconButton size="small" onClick={() => handleSort('risk_reward')}>
                     <SortIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
-                <TableCell>Details</TableCell>
+                <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>Details</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {filteredAndSortedOpportunities.map((opp) => (
                 <TableRow key={opp.symbol}>
-                  <TableCell>{opp.symbol}</TableCell>
-                  <TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>{opp.symbol}</TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>
                     <Chip
                       icon={getDirectionIcon(opp.signal_type)}
                       label={opp.signal_type}
@@ -367,20 +364,20 @@ const Opportunities = () => {
                       size="small"
                     />
                   </TableCell>
-                  <TableCell>${opp.entry.toFixed(6)}</TableCell>
-                  <TableCell>${opp.stop_loss.toFixed(6)}</TableCell>
-                  <TableCell>${opp.take_profit.toFixed(6)}</TableCell>
-                  <TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>${opp.entry.toFixed(6)}</TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>${opp.stop_loss.toFixed(6)}</TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>${opp.take_profit.toFixed(6)}</TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>
                     <Chip
                       label={`${(opp.confidence_score * 100).toFixed(1)}%`}
                       color={opp.confidence_score > 0.7 ? 'success' : opp.confidence_score > 0.4 ? 'warning' : 'error'}
                       size="small"
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>
                     {((opp.take_profit - opp.entry) / (opp.entry - opp.stop_loss)).toFixed(2)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ px: { xs: 1, sm: 2 }, whiteSpace: 'normal' }}>
                     <Tooltip title="View Details">
                       <IconButton size="small">
                         <InfoIcon />
