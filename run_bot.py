@@ -3,6 +3,7 @@ import logging
 import os
 from dotenv import load_dotenv
 from src.trading_bot import TradingBot
+import warnings
 
 # Configure logging
 logging.basicConfig(
@@ -15,6 +16,8 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+warnings.filterwarnings("ignore", message="invalid value encountered in scalar divide")
 
 async def main():
     # Load environment variables

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 import numpy as np
 from functools import lru_cache
+import warnings
 
 # Load environment variables
 load_dotenv()
