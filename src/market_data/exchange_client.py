@@ -992,3 +992,11 @@ class ExchangeClient:
     async def get_all_symbols(self):
         # Replace this with actual logic to fetch symbols from the exchange
         return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
+    async def initialize(self, symbols: Optional[List[str]] = None):
+        """Initialize the exchange client with optional symbols."""
+        symbols = symbols or []
+        # Initialize WebSocket clients for each symbol
+        for symbol in symbols:
+            await self._initialize_websocket(symbol)
+        logger.info(f"Initialized exchange client with {len(symbols)} symbols.")
