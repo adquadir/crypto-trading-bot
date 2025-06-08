@@ -2,21 +2,22 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import Box from '@mui/material/Box';
+import { WebSocketProvider } from './contexts/WebSocketContext';
+import Navbar from './components/Navbar';
+import Dashboard from './pages/Dashboard';
+import Signals from './pages/Signals';
+import Opportunities from './components/Opportunities';
+import Settings from './pages/Settings';
 
 // Layout components
 import DashboardLayout from './layouts/DashboardLayout';
 
 // Pages
-import Dashboard from './pages/Dashboard';
-import Signals from './pages/Signals';
 import Positions from './pages/Positions';
 import Strategies from './pages/Strategies';
-import Settings from './pages/Settings';
-import Opportunities from './pages/Opportunities';
 
 // Create theme
-const theme = createTheme({
+const darkTheme = createTheme({
   palette: {
     mode: 'dark',
     primary: {
@@ -26,30 +27,27 @@ const theme = createTheme({
       main: '#f48fb1',
     },
     background: {
-      default: '#0a1929',
-      paper: '#132f4c',
+      default: '#121212',
+      paper: '#1e1e1e',
     },
   },
 });
 
 function App() {
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <Router>
-        <Box sx={{ display: 'flex' }}>
-          <DashboardLayout>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/opportunities" element={<Opportunities />} />
-              <Route path="/signals" element={<Signals />} />
-              <Route path="/positions" element={<Positions />} />
-              <Route path="/strategies" element={<Strategies />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
-          </DashboardLayout>
-        </Box>
-      </Router>
+      <WebSocketProvider>
+        <Router>
+          <Navbar />
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/signals" element={<Signals />} />
+            <Route path="/opportunities" element={<Opportunities />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </Router>
+      </WebSocketProvider>
     </ThemeProvider>
   );
 }

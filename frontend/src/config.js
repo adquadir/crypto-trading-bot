@@ -37,6 +37,41 @@ const config = {
         OPPORTUNITIES: '/api/trading/opportunities',
         OPPORTUNITY_STATS: '/api/trading/opportunities/stats',
         SYMBOL_OPPORTUNITY: (symbol) => `/api/trading/opportunities/${symbol}`
+    },
+    // API endpoints
+    apiUrl: process.env.REACT_APP_API_URL || 'http://localhost:5000',
+    wsUrl: process.env.REACT_APP_WS_URL || 'ws://localhost:5000/ws',
+    
+    // WebSocket settings
+    wsReconnectDelay: 1000,
+    wsMaxReconnectAttempts: 5,
+    
+    // Data freshness thresholds (in seconds)
+    freshnessThresholds: {
+        ohlcv: 5,
+        orderbook: 2,
+        trades: 2,
+        ticker: 2,
+        openInterest: 5,
+        fundingRate: 60
+    },
+    
+    // UI settings
+    defaultTimeframe: '1m',
+    availableTimeframes: ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'],
+    
+    // Chart settings
+    chartDefaults: {
+        height: 400,
+        maintainAspectRatio: false,
+        animation: false,
+        responsive: true
+    },
+    
+    // Table settings
+    tableDefaults: {
+        pageSize: 10,
+        pageSizeOptions: [10, 25, 50, 100]
     }
 };
 
