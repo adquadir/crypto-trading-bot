@@ -765,7 +765,7 @@ class ExchangeClient:
             
             # Initialize cache for each symbol
             for symbol in self.symbols:
-                self.cache[symbol] = {
+                self.cache.set(symbol, {
                     'ohlcv': {},
                     'orderbook': {},
                     'ticker': {},
@@ -773,7 +773,7 @@ class ExchangeClient:
                     'open_interest': {},
                     'funding_rate': {},
                     'volatility': {}
-                }
+                })
             
             # Setup proxy if configured
             self._setup_proxy()
@@ -847,10 +847,12 @@ class ExchangeClient:
                 for symbol in self.symbols:
                     funding_rate = await self.get_funding_rate(symbol)
                     if funding_rate:
-                        self.cache[symbol]['funding_rate'] = {
-                            'value': funding_rate,
-                            'timestamp': time.time()
-                        }
+                        self.cache.set(symbol, {
+                            'funding_rate': {
+                                'value': funding_rate,
+                                'timestamp': time.time()
+                            }
+                        })
                 await asyncio.sleep(self.cache_ttls['funding_rate'])
             except Exception as e:
                 self.logger.error(f"Error updating funding rates: {str(e)}")
@@ -958,7 +960,9 @@ class ExchangeClient:
         """Handle WebSocket kline updates."""
         try:
             cache_key = f"{symbol}_ohlcv"
-            self.cache[symbol]['ohlcv'] = data
+            self.cache.set(symbol, {
+                'ohlcv': data
+            })
             self.cache_timestamps[cache_key] = time.time()
             logger.debug(f"Updated OHLCV cache for {symbol}")
         except Exception as e:
@@ -968,7 +972,9 @@ class ExchangeClient:
         """Handle WebSocket trade updates."""
         try:
             cache_key = f"{symbol}_ticker"
-            self.cache[symbol]['ticker'] = data
+            self.cache.set(symbol, {
+                'ticker': data
+            })
             self.cache_timestamps[cache_key] = time.time()
             logger.debug(f"Updated ticker cache for {symbol}")
         except Exception as e:
@@ -978,7 +984,9 @@ class ExchangeClient:
         """Handle WebSocket order book updates."""
         try:
             cache_key = f"{symbol}_orderbook"
-            self.cache[symbol]['orderbook'] = data
+            self.cache.set(symbol, {
+                'orderbook': data
+            })
             self.cache_timestamps[cache_key] = time.time()
             logger.debug(f"Updated orderbook cache for {symbol}")
         except Exception as e:
@@ -1018,7 +1026,7 @@ class ExchangeClient:
                     volatilities.append(self._volatility_cache[symbol])
                 else:
                     # Calculate volatility from recent price data
-                    klines = self.cache[symbol]['ohlcv']
+                    klines = self.cache.get(symbol, {}).get('ohlcv', [])
                     if klines and len(klines) >= 20:
                         closes = [float(k['close']) for k in klines[-20:]]
                         returns = np.diff(closes) / closes[:-1]
@@ -1118,7 +1126,9 @@ class ExchangeClient:
             # Implement REST API call here
             data = await self._fetch_ohlcv_rest(symbol, timeframe)
             if data:
-                self.cache[symbol]['ohlcv'] = data
+                self.cache.set(symbol, {
+                    'ohlcv': data
+                })
                 self.cache_timestamps[cache_key] = time.time()
             return data
         except Exception as e:
@@ -1140,7 +1150,9 @@ class ExchangeClient:
             # Implement REST API call here
             data = await self._fetch_ticker_rest(symbol)
             if data:
-                self.cache[symbol]['ticker'] = data
+                self.cache.set(symbol, {
+                    'ticker': data
+                })
                 self.cache_timestamps[cache_key] = time.time()
             return data
         except Exception as e:
@@ -1162,7 +1174,9 @@ class ExchangeClient:
             # Implement REST API call here
             data = await self._fetch_orderbook_rest(symbol)
             if data:
-                self.cache[symbol]['orderbook'] = data
+                self.cache.set(symbol, {
+                    'orderbook': data
+                })
                 self.cache_timestamps[cache_key] = time.time()
             return data
         except Exception as e:
