@@ -23,8 +23,20 @@ class SignalGenerator:
     def calculate_indicators(self, market_data: Dict, params: Dict = None) -> Dict:
         """Calculate technical indicators from market data."""
         try:
+            # Validate market data
+            if not market_data or 'klines' not in market_data:
+                logger.error("Invalid market data: missing 'klines' key")
+                return {}
+            
+            klines = market_data['klines']
+            if not klines or len(klines) == 0:
+                logger.error("Empty klines data")
+                return {}
+            
+            logger.debug(f"Processing {len(klines)} klines")
+            
             # Extract price data
-            df = pd.DataFrame(market_data['klines'])
+            df = pd.DataFrame(klines)
             
             # Validate required columns
             required_columns = ['open', 'high', 'low', 'close', 'volume']
@@ -35,97 +47,90 @@ class SignalGenerator:
             # Convert numeric columns
             for col in required_columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
+                logger.debug(f"Column {col} stats - min: {df[col].min()}, max: {df[col].max()}, mean: {df[col].mean()}")
             
             # Drop any rows with NaN values
+            initial_len = len(df)
             df.dropna(inplace=True)
+            if len(df) < initial_len:
+                logger.warning(f"Dropped {initial_len - len(df)} rows with NaN values")
             
             # Validate data points
-            if len(df) < 20:  # Minimum required data points
-                logger.warning(f"Insufficient data points: {len(df)}")
+            min_required_points = 20  # Minimum required for most indicators
+            if len(df) < min_required_points:
+                logger.warning(f"Insufficient data points: {len(df)} < {min_required_points}")
                 return {}
-            
-            # Calculate MACD
-            macd = ta.trend.MACD(
-                df['close'],
-                window_slow=params.get('macd_slow_period', 26),
-                window_fast=params.get('macd_fast_period', 12),
-                window_sign=params.get('macd_signal_period', 9)
-            )
-            
-            # Calculate RSI
-            rsi = ta.momentum.RSIIndicator(
-                df['close'],
-                window=14
-            )
-            
-            # Calculate Bollinger Bands
-            bb = ta.volatility.BollingerBands(
-                df['close'],
-                window=20,
-                window_dev=params.get('bb_std_dev', 2)
-            )
-            
-            # Calculate ADX
-            adx = ta.trend.ADXIndicator(
-                df['high'],
-                df['low'],
-                df['close'],
-                window=14
-            )
-            
-            # Calculate ATR
-            atr = ta.volatility.AverageTrueRange(
-                df['high'],
-                df['low'],
-                df['close'],
-                window=14
-            )
-            
-            # Calculate CCI
-            cci = ta.trend.CCIIndicator(
-                df['high'],
-                df['low'],
-                df['close'],
-                window=20
-            )
             
             # Get current price
             current_price = float(df['close'].iloc[-1])
+            logger.debug(f"Current price: {current_price}")
             
             # Handle potential NaN/inf values from ta calculations
             def safe_float(val, default=0.0):
                 try:
                     f = float(val)
                     if not np.isfinite(f):
+                        logger.debug(f"Non-finite value encountered: {val}, using default: {default}")
                         return default
                     return f
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Error converting to float: {val}, error: {e}, using default: {default}")
                     return default
 
             # Calculate indicators with error handling
             try:
+                logger.debug("Calculating MACD...")
+                macd = ta.trend.MACD(
+                    df['close'],
+                    window_slow=params.get('macd_slow_period', 26),
+                    window_fast=params.get('macd_fast_period', 12),
+                    window_sign=params.get('macd_signal_period', 9)
+                )
                 macd_value = safe_float(macd.macd().iloc[-1])
                 macd_signal = safe_float(macd.macd_signal().iloc[-1])
                 macd_histogram = safe_float(macd.macd_diff().iloc[-1])
+                logger.debug(f"MACD values - value: {macd_value}, signal: {macd_signal}, histogram: {macd_histogram}")
             except Exception as e:
                 logger.error(f"Error calculating MACD: {e}")
                 macd_value = macd_signal = macd_histogram = 0.0
 
             try:
+                logger.debug("Calculating RSI...")
+                rsi = ta.momentum.RSIIndicator(
+                    df['close'],
+                    window=14
+                )
                 rsi_value = safe_float(rsi.rsi().iloc[-1], 50.0)
+                logger.debug(f"RSI value: {rsi_value}")
             except Exception as e:
                 logger.error(f"Error calculating RSI: {e}")
                 rsi_value = 50.0
 
             try:
+                logger.debug("Calculating Bollinger Bands...")
+                bb = ta.volatility.BollingerBands(
+                    df['close'],
+                    window=20,
+                    window_dev=params.get('bb_std_dev', 2)
+                )
                 bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
                 bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
                 bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
+                logger.debug(f"Bollinger Bands - upper: {bb_upper}, middle: {bb_middle}, lower: {bb_lower}")
             except Exception as e:
                 logger.error(f"Error calculating Bollinger Bands: {e}")
                 bb_upper = bb_middle = bb_lower = current_price
 
+            # Adjust ADX window based on available data points
+            adx_window = min(14, len(df) - 1)  # Ensure window size doesn't exceed available data
             try:
+                logger.debug(f"Calculating ADX with window size {adx_window}...")
+                adx = ta.trend.ADXIndicator(
+                    df['high'],
+                    df['low'],
+                    df['close'],
+                    window=adx_window
+                )
                 adx_df = pd.DataFrame({
                     'adx': adx.adx(),
                     'adx_pos': adx.adx_pos(),
@@ -135,23 +140,40 @@ class SignalGenerator:
                 adx_value = float(adx_df['adx'].iloc[-1])
                 adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
                 adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
+                logger.debug(f"ADX values - value: {adx_value}, DI+: {adx_di_plus}, DI-: {adx_di_minus}")
             except Exception as e:
                 logger.error(f"Error calculating ADX: {e}")
                 adx_value = adx_di_plus = adx_di_minus = 0.0
 
             try:
+                logger.debug("Calculating ATR...")
+                atr = ta.volatility.AverageTrueRange(
+                    df['high'],
+                    df['low'],
+                    df['close'],
+                    window=min(14, len(df) - 1)  # Adjust window size
+                )
                 atr_value = safe_float(atr.average_true_range().iloc[-1])
+                logger.debug(f"ATR value: {atr_value}")
             except Exception as e:
                 logger.error(f"Error calculating ATR: {e}")
                 atr_value = 0.0
 
             try:
+                logger.debug("Calculating CCI...")
+                cci = ta.trend.CCIIndicator(
+                    df['high'],
+                    df['low'],
+                    df['close'],
+                    window=min(20, len(df) - 1)  # Adjust window size
+                )
                 cci_value = safe_float(cci.cci().iloc[-1])
+                logger.debug(f"CCI value: {cci_value}")
             except Exception as e:
                 logger.error(f"Error calculating CCI: {e}")
                 cci_value = 0.0
 
-            return {
+            indicators = {
                 'macd': {
                     'value': macd_value,
                     'signal': macd_signal,
@@ -177,6 +199,9 @@ class SignalGenerator:
                 'cci': cci_value,
                 'current_price': current_price
             }
+            
+            logger.debug("Successfully calculated all indicators")
+            return indicators
             
         except Exception as e:
             logger.error(f"Error calculating indicators: {e}")
@@ -581,8 +606,11 @@ class SignalGenerator:
     def _resample_dataframe(self, df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
         """Resample OHLCV data to a different timeframe."""
         try:
+            logger.debug(f"Starting resampling to {timeframe} timeframe")
+            
             # Create a copy to avoid modifying the original
             df = df.copy()
+            logger.debug(f"Original dataframe shape: {df.shape}")
             
             # Ensure all required columns exist
             required_columns = ['open', 'high', 'low', 'close', 'volume']
@@ -593,12 +621,15 @@ class SignalGenerator:
             # Convert numeric columns
             for col in required_columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
+                logger.debug(f"Column {col} stats - min: {df[col].min()}, max: {df[col].max()}, mean: {df[col].mean()}")
             
             # Handle timestamp
             if 'timestamp' in df.columns:
                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                logger.debug("Using 'timestamp' column for datetime")
             elif 'time' in df.columns:
                 df['timestamp'] = pd.to_datetime(df['time'], unit='ms')
+                logger.debug("Using 'time' column for datetime")
             else:
                 logger.error("No timestamp column found in dataframe")
                 return pd.DataFrame()
@@ -608,8 +639,24 @@ class SignalGenerator:
             
             # Sort by timestamp
             df.sort_index(inplace=True)
+            logger.debug(f"Data range: {df.index.min()} to {df.index.max()}")
+            
+            # Calculate minimum required data points based on timeframe
+            min_points = {
+                '1m': 20,
+                '5m': 20,
+                '15m': 20,
+                '1h': 20,
+                '4h': 20,
+                '1d': 20
+            }.get(timeframe, 20)
+            
+            if len(df) < min_points:
+                logger.warning(f"Insufficient data points for resampling: {len(df)} < {min_points}")
+                return pd.DataFrame()
             
             # Resample OHLCV data
+            logger.debug(f"Resampling data to {timeframe} timeframe")
             resampled = df.resample(timeframe).agg({
                 'open': 'first',
                 'high': 'max',
@@ -619,16 +666,20 @@ class SignalGenerator:
             })
             
             # Drop any rows with NaN values
+            initial_len = len(resampled)
             resampled.dropna(inplace=True)
+            if len(resampled) < initial_len:
+                logger.warning(f"Dropped {initial_len - len(resampled)} rows with NaN values after resampling")
             
             # Reset index to make timestamp a column again
             resampled.reset_index(inplace=True)
             
             # Validate resampled data
-            if len(resampled) < 20:  # Minimum required data points
-                logger.warning(f"Insufficient data points after resampling: {len(resampled)}")
+            if len(resampled) < min_points:
+                logger.warning(f"Insufficient data points after resampling: {len(resampled)} < {min_points}")
                 return pd.DataFrame()
             
+            logger.debug(f"Successfully resampled data. New shape: {resampled.shape}")
             return resampled
             
         except Exception as e:
