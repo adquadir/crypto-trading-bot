@@ -82,49 +82,22 @@ signal_generator = SignalGenerator()
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, List[WebSocket]] = {}
-        self.connection_tasks: Dict[str, asyncio.Task] = {}
-        
-    async def connect(self, websocket: WebSocket, client_id: str):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        if client_id not in self.active_connections:
-            self.active_connections[client_id] = []
-        self.active_connections[client_id].append(websocket)
-        logger.info(f"Client {client_id} connected. Total connections: {len(self.active_connections[client_id])}")
-        
-    async def disconnect(self, websocket: WebSocket, client_id: str):
-        if client_id in self.active_connections:
-            if websocket in self.active_connections[client_id]:
-                self.active_connections[client_id].remove(websocket)
-                logger.info(f"Client {client_id} disconnected. Remaining connections: {len(self.active_connections[client_id])}")
-            
-            # Clean up empty client lists
-            if not self.active_connections[client_id]:
-                del self.active_connections[client_id]
-                if client_id in self.connection_tasks:
-                    self.connection_tasks[client_id].cancel()
-                    try:
-                        await self.connection_tasks[client_id]
-                    except asyncio.CancelledError:
-                        pass
-                    del self.connection_tasks[client_id]
-                    
-    async def broadcast(self, message: dict, client_id: str):
-        if client_id in self.active_connections:
-            disconnected = []
-            for connection in self.active_connections[client_id]:
-                try:
-                    if connection.client_state.CONNECTED:  # Check if still connected
-                        await connection.send_json(message)
-                    else:
-                        disconnected.append(connection)
-                except Exception as e:
-                    logger.error(f"Error broadcasting to client {client_id}: {e}")
-                    disconnected.append(connection)
-                    
-            # Clean up disconnected websockets
-            for connection in disconnected:
-                await self.disconnect(connection, client_id)
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to WebSocket: {e}")
+                await self.disconnect(connection)
 
 manager = ConnectionManager()
 
@@ -142,25 +115,15 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    # Cancel all connection tasks
-    for task in manager.connection_tasks.values():
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-    
     # Close all websocket connections
-    for client_id, connections in list(manager.active_connections.items()):
-        for connection in connections:
-            try:
-                await connection.close()
-            except Exception as e:
-                logger.error(f"Error closing websocket for client {client_id}: {e}")
+    for connection in list(manager.active_connections):
+        try:
+            await connection.close()
+        except Exception as e:
+            logger.error(f"Error closing websocket: {e}")
     
     # Clear all connection data
     manager.active_connections.clear()
-    manager.connection_tasks.clear()
     
     # Close exchange client
     await exchange_client.close()
@@ -203,7 +166,7 @@ async def market_data_stream(client_id: str):
                     }
                     
                     # Broadcast to client
-                    await manager.broadcast(message, client_id)
+                    await manager.broadcast(message)
                     
                     # Rate limiting
                     await asyncio.sleep(1.0)  # 1 second delay between symbols
@@ -221,42 +184,58 @@ async def market_data_stream(client_id: str):
         logger.error(f"Market data stream error for client {client_id}: {e}")
     finally:
         # Clean up any remaining connections for this client
-        if client_id in manager.active_connections:
-            for connection in manager.active_connections[client_id]:
-                try:
-                    await connection.close()
-                except Exception as e:
-                    logger.error(f"Error closing websocket for client {client_id}: {e}")
-            del manager.active_connections[client_id]
+        for connection in list(manager.active_connections):
+            try:
+                await connection.close()
+            except Exception as e:
+                logger.error(f"Error closing websocket for client {client_id}: {e}")
+        manager.active_connections.clear()
 
 @app.websocket("/ws/signals")
 async def websocket_endpoint(websocket: WebSocket):
-    client_id = "signals_client" # Use a fixed client_id for this endpoint
+    await manager.connect(websocket)
     try:
-        await manager.connect(websocket, client_id)
-        
-        # Start market data stream if not already running
-        if client_id not in manager.connection_tasks:
-            manager.connection_tasks[client_id] = asyncio.create_task(
-                market_data_stream(client_id)
-            )
-        
-        # Keep connection alive and handle client messages
         while True:
-            try:
-                data = await websocket.receive_text()
-                # Handle any client messages here if needed
-            except WebSocketDisconnect:
-                await manager.disconnect(websocket, client_id)
-                break
-            except Exception as e:
-                logger.error(f"WebSocket error for client {client_id}: {e}")
-                await manager.disconnect(websocket, client_id)
-                break
-                
+            # Get latest opportunities
+            opportunities_list = await symbol_discovery.scan_opportunities()
+            
+            # Format opportunities
+            formatted_opportunities = [
+                {
+                    "symbol": opp.symbol,
+                    "signal_type": opp.direction,
+                    "entry": opp.entry_price,
+                    "take_profit": opp.take_profit,
+                    "stop_loss": opp.stop_loss,
+                    "confidence_score": opp.confidence,
+                    "leverage": opp.leverage,
+                    "risk_reward": opp.risk_reward,
+                    "volume_24h": opp.volume_24h,
+                    "volatility": opp.volatility,
+                    "score": opp.score,
+                    "indicators": opp.indicators,
+                    "reasoning": opp.reasoning,
+                    "price_history": opp.price_history if hasattr(opp, 'price_history') else None,
+                    "data_freshness": opp.data_freshness if hasattr(opp, 'data_freshness') else None
+                }
+                for opp in opportunities_list
+            ]
+            
+            # Send updates
+            for opp in formatted_opportunities:
+                await websocket.send_json({
+                    "type": "opportunity_update",
+                    "opportunity": opp
+                })
+            
+            # Wait before next update
+            await asyncio.sleep(1)  # Update every second
+            
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
     except Exception as e:
-        logger.error(f"Error in websocket endpoint for client {client_id}: {e}")
-        await manager.disconnect(websocket, client_id)
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
 
 @app.get("/health")
 async def health_check():
@@ -799,25 +778,19 @@ async def get_opportunities(
     min_volume: float = 1000000,
     limit: int = Query(50, ge=1, le=100, description="Limit the number of opportunities returned")
 ):
-    """Get current trading opportunities with optional filtering."""
     try:
-        # Update symbol discovery parameters
-        symbol_discovery.min_confidence = min_confidence
-        symbol_discovery.min_risk_reward = min_risk_reward
-        symbol_discovery.min_volume_24h = min_volume
+        # Get opportunities with real-time data
+        opportunities_list = await symbol_discovery.scan_opportunities()
         
-        # Get opportunities
-        opportunities = await symbol_discovery.scan_opportunities()
-        
-        # Filter opportunities based on parameters
+        # Filter opportunities
         filtered_opportunities = [
-            opp for opp in opportunities
+            opp for opp in opportunities_list
             if opp.confidence >= min_confidence
-            and opp.risk_reward >= (min_risk_reward - 1e-9)  # Allow for floating point precision issues
+            and opp.risk_reward >= min_risk_reward
             and opp.volume_24h >= min_volume
         ]
         
-        # Sort by score and limit results
+        # Sort by score
         sorted_opportunities = sorted(
             filtered_opportunities,
             key=lambda x: x.score,
@@ -828,11 +801,11 @@ async def get_opportunities(
         formatted_opportunities = [
             {
                 "symbol": opp.symbol,
-                "signal_type": opp.direction,  # Changed from direction to signal_type
-                "entry": opp.entry_price,  # Changed from entry_price to entry
+                "signal_type": opp.direction,
+                "entry": opp.entry_price,
                 "take_profit": opp.take_profit,
                 "stop_loss": opp.stop_loss,
-                "confidence_score": opp.confidence,  # Changed from confidence to confidence_score
+                "confidence_score": opp.confidence,
                 "leverage": opp.leverage,
                 "risk_reward": opp.risk_reward,
                 "volume_24h": opp.volume_24h,
@@ -840,7 +813,8 @@ async def get_opportunities(
                 "score": opp.score,
                 "indicators": opp.indicators,
                 "reasoning": opp.reasoning,
-                "price_history": opp.price_history if hasattr(opp, 'price_history') else None
+                "price_history": opp.price_history if hasattr(opp, 'price_history') else None,
+                "data_freshness": opp.data_freshness if hasattr(opp, 'data_freshness') else None
             }
             for opp in sorted_opportunities
         ]

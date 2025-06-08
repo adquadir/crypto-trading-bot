@@ -202,7 +202,7 @@ const Opportunities = () => {
   const [error, setError] = useState(null);
   const [selectedOpportunity, setSelectedOpportunity] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [viewMode, setViewMode] = useState('table'); // 'table' or 'chart'
+  const [viewMode, setViewMode] = useState('table');
   const [filters, setFilters] = useState({
     signalType: 'all',
     minConfidence: 0,
@@ -213,6 +213,60 @@ const Opportunities = () => {
     field: 'confidence_score',
     direction: 'desc'
   });
+  const [wsConnected, setWsConnected] = useState(false);
+
+  useEffect(() => {
+    const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+      setWsConnected(true);
+      setError(null);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'opportunity_update') {
+          setOpportunities(prev => {
+            const updated = [...prev];
+            const index = updated.findIndex(opp => opp.symbol === data.opportunity.symbol);
+            if (index >= 0) {
+              updated[index] = data.opportunity;
+            } else {
+              updated.push(data.opportunity);
+            }
+            return updated;
+          });
+        }
+      } catch (err) {
+        console.error('Error processing WebSocket message:', err);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setError('WebSocket connection error');
+      setWsConnected(false);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      setWsConnected(false);
+      setTimeout(() => {
+        if (!wsConnected) {
+          console.log('Attempting to reconnect WebSocket...');
+          ws.connect();
+        }
+      }, 5000);
+    };
+
+    fetchOpportunities();
+
+    return () => {
+      ws.close();
+    };
+  }, []);
 
   const fetchOpportunities = async () => {
     try {
@@ -227,13 +281,6 @@ const Opportunities = () => {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchOpportunities();
-    // Set up polling every 30 seconds
-    const interval = setInterval(fetchOpportunities, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   const getDirectionColor = (direction) => {
     switch(direction) {

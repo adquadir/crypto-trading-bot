@@ -31,6 +31,12 @@ class TradingOpportunity:
     score: float
     indicators: Dict = field(default_factory=dict)
     reasoning: List[str] = field(default_factory=list)
+    # Add new metrics
+    book_depth: float = 0.0  # Average depth within 0.25%
+    oi_trend: float = 0.0  # Open interest trend over past 10 minutes
+    volume_trend: float = 0.0  # Volume trend over past 10 minutes
+    slippage: float = 0.0  # Estimated slippage for 0.1 BTC order
+    data_freshness: float = 0.0  # Time since last data update in seconds
 
 @dataclass
 class SignalValidationResult:
@@ -43,6 +49,333 @@ class CachedSignal:
     signal: Dict
     timestamp: datetime
     expires_at: datetime
+
+@dataclass
+class SignalEvaluation:
+    """Track signal performance and outcomes."""
+    symbol: str
+    direction: str
+    entry_price: float
+    take_profit: float
+    stop_loss: float
+    confidence: float
+    score: float
+    timestamp: datetime
+    outcome: Optional[str] = None  # 'win', 'loss', 'breakeven'
+    pnl: Optional[float] = None
+    exit_price: Optional[float] = None
+    exit_time: Optional[datetime] = None
+    metrics: Dict = field(default_factory=dict)  # Store all input metrics
+    reasoning: List[str] = field(default_factory=list)
+
+class SignalTracker:
+    """Track and evaluate signal performance."""
+    def __init__(self):
+        self.signals: List[SignalEvaluation] = []
+        self.score_weights = {
+            'volume': 0.15,
+            'volatility': 0.15,
+            'trend': 0.20,
+            'momentum': 0.20,
+            'liquidity': 0.15,
+            'oi_trend': 0.15
+        }
+        self.min_samples = 100  # Minimum samples for weight tuning
+        self.win_rate_threshold = 0.55  # Target win rate
+        self.score_buckets = {
+            'high': (0.8, 1.0),
+            'medium': (0.6, 0.8),
+            'low': (0.4, 0.6),
+            'very_low': (0.0, 0.4)
+        }
+        self.score_bucket_stats = {}
+        
+    def add_signal(self, signal: SignalEvaluation):
+        """Add a new signal for tracking."""
+        self.signals.append(signal)
+        self._log_signal_details(signal)
+        
+    def _log_signal_details(self, signal: SignalEvaluation):
+        """Log detailed signal information for analysis."""
+        log_entry = {
+            'timestamp': signal.timestamp.isoformat(),
+            'symbol': signal.symbol,
+            'direction': signal.direction,
+            'entry_price': signal.entry_price,
+            'take_profit': signal.take_profit,
+            'stop_loss': signal.stop_loss,
+            'confidence': signal.confidence,
+            'score': signal.score,
+            'metrics': signal.metrics,
+            'reasoning': signal.reasoning
+        }
+        
+        # Log to daily file
+        log_dir = Path('logs/signals')
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"signals_{signal.timestamp.strftime('%Y%m%d')}.jsonl"
+        
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
+            
+    def update_outcome(self, symbol: str, outcome: str, pnl: float, exit_price: float):
+        """Update signal outcome after trade completion."""
+        for signal in self.signals:
+            if signal.symbol == symbol and signal.outcome is None:
+                signal.outcome = outcome
+                signal.pnl = pnl
+                signal.exit_price = exit_price
+                signal.exit_time = datetime.now()
+                
+                # Log outcome
+                self._log_outcome(signal)
+                
+                # Update analytics
+                self._update_analytics(signal)
+                break
+                
+    def _log_outcome(self, signal: SignalEvaluation):
+        """Log trade outcome for analysis."""
+        log_entry = {
+            'timestamp': signal.exit_time.isoformat(),
+            'symbol': signal.symbol,
+            'outcome': signal.outcome,
+            'pnl': signal.pnl,
+            'exit_price': signal.exit_price,
+            'holding_time': (signal.exit_time - signal.timestamp).total_seconds() / 3600,  # hours
+            'score': signal.score,
+            'confidence': signal.confidence
+        }
+        
+        log_dir = Path('logs/outcomes')
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"outcomes_{signal.exit_time.strftime('%Y%m%d')}.jsonl"
+        
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
+            
+    def _update_analytics(self, signal: SignalEvaluation):
+        """Update performance analytics."""
+        # Update score bucket performance
+        bucket = self._get_score_bucket(signal.score)
+        if bucket not in self.score_bucket_stats:
+            self.score_bucket_stats[bucket] = {
+                'total': 0,
+                'wins': 0,
+                'losses': 0,
+                'total_pnl': 0.0,
+                'avg_holding_time': 0.0
+            }
+            
+        stats = self.score_bucket_stats[bucket]
+        stats['total'] += 1
+        if signal.outcome == 'win':
+            stats['wins'] += 1
+        else:
+            stats['losses'] += 1
+        stats['total_pnl'] += signal.pnl
+        stats['avg_holding_time'] = (
+            (stats['avg_holding_time'] * (stats['total'] - 1) +
+             (signal.exit_time - signal.timestamp).total_seconds() / 3600) /
+            stats['total']
+        )
+        
+    def _get_score_bucket(self, score: float) -> str:
+        """Get the score bucket for a given score."""
+        for bucket, (low, high) in self.score_buckets.items():
+            if low <= score < high:
+                return bucket
+        return 'very_low'
+        
+    def get_performance_metrics(self) -> Dict:
+        """Get comprehensive performance metrics."""
+        metrics = {
+            'overall': self._calculate_overall_metrics(),
+            'by_score': self._calculate_score_metrics(),
+            'by_confidence': self._calculate_confidence_metrics(),
+            'by_regime': self._calculate_regime_metrics(),
+            'by_timeframe': self._calculate_timeframe_metrics()
+        }
+        
+        # Calculate optimal thresholds
+        metrics['optimal_thresholds'] = self.get_optimal_thresholds()
+        
+        return metrics
+        
+    def _calculate_overall_metrics(self) -> Dict:
+        """Calculate overall performance metrics."""
+        completed = [s for s in self.signals if s.outcome is not None]
+        if not completed:
+            return {}
+            
+        return {
+            'total_trades': len(completed),
+            'win_rate': sum(1 for s in completed if s.outcome == 'win') / len(completed),
+            'avg_pnl': sum(s.pnl for s in completed) / len(completed),
+            'avg_holding_time': sum((s.exit_time - s.timestamp).total_seconds() / 3600 
+                                  for s in completed) / len(completed),
+            'profit_factor': (
+                sum(s.pnl for s in completed if s.pnl > 0) /
+                abs(sum(s.pnl for s in completed if s.pnl < 0))
+                if any(s.pnl < 0 for s in completed) else float('inf')
+            )
+        }
+        
+    def _calculate_score_metrics(self) -> Dict:
+        """Calculate performance metrics by score bucket."""
+        return {
+            bucket: {
+                'win_rate': stats['wins'] / stats['total'] if stats['total'] > 0 else 0,
+                'avg_pnl': stats['total_pnl'] / stats['total'] if stats['total'] > 0 else 0,
+                'avg_holding_time': stats['avg_holding_time'],
+                'total_trades': stats['total']
+            }
+            for bucket, stats in self.score_bucket_stats.items()
+        }
+        
+    def _calculate_confidence_metrics(self) -> Dict:
+        """Calculate performance metrics by confidence level."""
+        completed = [s for s in self.signals if s.outcome is not None]
+        if not completed:
+            return {}
+            
+        confidence_ranges = {
+            'high': (0.8, 1.0),
+            'medium': (0.6, 0.8),
+            'low': (0.4, 0.6),
+            'very_low': (0.0, 0.4)
+        }
+        
+        metrics = {}
+        for level, (low, high) in confidence_ranges.items():
+            level_signals = [s for s in completed if low <= s.confidence < high]
+            if level_signals:
+                metrics[level] = {
+                    'win_rate': sum(1 for s in level_signals if s.outcome == 'win') / len(level_signals),
+                    'avg_pnl': sum(s.pnl for s in level_signals) / len(level_signals),
+                    'total_trades': len(level_signals)
+                }
+                
+        return metrics
+        
+    def _calculate_regime_metrics(self) -> Dict:
+        """Calculate performance metrics by market regime."""
+        completed = [s for s in self.signals if s.outcome is not None]
+        if not completed:
+            return {}
+            
+        regimes = {}
+        for signal in completed:
+            regime = signal.metrics.get('regime', 'unknown')
+            if regime not in regimes:
+                regimes[regime] = {
+                    'total': 0,
+                    'wins': 0,
+                    'total_pnl': 0.0
+                }
+                
+            stats = regimes[regime]
+            stats['total'] += 1
+            if signal.outcome == 'win':
+                stats['wins'] += 1
+            stats['total_pnl'] += signal.pnl
+            
+        return {
+            regime: {
+                'win_rate': stats['wins'] / stats['total'],
+                'avg_pnl': stats['total_pnl'] / stats['total'],
+                'total_trades': stats['total']
+            }
+            for regime, stats in regimes.items()
+        }
+        
+    def _calculate_timeframe_metrics(self) -> Dict:
+        """Calculate performance metrics by time of day."""
+        completed = [s for s in self.signals if s.outcome is not None]
+        if not completed:
+            return {}
+            
+        timeframes = {
+            'morning': (6, 12),
+            'afternoon': (12, 18),
+            'evening': (18, 24),
+            'night': (0, 6)
+        }
+        
+        metrics = {}
+        for period, (start, end) in timeframes.items():
+            period_signals = [
+                s for s in completed
+                if start <= s.timestamp.hour < end
+            ]
+            if period_signals:
+                metrics[period] = {
+                    'win_rate': sum(1 for s in period_signals if s.outcome == 'win') / len(period_signals),
+                    'avg_pnl': sum(s.pnl for s in period_signals) / len(period_signals),
+                    'total_trades': len(period_signals)
+                }
+                
+        return metrics
+
+    def get_optimal_thresholds(self) -> Dict:
+        """Calculate optimal thresholds based on historical performance."""
+        completed = [s for s in self.signals if s.outcome is not None]
+        if len(completed) < self.min_samples:
+            return {
+                'min_score': 0.6,
+                'min_confidence': 0.6,
+                'min_win_rate': 0.55
+            }
+            
+        # Calculate optimal score threshold
+        scores = sorted([s.score for s in completed])
+        win_rates = []
+        for i in range(len(scores)):
+            threshold = scores[i]
+            signals_above = [s for s in completed if s.score >= threshold]
+            if len(signals_above) >= self.min_samples:
+                win_rate = sum(1 for s in signals_above if s.outcome == 'win') / len(signals_above)
+                win_rates.append((threshold, win_rate))
+                
+        optimal_score = max(
+            (threshold for threshold, win_rate in win_rates if win_rate >= self.win_rate_threshold),
+            default=0.6
+        )
+        
+        # Calculate optimal confidence threshold
+        confidences = sorted([s.confidence for s in completed])
+        win_rates = []
+        for i in range(len(confidences)):
+            threshold = confidences[i]
+            signals_above = [s for s in completed if s.confidence >= threshold]
+            if len(signals_above) >= self.min_samples:
+                win_rate = sum(1 for s in signals_above if s.outcome == 'win') / len(signals_above)
+                win_rates.append((threshold, win_rate))
+                
+        optimal_confidence = max(
+            (threshold for threshold, win_rate in win_rates if win_rate >= self.win_rate_threshold),
+            default=0.6
+        )
+        
+        # Calculate optimal win rate threshold
+        win_rates = []
+        for i in range(len(scores)):
+            threshold = scores[i]
+            signals_above = [s for s in completed if s.score >= threshold]
+            if len(signals_above) >= self.min_samples:
+                win_rate = sum(1 for s in signals_above if s.outcome == 'win') / len(signals_above)
+                win_rates.append((threshold, win_rate))
+                
+        optimal_win_rate = max(
+            (win_rate for _, win_rate in win_rates),
+            default=self.win_rate_threshold
+        )
+        
+        return {
+            'min_score': optimal_score,
+            'min_confidence': optimal_confidence,
+            'min_win_rate': optimal_win_rate
+        }
 
 class SymbolDiscovery:
     def __init__(self, exchange_client: ExchangeClient):
@@ -877,10 +1210,92 @@ class SymbolDiscovery:
         if spread > self.max_spread:
             reasons.append(f"Spread too high: {spread:.4f} > {self.max_spread:.4f}")
 
-        # Liquidity filter
-        liquidity = self._calculate_liquidity(market_data.get('orderbook', {}))
-        if liquidity < self.min_liquidity:
-            reasons.append(f"Low liquidity: {liquidity:.2f} < {self.min_liquidity:.2f}")
+        # Enhanced liquidity filter with multiple depth ranges
+        orderbook = market_data.get('orderbook', {})
+        if orderbook:
+            mid_price = (orderbook['asks'][0][0] + orderbook['bids'][0][0]) / 2
+            volatility = self.calculate_volatility(market_data.get('klines', []))
+            
+            # Define depth ranges and their minimum requirements
+            depth_ranges = [
+                (0.001, 0.0025, 10000),  # 0.1% range, minimum $10k
+                (0.0025, 0.005, 20000),  # 0.25% range, minimum $20k
+                (0.005, 0.01, 50000)     # 0.5% range, minimum $50k
+            ]
+            
+            # Adjust requirements based on volatility
+            volatility_factor = 1 + (volatility * 10)
+            
+            # Check each depth range
+            depth_metrics = []
+            for min_range, max_range, min_depth in depth_ranges:
+                range_min = mid_price * (1 - max_range)
+                range_max = mid_price * (1 + max_range)
+                
+                buy_depth = sum(qty for price, qty in orderbook['bids'] if range_min <= price <= mid_price)
+                sell_depth = sum(qty for price, qty in orderbook['asks'] if mid_price <= price <= range_max)
+                avg_depth = (buy_depth + sell_depth) / 2
+                
+                adjusted_min_depth = min_depth * volatility_factor
+                depth_metrics.append({
+                    'range': f"{min_range*100:.1f}%-{max_range*100:.1f}%",
+                    'depth': avg_depth,
+                    'required': adjusted_min_depth,
+                    'passed': avg_depth >= adjusted_min_depth
+                })
+            
+            # Log depth metrics
+            depth_log = "; ".join([
+                f"{m['range']}: ${m['depth']:.2f} (req: ${m['required']:.2f})"
+                for m in depth_metrics
+            ])
+            logger.debug(f"Depth metrics for {symbol}: {depth_log}")
+            
+            # Check if any range passes
+            if not any(m['passed'] for m in depth_metrics):
+                reasons.append(
+                    f"Insufficient liquidity across all ranges (volatility: {volatility:.4f}): {depth_log}"
+                )
+                return False, reasons
+
+        # Open interest filter and trend check with enhanced metrics
+        open_interest = market_data.get('open_interest', 0)
+        if open_interest < self.min_open_interest:
+            reasons.append(f"Low open interest: {open_interest:.2f} < {self.min_open_interest:.2f}")
+        
+        # Enhanced OI trend analysis
+        oi_data = market_data.get('open_interest_history', [])
+        if len(oi_data) >= 10:
+            recent_oi = oi_data[-10:]  # Last 10 minutes
+            oi_trend = np.polyfit(range(len(recent_oi)), recent_oi, 1)[0]
+            oi_change_pct = (recent_oi[-1] - recent_oi[0]) / recent_oi[0]
+            
+            # Calculate OI volatility
+            oi_std = np.std(recent_oi)
+            oi_mean = np.mean(recent_oi)
+            oi_cv = oi_std / oi_mean if oi_mean > 0 else float('inf')
+            
+            # Log OI metrics
+            logger.debug(
+                f"OI metrics for {symbol}: "
+                f"trend={oi_trend:.2f}, "
+                f"change={oi_change_pct*100:.1f}%, "
+                f"CV={oi_cv:.2f}"
+            )
+            
+            if oi_trend < 0:
+                if oi_change_pct < -0.05:  # More than 5% decline
+                    reasons.append(
+                        f"Severe OI decline: {oi_change_pct*100:.1f}% "
+                        f"(volatility: {oi_cv:.2f})"
+                    )
+                    return False, reasons
+                elif oi_cv > 0.1:  # High OI volatility
+                    reasons.append(
+                        f"Unstable OI: {oi_cv:.2f} CV "
+                        f"(trend: {oi_change_pct*100:.1f}%)"
+                    )
+                    # Don't return False for high volatility, just log it
 
         # Market cap filter
         market_cap = self._calculate_market_cap(market_data.get('ticker_24h', {}))
@@ -897,10 +1312,18 @@ class SymbolDiscovery:
         if not (self.min_funding_rate <= funding_rate <= self.max_funding_rate):
             reasons.append(f"Funding rate out of range: {funding_rate:.6f} ({self.min_funding_rate:.6f}-{self.max_funding_rate:.6f})")
 
-        # Open interest filter
-        open_interest = market_data.get('open_interest', 0)
-        if open_interest < self.min_open_interest:
-            reasons.append(f"Low open interest: {open_interest:.2f} < {self.min_open_interest:.2f}")
+        # Volume trend check over past 10 minutes
+        volume_data = market_data.get('volume_history', [])
+        if len(volume_data) >= 10:
+            recent_volume = volume_data[-10:]
+            volume_trend = np.polyfit(range(len(recent_volume)), recent_volume, 1)[0]
+            
+            if volume_trend < 0:
+                # Calculate volume trend severity
+                volume_change_pct = (recent_volume[-1] - recent_volume[0]) / recent_volume[0]
+                if volume_change_pct < -0.1:  # More than 10% decline
+                    reasons.append(f"Severe volume decline: {volume_change_pct*100:.1f}%")
+                    # Don't return False for severe decline, just log it
 
         # Price stability filter
         if not self._check_price_stability(market_data.get('klines', [])):
@@ -910,12 +1333,66 @@ class SymbolDiscovery:
         if not self._check_volume_trend(market_data.get('klines', [])):
             reasons.append("Unhealthy volume trend")
 
+        # Estimate slippage for a simulated market order
+        if orderbook:
+            simulated_order_size = 0.1  # 0.1 BTC or equivalent
+            slippage = self._estimate_slippage(orderbook, simulated_order_size)
+            if slippage > 0.002:  # 0.2% max slippage
+                reasons.append(f"High slippage: {slippage*100:.3f}%")
+
         if reasons:
             logger.debug(f"Symbol {symbol} excluded by advanced filters: {'; '.join(reasons)}")
             logger.info(f"Excluded {symbol}: {'; '.join(reasons)}")
             return False, reasons
 
         return True, []
+
+    def _estimate_slippage(self, orderbook: Dict, order_size: float) -> float:
+        """Estimate slippage for a simulated market order."""
+        try:
+            if not orderbook or 'bids' not in orderbook or 'asks' not in orderbook:
+                return float('inf')
+                
+            # Calculate average price for buying
+            buy_price = 0
+            remaining_size = order_size
+            for price, qty in orderbook['asks']:
+                if remaining_size <= 0:
+                    break
+                executed = min(remaining_size, qty)
+                buy_price += price * executed
+                remaining_size -= executed
+                
+            if remaining_size > 0:
+                return float('inf')  # Not enough liquidity
+                
+            avg_buy_price = buy_price / order_size
+            
+            # Calculate average price for selling
+            sell_price = 0
+            remaining_size = order_size
+            for price, qty in orderbook['bids']:
+                if remaining_size <= 0:
+                    break
+                executed = min(remaining_size, qty)
+                sell_price += price * executed
+                remaining_size -= executed
+                
+            if remaining_size > 0:
+                return float('inf')  # Not enough liquidity
+                
+            avg_sell_price = sell_price / order_size
+            
+            # Calculate slippage as percentage
+            mid_price = (orderbook['asks'][0][0] + orderbook['bids'][0][0]) / 2
+            buy_slippage = abs(avg_buy_price - mid_price) / mid_price
+            sell_slippage = abs(avg_sell_price - mid_price) / mid_price
+            
+            return max(buy_slippage, sell_slippage)
+            
+        except Exception as e:
+            logger.error(f"Error estimating slippage: {e}")
+            return float('inf')
             
     def _check_price_stability(self, ohlcv: List[Dict]) -> bool:
         """Check if price is stable enough for trading."""
@@ -939,404 +1416,70 @@ class SymbolDiscovery:
             logger.error(f"Error checking price stability: {e}")
             return False
             
-    def _check_volume_trend(self, ohlcv: List[Dict]) -> bool:
-        """Check if volume trend is healthy."""
+    def _check_volume_trend(self, ohlcv: List[Dict], signal_direction: Optional[str] = None) -> bool:
+        """Check if volume trend is healthy, with relaxed criteria for confirmed signals."""
         try:
             volumes = [float(candle['volume']) for candle in ohlcv]
             
             # Need at least 20 data points for the MA and STD calculations
             if len(volumes) < 20:
-                # If insufficient data, assume healthy for now or return False based on desired behavior
-                # Returning True to allow symbols through if not enough data to strictly fail
-                return True # Or False, depending on desired strictness with limited data
-
-            # Calculate volume moving averages
+                logger.debug("Insufficient data points for volume trend analysis")
+                return True  # Allow through if not enough data
+                
+            # Calculate volume metrics
             vol_ma5 = np.mean(volumes[-5:])
             vol_ma20 = np.mean(volumes[-20:])
-            
-            # Volume should be increasing or stable
-            # Relaxing the threshold from 0.5 to 0.3 or 0.2
-            if vol_ma5 < vol_ma20 * 0.2:  # Adjusted to allow recent volume to be as low as 20% of the 20-period average
-                return False
-                
-            # Check for volume consistency (lower coefficient of variation indicates more consistent volume)
-            # Relaxing the threshold from 1.0 to 1.5
             vol_std = np.std(volumes[-20:])
             vol_mean = np.mean(volumes[-20:])
-            if vol_mean > 0 and (vol_std / vol_mean) > 1.5:  # Adjusted to allow higher coefficient of variation (more inconsistency)
+            
+            # Check for volume consistency
+            vol_cv = vol_std / vol_mean if vol_mean > 0 else float('inf')
+            
+            # Additional safeguards
+            # 1. Check for sudden volume spikes
+            recent_vol_std = np.std(volumes[-5:])
+            if recent_vol_std > vol_mean * 2.0:
+                logger.warning(f"Sudden volume spike detected: {recent_vol_std/vol_mean:.2f}x average")
                 return False
                 
-            return True
+            # 2. Check for volume trend consistency
+            vol_trend = np.polyfit(range(len(volumes[-20:])), volumes[-20:], 1)[0]
+            if abs(vol_trend) > vol_mean * 0.5:
+                logger.warning(f"Extreme volume trend detected: {vol_trend/vol_mean:.2f}x average")
+                return False
+                
+            # 3. Check for volume gaps
+            vol_diffs = np.diff(volumes[-5:])
+            if np.max(np.abs(vol_diffs)) > vol_mean * 3.0:
+                logger.warning(f"Large volume gap detected: {np.max(np.abs(vol_diffs))/vol_mean:.2f}x average")
+                return False
+            
+            # If signal direction is confirmed, use relaxed criteria
+            if signal_direction:
+                # For confirmed signals, only check for extreme volume drops
+                if vol_ma5 < vol_ma20 * 0.1:  # Allow up to 90% volume drop
+                    logger.warning(f"Extreme volume drop detected: {vol_ma5/vol_ma20:.2%} of average")
+                    return False
+                    
+                # Check for volume consistency with relaxed threshold
+                if vol_cv > 2.0:  # Allow higher coefficient of variation
+                    logger.warning(f"High volume variation: {vol_cv:.2f}")
+                    return False
+                    
+                return True
+            else:
+                # Standard checks for unconfirmed signals
+                if vol_ma5 < vol_ma20 * 0.2:  # Require at least 20% of average volume
+                    logger.debug(f"Low recent volume: {vol_ma5/vol_ma20:.2%} of average")
+                    return False
+                    
+                # Check for volume consistency
+                if vol_cv > 1.5:  # Standard threshold for variation
+                    logger.debug(f"High volume variation: {vol_cv:.2f}")
+                    return False
+                    
+                return True
             
         except Exception as e:
             logger.error(f"Error checking volume trend: {e}")
-            return False
-
-    def get_top_opportunities(self, count: int = 5) -> List[TradingOpportunity]:
-        """Get the top N trading opportunities."""
-        opportunities = list(self.opportunities.values())
-        opportunities.sort(key=lambda x: x.score, reverse=True)
-        return opportunities[:count]
-
-    async def update_opportunities(self, risk_per_trade: float = 50.0):
-        """Update opportunities periodically."""
-        while True:
-            try:
-                await self.scan_opportunities(risk_per_trade)
-                await asyncio.sleep(60)  # Update every minute
-            except Exception as e:
-                logger.error(f"Error updating opportunities: {e}")
-                await asyncio.sleep(5)  # Wait before retrying 
-
-    def _calculate_indicators(self, ohlcv: List[Dict]) -> Dict:
-        """Calculate technical indicators from OHLCV data."""
-        try:
-            # Extract price and volume data
-            closes = np.array([float(candle['close']) for candle in ohlcv])
-            highs = np.array([float(candle['high']) for candle in ohlcv])
-            lows = np.array([float(candle['low']) for candle in ohlcv])
-            volumes = np.array([float(candle['volume']) for candle in ohlcv])
-            
-            # Calculate MACD
-            ema12 = self._calculate_ema(closes, 12)
-            ema26 = self._calculate_ema(closes, 26)
-            macd_line = ema12 - ema26
-            signal_line = self._calculate_ema(macd_line, 9)
-            macd_histogram = macd_line - signal_line
-            
-            # Calculate RSI
-            rsi = self._calculate_rsi(closes)
-            
-            # Calculate Bollinger Bands
-            bb_middle = self._calculate_sma(closes, 20)
-            bb_std = np.std(closes[-20:])
-            bb_upper = bb_middle + (2 * bb_std)
-            bb_lower = bb_middle - (2 * bb_std)
-            
-            # Calculate Stochastic Oscillator
-            stoch_k = self._calculate_stochastic(highs, lows, closes)
-            stoch_d = self._calculate_sma(stoch_k, 3)
-            
-            # Calculate ATR
-            atr = self._calculate_atr(highs, lows, closes)
-            
-            # Calculate OBV (On-Balance Volume)
-            obv = self._calculate_obv(closes, volumes)
-            
-            # Calculate VWAP
-            vwap = self._calculate_vwap(ohlcv)
-            
-            # Calculate ADX
-            adx, di_plus, di_minus = self._calculate_adx(highs, lows, closes)
-            
-            # Calculate CCI
-            cci = self._calculate_cci(highs, lows, closes)
-            
-            # Get current price
-            current_price = float(closes[-1])
-            
-            return {
-                'macd': {
-                    'value': float(macd_line[-1]),
-                    'signal': float(signal_line[-1]),
-                    'histogram': float(macd_histogram[-1])
-                },
-                'macd_signal': float(signal_line[-1]),
-                'rsi': float(rsi[-1]),
-                'bollinger_bands': {
-                    'upper': float(bb_upper[-1]),
-                    'middle': float(bb_middle[-1]),
-                    'lower': float(bb_lower[-1])
-                },
-                'bb_upper': float(bb_upper[-1]),  # Add these for signal generator
-                'bb_lower': float(bb_lower[-1]),  # Add these for signal generator
-                'stochastic': {
-                    'k': float(stoch_k[-1]),
-                    'd': float(stoch_d[-1])
-                },
-                'atr': float(atr[-1]),
-                'obv': {
-                    'value': float(obv[-1]),
-                    'trend': 'up' if obv[-1] > obv[-2] else 'down'
-                },
-                'vwap': float(vwap[-1]),
-                'adx': {
-                    'value': float(adx[-1]),
-                    'di_plus': float(di_plus[-1]),
-                    'di_minus': float(di_minus[-1])
-                },
-                'plus_di': float(di_plus[-1]),  # Add these for signal generator
-                'minus_di': float(di_minus[-1]),  # Add these for signal generator
-                'cci': float(cci[-1]),
-                'current_price': current_price
-            }
-            
-        except Exception as e:
-            logger.error(f"Error calculating indicators: {e}")
-            return {}
-            
-    def _calculate_ema(self, data: np.ndarray, period: int) -> np.ndarray:
-        """Calculate Exponential Moving Average."""
-        return np.array(pd.Series(data).ewm(span=period, adjust=False).mean())
-        
-    def _calculate_sma(self, data: np.ndarray, period: int) -> np.ndarray:
-        """Calculate Simple Moving Average."""
-        return np.array(pd.Series(data).rolling(window=period).mean())
-        
-    def _calculate_rsi(self, data: np.ndarray, period: int = 14) -> np.ndarray:
-        """Calculate Relative Strength Index."""
-        delta = np.diff(data)
-        gain = (delta > 0) * delta
-        loss = (delta < 0) * -delta
-        
-        avg_gain = self._calculate_sma(gain, period)
-        avg_loss = self._calculate_sma(loss, period)
-        
-        rs = np.zeros_like(avg_gain) # Initialize rs array
-        
-        # Handle division by zero for avg_loss
-        # If avg_loss is 0, RSI is 100 (if avg_gain > 0) or undefined (if avg_gain is also 0).
-        # If avg_gain is 0 and avg_loss is not 0, RSI is 0.
-
-        # Use np.errstate to suppress warnings for division by zero temporarily
-        with np.errstate(divide='ignore', invalid='ignore'):
-            # Where avg_loss is 0:
-            #   If avg_gain is > 0, rs is inf (RSI=100)
-            #   If avg_gain is 0, rs is nan (RSI=50 traditionally, or undefined)
-            rs = np.where(avg_loss == 0, 
-                          np.where(avg_gain == 0, np.nan, np.inf), 
-                          avg_gain / avg_loss)
-        
-        rsi = 100 - (100 / (1 + rs))
-        
-        # Handle cases where rs is inf (RSI should be 100)
-        rsi = np.where(rs == np.inf, 100.0, rsi)
-        
-        return np.concatenate(([np.nan] * (period + 1), rsi[period:])) # Adjust length for initial NaNs
-        
-    def _calculate_stochastic(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> np.ndarray:
-        """Calculate Stochastic Oscillator."""
-        lowest_low = self._calculate_sma(lows, period)
-        highest_high = self._calculate_sma(highs, period)
-        
-        # Avoid division by zero when highest_high - lowest_low is zero
-        denominator = highest_high - lowest_low
-        k = np.where(denominator == 0, np.nan, 100 * ((closes - lowest_low) / denominator))
-        return k
-        
-    def _calculate_atr(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> np.ndarray:
-        """Calculate Average True Range."""
-        tr1 = np.abs(highs[1:] - lows[1:])
-        tr2 = np.abs(highs[1:] - closes[:-1])
-        tr3 = np.abs(lows[1:] - closes[:-1])
-        
-        tr = np.maximum(np.maximum(tr1, tr2), tr3)
-        atr = self._calculate_sma(tr, period)
-        return np.concatenate(([np.nan], atr)) # Add nan for the first period
-        
-    def _calculate_obv(self, closes: np.ndarray, volumes: np.ndarray) -> np.ndarray:
-        """Calculate On-Balance Volume."""
-        obv = np.zeros_like(closes, dtype=float) # Ensure float type
-        if len(closes) > 0:
-            obv[0] = volumes[0]
-            
-            for i in range(1, len(closes)):
-                if closes[i] > closes[i-1]:
-                    obv[i] = obv[i-1] + volumes[i]
-                elif closes[i] < closes[i-1]:
-                    obv[i] = obv[i-1] - volumes[i]
-                else:
-                    obv[i] = obv[i-1]
-                
-        return obv
-        
-    def _calculate_vwap(self, ohlcv: List[Dict]) -> np.ndarray:
-        """Calculate Volume Weighted Average Price."""
-        typical_prices = np.array([
-            (float(candle['high']) + float(candle['low']) + float(candle['close'])) / 3
-            for candle in ohlcv
-        ])
-        volumes = np.array([float(candle['volume']) for candle in ohlcv])
-        
-        cumulative_volumes = np.cumsum(volumes)
-        
-        # Handle division by zero for cumulative_volumes
-        vwap = np.where(cumulative_volumes == 0, np.nan, np.cumsum(typical_prices * volumes) / cumulative_volumes)
-        return vwap
-        
-    def _calculate_adx(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 14) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Calculate Average Directional Index."""
-        # Calculate True Range
-        tr1 = np.abs(highs[1:] - lows[1:])
-        tr2 = np.abs(highs[1:] - closes[:-1])
-        tr3 = np.abs(lows[1:] - closes[:-1])
-        
-        tr = np.maximum(np.maximum(tr1, tr2), tr3)
-        tr_smoothed = self._calculate_sma(tr, period)
-        
-        # Calculate Directional Movement
-        up_move = highs[1:] - highs[:-1]
-        down_move = lows[:-1] - lows[1:]
-        
-        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
-        
-        plus_di = np.where(tr_smoothed == 0, np.nan, 100 * self._calculate_sma(plus_dm, period) / tr_smoothed)
-        minus_di = np.where(tr_smoothed == 0, np.nan, 100 * self._calculate_sma(minus_dm, period) / tr_smoothed)
-        
-        # Calculate ADX
-        # Avoid division by zero for plus_di + minus_di
-        di_sum = plus_di + minus_di
-        dx = np.where(di_sum == 0, np.nan, 100 * np.abs(plus_di - minus_di) / di_sum)
-        adx = self._calculate_sma(dx, period)
-        
-        return adx, plus_di, minus_di
-        
-    def _calculate_cci(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int = 20) -> np.ndarray:
-        """Calculate Commodity Channel Index."""
-        typical_price = (highs + lows + closes) / 3
-        sma = self._calculate_sma(typical_price, period)
-        mean_deviation = np.abs(typical_price - sma)
-        mean_deviation_sma = self._calculate_sma(mean_deviation, period)
-        
-        # Avoid division by zero for mean_deviation_sma
-        cci = np.where(mean_deviation_sma == 0, np.nan, (typical_price - sma) / (0.015 * mean_deviation_sma))
-        return cci 
-
-    async def _process_symbol(self, symbol: str) -> Optional[Dict]:
-        """Process a single symbol and generate trading signals."""
-        try:
-            # Get market data
-            market_data = await self.get_market_data(symbol)
-            if not market_data:
-                logger.warning(f"No market data available for {symbol}")
-                return None
-                
-            # Calculate initial confidence score
-            initial_confidence = self._calculate_confidence_score(market_data, {})
-            
-            # Generate signals using the signal generator
-            signal = self.signal_generator.generate_signals(
-                symbol,
-                market_data,
-                initial_confidence
-            )
-            
-            if not signal:
-                logger.debug(f"No signal generated for {symbol} with fresh data.")
-                return None
-                
-            # Validate the signal
-            validation = self._validate_signal(signal)
-            if not validation.is_valid:
-                logger.warning(f"Invalid signal for {symbol}: {validation.errors}")
-                return None
-                
-            # Cache the signal
-            self._cache_signal(symbol, signal)
-            
-            return signal
-            
-        except Exception as e:
-            logger.error(f"Error processing {symbol}: {e}")
-            return None
-
-    def _calculate_confidence_score(self, market_data: Dict, indicators: Dict) -> float:
-        """Calculate confidence score based on market data and indicators."""
-        try:
-            # Initialize score components
-            volume_score = 0.0
-            volatility_score = 0.0
-            trend_score = 0.0
-            momentum_score = 0.0
-
-            # Volume score (0-1)
-            volume_24h = float(market_data['ticker_24h'].get('volume', 0))
-            if volume_24h > 0:
-                volume_score = min(1.0, volume_24h / 1000000)  # Normalize to 1M volume
-
-            # Volatility score (0-1) - boost for scalping
-            atr = indicators.get('atr', 0)
-            current_price = indicators.get('current_price', 0)
-            if current_price > 0 and atr > 0:
-                volatility = (atr / current_price) * 100  # ATR as percentage of price
-                volatility_score = 0.5 if volatility < 1.0 else 1.0
-            else:
-                volatility_score = 0.5  # fallback boost
-
-            # Trend score (0-1) - boost for scalping
-            adx = indicators.get('adx', {}).get('value', 0)
-            if adx > 20:
-                trend_score = 0.5
-            if adx > 25:
-                trend_score = 1.0
-
-            # Momentum score (0-1)
-            rsi = indicators.get('rsi', 50)
-            if rsi > 0:
-                if rsi > 70 or rsi < 30:
-                    momentum_score = 1.0
-                else:
-                    momentum_score = 0.5
-
-            # Calculate weighted average
-            weights = {
-                'volume': 0.3,
-                'volatility': 0.2,
-                'trend': 0.3,
-                'momentum': 0.2
-            }
-
-            confidence_score = (
-                volume_score * weights['volume'] +
-                volatility_score * weights['volatility'] +
-                trend_score * weights['trend'] +
-                momentum_score * weights['momentum']
-            )
-            return confidence_score
-        except Exception as e:
-            logger.error(f"Error calculating confidence score: {e}")
-            return 0.0
-
-    def get_current_volatility(self):
-        """Return a simple current volatility metric (average ATR of top symbols)."""
-        try:
-            atrs = []
-            for symbol in list(self.cache.keys())[:10]:
-                data = self.cache[symbol]
-                indicators = data.get('indicators', {})
-                atr = indicators.get('atr')
-                if atr:
-                    atrs.append(atr)
-            if atrs:
-                return sum(atrs) / len(atrs)
-            return 0.0
-        except Exception as e:
-            logger.error(f"Error in get_current_volatility: {e}")
-            return 0.0
-
-    def _check_volume_surge(self, symbol: str) -> bool:
-        """Check if there's a recent volume surge (3-bar volume increase)."""
-        try:
-            if symbol not in self.cache:
-                return False
-                
-            market_data = self.cache[symbol]
-            if 'klines' not in market_data:
-                return False
-                
-            klines = market_data['klines']
-            if len(klines) < 3:
-                return False
-                
-            # Get last 3 volumes
-            volumes = [float(k['volume']) for k in klines[-3:]]
-            if len(volumes) < 3:
-                return False
-                
-            # Check if each bar has higher volume than the previous
-            return volumes[2] > volumes[1] > volumes[0]
-            
-        except Exception as e:
-            logger.error(f"Error checking volume surge for {symbol}: {e}")
             return False 

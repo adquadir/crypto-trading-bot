@@ -1,5 +1,5 @@
 # File: src/market_data/exchange_client.py
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Any
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 import random
 import numpy as np
+from .websocket_client import MarketDataWebSocket
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,8 @@ class ExchangeClient:
         self.health_check_task = None
         self.ws_connections = {}
         self.cache = CacheManager()
+        self._stale_data_alerts = {}  # Track stale data alerts
+        self._alert_threshold = 3  # Number of consecutive stale data occurrences before alert
 
         # Load proxy configuration from environment variables
         self.proxy_list = proxy_list or os.getenv('PROXY_PORTS', '10001,10002,10003').split(',')
@@ -185,6 +188,22 @@ class ExchangeClient:
             self._setup_proxy()
             
         self._init_client(api_key, api_secret)
+
+        # Initialize WebSocket client
+        self.ws_client = None
+        self.ws_symbols = set()
+        
+        # Cache TTLs (in seconds)
+        self.ttl = {
+            'ohlcv': config.get('ohlcv_cache_ttl', 60),  # Default 1 minute
+            'ticker': config.get('ticker_cache_ttl', 5),  # Default 5 seconds
+            'orderbook': config.get('orderbook_cache_ttl', 1),  # Default 1 second
+            'scalping': {
+                'ohlcv': config.get('scalping_ohlcv_cache_ttl', 5),  # 5 seconds for scalping
+                'ticker': config.get('scalping_ticker_cache_ttl', 1),  # 1 second for scalping
+                'orderbook': config.get('scalping_orderbook_cache_ttl', 0.5)  # 0.5 seconds for scalping
+            }
+        }
 
     def _setup_proxy(self):
         """Setup proxy configuration."""
@@ -820,3 +839,333 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error fetching market data for {symbol}: {e}")
             return {}
+
+    async def initialize(self, symbols: List[str]):
+        """Initialize the exchange client with WebSocket streaming."""
+        try:
+            # Initialize WebSocket client
+            self.ws_client = MarketDataWebSocket(
+                self,
+                symbols,
+                cache_ttl=min(self.ttl['scalping'].values())  # Use smallest TTL
+            )
+            
+            # Register callbacks
+            self.ws_client.register_callback('kline', self._handle_kline_update)
+            self.ws_client.register_callback('trade', self._handle_trade_update)
+            self.ws_client.register_callback('depth', self._handle_depth_update)
+            
+            # Start WebSocket client
+            asyncio.create_task(self.ws_client.start())
+            logger.info("WebSocket client initialized")
+            
+        except Exception as e:
+            logger.error(f"Error initializing exchange client: {e}")
+            raise
+
+    async def _handle_kline_update(self, symbol: str, data: Dict):
+        """Handle WebSocket kline updates."""
+        try:
+            cache_key = f"{symbol}_ohlcv"
+            self.cache[cache_key] = data
+            self.cache_timestamps[cache_key] = time.time()
+            logger.debug(f"Updated OHLCV cache for {symbol}")
+        except Exception as e:
+            logger.error(f"Error handling kline update: {e}")
+
+    async def _handle_trade_update(self, symbol: str, data: Dict):
+        """Handle WebSocket trade updates."""
+        try:
+            cache_key = f"{symbol}_ticker"
+            self.cache[cache_key] = data
+            self.cache_timestamps[cache_key] = time.time()
+            logger.debug(f"Updated ticker cache for {symbol}")
+        except Exception as e:
+            logger.error(f"Error handling trade update: {e}")
+
+    async def _handle_depth_update(self, symbol: str, data: Dict):
+        """Handle WebSocket order book updates."""
+        try:
+            cache_key = f"{symbol}_orderbook"
+            self.cache[cache_key] = data
+            self.cache_timestamps[cache_key] = time.time()
+            logger.debug(f"Updated orderbook cache for {symbol}")
+        except Exception as e:
+            logger.error(f"Error handling depth update: {e}")
+
+    def _get_cache_ttl(self, data_type: str, is_scalping: bool = False) -> float:
+        """Get the appropriate cache TTL based on data type and trading mode."""
+        try:
+            if is_scalping:
+                ttl = self.ttl['scalping'].get(data_type, self.ttl[data_type])
+            else:
+                ttl = self.ttl[data_type]
+                
+            # Adjust TTL based on market volatility
+            if data_type in ['orderbook', 'ticker']:
+                volatility = self._get_market_volatility()
+                if volatility > 0.02:  # High volatility
+                    ttl *= 0.5  # Reduce TTL by half
+                elif volatility < 0.005:  # Low volatility
+                    ttl *= 1.5  # Increase TTL by 50%
+                    
+            return ttl
+            
+        except Exception as e:
+            logger.error(f"Error getting cache TTL: {e}")
+            return self.ttl[data_type]  # Return default TTL on error
+            
+    def _get_market_volatility(self) -> float:
+        """Calculate current market volatility."""
+        try:
+            if not hasattr(self, '_volatility_cache'):
+                self._volatility_cache = {}
+                self._volatility_timestamp = 0
+                
+            # Update volatility cache every 5 minutes
+            current_time = time.time()
+            if current_time - self._volatility_timestamp > 300:
+                self._volatility_cache = {}
+                self._volatility_timestamp = current_time
+                
+            # Calculate average volatility across tracked symbols
+            volatilities = []
+            for symbol in self.symbols:
+                if symbol in self._volatility_cache:
+                    volatilities.append(self._volatility_cache[symbol])
+                else:
+                    # Calculate volatility from recent price data
+                    klines = self.cache.get(f"{symbol}_ohlcv")
+                    if klines and len(klines) >= 20:
+                        closes = [float(k['close']) for k in klines[-20:]]
+                        returns = np.diff(closes) / closes[:-1]
+                        vol = np.std(returns) * np.sqrt(24 * 60)  # Annualized
+                        self._volatility_cache[symbol] = vol
+                        volatilities.append(vol)
+                        
+            return np.mean(volatilities) if volatilities else 0.01  # Default to 1% if no data
+            
+        except Exception as e:
+            logger.error(f"Error calculating market volatility: {e}")
+            return 0.01  # Default to 1% on error
+            
+    def _validate_data_quality(self, data: Any, data_type: str) -> bool:
+        """Validate data quality based on type."""
+        try:
+            if data_type == 'orderbook':
+                if not isinstance(data, dict) or 'bids' not in data or 'asks' not in data:
+                    return False
+                if not data['bids'] or not data['asks']:
+                    return False
+                # Check spread
+                best_bid = float(data['bids'][0][0])
+                best_ask = float(data['asks'][0][0])
+                spread = (best_ask - best_bid) / best_bid
+                if spread > 0.01:  # 1% spread threshold
+                    return False
+                    
+            elif data_type == 'ticker':
+                if not isinstance(data, dict) or 'lastPrice' not in data:
+                    return False
+                # Check price change sanity
+                if 'priceChangePercent' in data:
+                    change = abs(float(data['priceChangePercent']))
+                    if change > 100:  # 100% change threshold
+                        return False
+                        
+            elif data_type == 'ohlcv':
+                if not isinstance(data, list) or len(data) < 2:
+                    return False
+                # Check for gaps
+                for i in range(1, len(data)):
+                    if data[i][0] - data[i-1][0] > 60000:  # 1 minute gap
+                        return False
+                        
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating data quality: {e}")
+            return False
+            
+    def _check_data_consistency(self, data: Any, data_type: str) -> bool:
+        """Check data consistency based on type."""
+        try:
+            if data_type == 'orderbook':
+                # Check bid/ask ordering
+                bids = [float(bid[0]) for bid in data['bids']]
+                asks = [float(ask[0]) for ask in data['asks']]
+                if not all(bids[i] >= bids[i+1] for i in range(len(bids)-1)):
+                    return False
+                if not all(asks[i] <= asks[i+1] for i in range(len(asks)-1)):
+                    return False
+                    
+            elif data_type == 'ticker':
+                # Check price consistency
+                if 'lastPrice' in data and 'highPrice' in data and 'lowPrice' in data:
+                    last = float(data['lastPrice'])
+                    high = float(data['highPrice'])
+                    low = float(data['lowPrice'])
+                    if not (low <= last <= high):
+                        return False
+                        
+            elif data_type == 'ohlcv':
+                # Check OHLC consistency
+                for candle in data:
+                    if not (candle[3] <= candle[1] and candle[4] >= candle[2]):  # High >= Open/Close >= Low
+                        return False
+                        
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking data consistency: {e}")
+            return False
+
+    async def get_ohlcv(self, symbol: str, timeframe: str = '1m', is_scalping: bool = False) -> Optional[Dict]:
+        """Get OHLCV data with WebSocket fallback."""
+        cache_key = f"{symbol}_ohlcv"
+        
+        # Check WebSocket cache first
+        if self.ws_client:
+            ws_data = self.ws_client.get_cached_data(symbol, 'kline')
+            if ws_data and self._is_cache_valid(cache_key, 'ohlcv', is_scalping):
+                return ws_data
+        
+        # Fallback to REST API if needed
+        try:
+            # Implement REST API call here
+            data = await self._fetch_ohlcv_rest(symbol, timeframe)
+            if data:
+                self.cache[cache_key] = data
+                self.cache_timestamps[cache_key] = time.time()
+            return data
+        except Exception as e:
+            logger.error(f"Error fetching OHLCV data: {e}")
+            return None
+
+    async def get_ticker(self, symbol: str, is_scalping: bool = False) -> Optional[Dict]:
+        """Get ticker data with WebSocket fallback."""
+        cache_key = f"{symbol}_ticker"
+        
+        # Check WebSocket cache first
+        if self.ws_client:
+            ws_data = self.ws_client.get_cached_data(symbol, 'trade')
+            if ws_data and self._is_cache_valid(cache_key, 'ticker', is_scalping):
+                return ws_data
+        
+        # Fallback to REST API if needed
+        try:
+            # Implement REST API call here
+            data = await self._fetch_ticker_rest(symbol)
+            if data:
+                self.cache[cache_key] = data
+                self.cache_timestamps[cache_key] = time.time()
+            return data
+        except Exception as e:
+            logger.error(f"Error fetching ticker data: {e}")
+            return None
+
+    async def get_orderbook(self, symbol: str, is_scalping: bool = False) -> Optional[Dict]:
+        """Get order book data with WebSocket fallback."""
+        cache_key = f"{symbol}_orderbook"
+        
+        # Check WebSocket cache first
+        if self.ws_client:
+            ws_data = self.ws_client.get_cached_data(symbol, 'depth')
+            if ws_data and self._is_cache_valid(cache_key, 'orderbook', is_scalping):
+                return ws_data
+        
+        # Fallback to REST API if needed
+        try:
+            # Implement REST API call here
+            data = await self._fetch_orderbook_rest(symbol)
+            if data:
+                self.cache[cache_key] = data
+                self.cache_timestamps[cache_key] = time.time()
+            return data
+        except Exception as e:
+            logger.error(f"Error fetching orderbook data: {e}")
+            return None
+
+    def get_data_freshness(self, symbol: str, data_type: str) -> float:
+        """Get the age of the most recent data in seconds."""
+        if self.ws_client:
+            return self.ws_client.get_data_freshness(symbol)
+            
+        cache_key = f"{symbol}_{data_type}"
+        if cache_key in self.cache_timestamps:
+            return time.time() - self.cache_timestamps[cache_key]
+        return float('inf')
+
+    async def stop(self):
+        """Stop the exchange client and WebSocket connection."""
+        if self.ws_client:
+            await self.ws_client.stop()
+        logger.info("Exchange client stopped")
+
+    def _check_stale_data(self, symbol: str, data_type: str, age: float) -> None:
+        """Check for stale data and trigger alerts if necessary."""
+        try:
+            key = f"{symbol}_{data_type}"
+            if age > self.ttl[data_type]:
+                if key not in self._stale_data_alerts:
+                    self._stale_data_alerts[key] = {
+                        'count': 1,
+                        'last_alert': time.time(),
+                        'max_age': age
+                    }
+                else:
+                    self._stale_data_alerts[key]['count'] += 1
+                    self._stale_data_alerts[key]['max_age'] = max(age, self._stale_data_alerts[key]['max_age'])
+                    
+                # Check if we should trigger an alert
+                if self._stale_data_alerts[key]['count'] >= self._alert_threshold:
+                    # Only alert if we haven't alerted in the last 5 minutes
+                    if time.time() - self._stale_data_alerts[key]['last_alert'] > 300:
+                        logger.warning(
+                            f"Persistent stale data detected for {symbol} {data_type}: "
+                            f"{self._stale_data_alerts[key]['count']} occurrences, "
+                            f"max age {self._stale_data_alerts[key]['max_age']:.1f}s"
+                        )
+                        self._stale_data_alerts[key]['last_alert'] = time.time()
+            else:
+                # Reset counter if data is fresh
+                if key in self._stale_data_alerts:
+                    del self._stale_data_alerts[key]
+                    
+        except Exception as e:
+            logger.error(f"Error checking stale data: {e}")
+            
+    def _is_cache_valid(self, cache_key: str, data_type: str, is_scalping: bool = False) -> bool:
+        """Check if cached data is still valid with enhanced validation."""
+        try:
+            if cache_key not in self.cache or cache_key not in self.cache_timestamps:
+                return False
+                
+            ttl = self._get_cache_ttl(data_type, is_scalping)
+            age = time.time() - self.cache_timestamps[cache_key]
+            
+            # Check for stale data and trigger alerts
+            symbol = cache_key.split('_')[0]
+            self._check_stale_data(symbol, data_type, age)
+            
+            # Check data quality
+            data = self.cache[cache_key]
+            if not self._validate_data_quality(data, data_type):
+                logger.warning(f"Poor data quality for {cache_key}")
+                return False
+                
+            # Check for stale data
+            if age > ttl:
+                logger.warning(f"Cache expired for {cache_key}: {age:.2f}s old (TTL: {ttl}s)")
+                return False
+                
+            # Check for data consistency
+            if not self._check_data_consistency(data, data_type):
+                logger.warning(f"Inconsistent data for {cache_key}")
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating cache: {e}")
+            return False

@@ -18,7 +18,11 @@ import {
   IconButton,
   Tooltip,
   Chip,
-  Divider
+  Divider,
+  CardHeader,
+  List,
+  ListItem,
+  ListItemText
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
@@ -512,6 +516,96 @@ const Signals = () => {
     return 'error';
   };
 
+  const DataFreshnessPanel = ({ signal }) => {
+    if (!signal?.data_freshness) return null;
+    
+    const getFreshnessColor = (age, maxAge) => {
+      const ratio = age / maxAge;
+      if (ratio < 0.5) return 'success';
+      if (ratio < 0.8) return 'warning';
+      return 'error';
+    };
+    
+    return (
+      <Card>
+        <CardHeader title="Data Freshness" />
+        <CardContent>
+          <Grid container spacing={2}>
+            {Object.entries(signal.data_freshness).map(([type, age]) => (
+              <Grid item xs={6} key={type}>
+                <Box display="flex" alignItems="center">
+                  <Typography variant="body2" style={{ marginRight: 8 }}>
+                    {type}:
+                  </Typography>
+                  <Chip
+                    label={`${age.toFixed(1)}s`}
+                    color={getFreshnessColor(age, signal.max_allowed_freshness[type])}
+                    size="small"
+                  />
+                </Box>
+              </Grid>
+            ))}
+          </Grid>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const DebugPanel = ({ rejectionStats }) => {
+    if (!rejectionStats) return null;
+    
+    return (
+      <Card>
+        <CardHeader title="Signal Debug Info" />
+        <CardContent>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Typography variant="h6">Rejection Reasons</Typography>
+              <List dense>
+                {Object.entries(rejectionStats.reasons || {}).map(([reason, count]) => (
+                  <ListItem key={reason}>
+                    <ListItemText
+                      primary={reason}
+                      secondary={`Count: ${count}`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <Typography variant="h6">By Market Regime</Typography>
+              <List dense>
+                {Object.entries(rejectionStats.by_regime || {}).map(([regime, stats]) => (
+                  <ListItem key={regime}>
+                    <ListItemText
+                      primary={regime}
+                      secondary={`Rejected: ${stats.rejected} / Total: ${stats.total}`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <Typography variant="h6">By Confidence</Typography>
+              <List dense>
+                {Object.entries(rejectionStats.by_confidence || {}).map(([level, stats]) => (
+                  <ListItem key={level}>
+                    <ListItemText
+                      primary={level}
+                      secondary={`Rejected: ${stats.rejected} / Total: ${stats.total}`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+    );
+  };
+
   if (loading && !signals.length) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -705,27 +799,64 @@ const Signals = () => {
                       </Typography>
                       <Box display="flex" gap={1} flexWrap="wrap">
                         {signal.regime === 'TRENDING' && (
-                          <Chip
-                            label={`ADX: ${signal.indicators?.adx?.value?.toFixed(1) || 'N/A'}`}
-                            color="success"
-                            size="small"
-                          />
+                          <>
+                            <Chip
+                              label={`ADX: ${signal.indicators?.adx?.value?.toFixed(1) || 'N/A'}`}
+                              color="success"
+                              size="small"
+                            />
+                            <Chip
+                              label={`Confidence: ${(signal.regime_confidence * 100).toFixed(0)}%`}
+                              color={signal.regime_confidence > 0.7 ? "success" : "warning"}
+                              size="small"
+                            />
+                          </>
                         )}
                         {signal.regime === 'RANGING' && (
-                          <Chip
-                            label={`BB Width: ${signal.indicators?.bollinger_bands?.width?.toFixed(3) || 'N/A'}`}
-                            color="info"
-                            size="small"
-                          />
+                          <>
+                            <Chip
+                              label={`BB Width: ${signal.indicators?.bollinger_bands?.width?.toFixed(3) || 'N/A'}`}
+                              color="info"
+                              size="small"
+                            />
+                            <Chip
+                              label={`Confidence: ${(signal.regime_confidence * 100).toFixed(0)}%`}
+                              color={signal.regime_confidence > 0.7 ? "success" : "warning"}
+                              size="small"
+                            />
+                          </>
                         )}
                         {signal.regime === 'VOLATILE' && (
+                          <>
+                            <Chip
+                              label={`ATR: ${signal.indicators?.atr?.toFixed(2) || 'N/A'}`}
+                              color="warning"
+                              size="small"
+                            />
+                            <Chip
+                              label={`Confidence: ${(signal.regime_confidence * 100).toFixed(0)}%`}
+                              color={signal.regime_confidence > 0.7 ? "success" : "warning"}
+                              size="small"
+                            />
+                          </>
+                        )}
+                        {signal.is_transitioning && (
                           <Chip
-                            label={`ATR: ${signal.indicators?.atr?.toFixed(2) || 'N/A'}`}
+                            label="Regime Transition"
                             color="warning"
                             size="small"
                           />
                         )}
                       </Box>
+                      {signal.regime_scores && (
+                        <Box mt={1}>
+                          <Typography variant="caption" color="textSecondary">
+                            Regime Scores: {Object.entries(signal.regime_scores)
+                              .map(([regime, score]) => `${regime}: ${(score * 100).toFixed(0)}%`)
+                              .join(' | ')}
+                          </Typography>
+                        </Box>
+                      )}
                     </Grid>
 
                     {/* Signal Reasons */}
@@ -754,6 +885,14 @@ const Signals = () => {
                         {new Date(signal.timestamp).toLocaleTimeString()}
                       </Typography>
                     </Grid>
+                  </Grid>
+
+                  <Grid item xs={12}>
+                    <DataFreshnessPanel signal={signal} />
+                  </Grid>
+
+                  <Grid item xs={12}>
+                    <DebugPanel rejectionStats={signal.rejection_stats} />
                   </Grid>
                 </CardContent>
               </Card>
