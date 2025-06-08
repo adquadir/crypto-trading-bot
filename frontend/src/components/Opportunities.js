@@ -367,9 +367,9 @@ const Opportunities = () => {
                       size="small"
                     />
                   </TableCell>
-                  <TableCell>${opp.entry.toFixed(2)}</TableCell>
-                  <TableCell>${opp.stop_loss.toFixed(2)}</TableCell>
-                  <TableCell>${opp.take_profit.toFixed(2)}</TableCell>
+                  <TableCell>${opp.entry.toFixed(6)}</TableCell>
+                  <TableCell>${opp.stop_loss.toFixed(6)}</TableCell>
+                  <TableCell>${opp.take_profit.toFixed(6)}</TableCell>
                   <TableCell>
                     <Chip
                       label={`${(opp.confidence_score * 100).toFixed(1)}%`}
@@ -412,7 +412,7 @@ const Opportunities = () => {
                     <Grid container spacing={2}>
                       <Grid item xs={6}>
                         <Typography variant="body2" color="textSecondary">Entry</Typography>
-                        <Typography variant="body1">${opp.entry.toFixed(2)}</Typography>
+                        <Typography variant="body1">${opp.entry.toFixed(6)}</Typography>
                       </Grid>
                       <Grid item xs={6}>
                         <Typography variant="body2" color="textSecondary">Confidence</Typography>
