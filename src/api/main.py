@@ -813,7 +813,7 @@ async def get_opportunities(
         filtered_opportunities = [
             opp for opp in opportunities
             if opp.confidence >= min_confidence
-            and opp.risk_reward >= min_risk_reward
+            and opp.risk_reward >= (min_risk_reward - 1e-9)  # Allow for floating point precision issues
             and opp.volume_24h >= min_volume
         ]
         
