@@ -42,13 +42,14 @@ import {
   Sort as SortIcon
 } from '@mui/icons-material';
 import axios from 'axios';
-import { Line } from 'react-chartjs-2';
+import { Line, Bar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip as ChartTooltip,
   Legend
@@ -61,10 +62,139 @@ ChartJS.register(
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   ChartTooltip,
   Legend
 );
+
+const TimeframeComparison = ({ signal }) => {
+  const chartData = {
+    labels: ['1m', '5m', '15m'],
+    datasets: [
+      {
+        label: 'Technical Alignment',
+        data: signal.mtf_alignment?.details?.technical?.scores || [],
+        borderColor: 'rgb(75, 192, 192)',
+        tension: 0.1
+      },
+      {
+        label: 'Volume Alignment',
+        data: signal.mtf_alignment?.details?.volume?.scores || [],
+        borderColor: 'rgb(255, 99, 132)',
+        tension: 0.1
+      },
+      {
+        label: 'Pattern Alignment',
+        data: signal.mtf_alignment?.details?.patterns?.scores || [],
+        borderColor: 'rgb(54, 162, 235)',
+        tension: 0.1
+      }
+    ]
+  };
+
+  const options = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Timeframe Alignment Analysis'
+      }
+    },
+    scales: {
+      y: {
+        min: -1,
+        max: 1,
+        title: {
+          display: true,
+          text: 'Alignment Score'
+        }
+      }
+    }
+  };
+
+  return (
+    <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1 }}>
+      <Line data={chartData} options={options} />
+    </Box>
+  );
+};
+
+const VolumeAnalysis = ({ signal }) => {
+  const volumeData = {
+    labels: ['1m', '5m', '15m'],
+    datasets: [
+      {
+        label: 'Volume Profile',
+        data: signal.mtf_alignment?.details?.volume?.analysis?.map(a => a.profile.score) || [],
+        backgroundColor: 'rgba(75, 192, 192, 0.5)',
+        borderColor: 'rgb(75, 192, 192)',
+        borderWidth: 1
+      },
+      {
+        label: 'Volume Delta',
+        data: signal.mtf_alignment?.details?.volume?.analysis?.map(a => a.delta.score) || [],
+        backgroundColor: 'rgba(255, 99, 132, 0.5)',
+        borderColor: 'rgb(255, 99, 132)',
+        borderWidth: 1
+      }
+    ]
+  };
+
+  const options = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Volume Analysis'
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'Score'
+        }
+      }
+    }
+  };
+
+  return (
+    <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1 }}>
+      <Bar data={volumeData} options={options} />
+    </Box>
+  );
+};
+
+const PatternAnalysis = ({ signal }) => {
+  const patterns = signal.mtf_alignment?.details?.patterns?.types || [];
+  
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+        Detected Patterns
+      </Typography>
+      <Box display="flex" gap={1} flexWrap="wrap">
+        {patterns.map((pattern, index) => (
+          <Chip
+            key={index}
+            label={pattern.type}
+            color={pattern.strength > 0.8 ? 'success' : pattern.strength > 0.6 ? 'warning' : 'default'}
+            variant="outlined"
+            sx={{ m: 0.5 }}
+          />
+        ))}
+      </Box>
+    </Box>
+  );
+};
 
 const Opportunities = () => {
   const [opportunities, setOpportunities] = useState([]);
@@ -129,6 +259,26 @@ const Opportunities = () => {
       default:
         return null;
     }
+  };
+
+  const getRegimeColor = (regime) => {
+    switch(regime) {
+      case 'TRENDING':
+        return 'success';
+      case 'RANGING':
+        return 'info';
+      case 'VOLATILE':
+        return 'warning';
+      default:
+        return 'default';
+    }
+  };
+
+  const getTimeframeColor = (strength) => {
+    if (strength >= 0.8) return 'success';
+    if (strength >= 0.6) return 'info';
+    if (strength >= 0.4) return 'warning';
+    return 'error';
   };
 
   const handleFilterChange = (field, value) => {
@@ -228,6 +378,176 @@ const Opportunities = () => {
     return <Line data={data} options={options} />;
   };
 
+  const renderTimeframeDetails = (opp) => {
+    if (!opp.mtf_alignment?.details) return null;
+
+    return (
+      <Box sx={{ mt: 2 }}>
+        <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+          Timeframe Analysis
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <TimeframeComparison signal={opp} />
+          </Grid>
+          <Grid item xs={12}>
+            <VolumeAnalysis signal={opp} />
+          </Grid>
+          <Grid item xs={12}>
+            <PatternAnalysis signal={opp} />
+          </Grid>
+          <Grid item xs={12}>
+            <Box display="flex" gap={1} flexWrap="wrap">
+              {Object.entries(opp.mtf_alignment.details).map(([category, data]) => (
+                <Chip
+                  key={category}
+                  label={`${category}: ${data.trend}`}
+                  color={getTimeframeColor(data.score)}
+                  size="small"
+                  sx={{ m: 0.5 }}
+                />
+              ))}
+            </Box>
+          </Grid>
+        </Grid>
+      </Box>
+    );
+  };
+
+  const renderCard = (opp) => (
+    <Card>
+      <CardContent>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">{opp.symbol}</Typography>
+          <Box display="flex" gap={1}>
+            <Chip
+              icon={getDirectionIcon(opp.signal_type)}
+              label={opp.signal_type}
+              color={getDirectionColor(opp.signal_type)}
+              size="small"
+            />
+            <Chip
+              label={opp.regime}
+              color={getRegimeColor(opp.regime)}
+              size="small"
+            />
+          </Box>
+        </Box>
+        {renderChart(opp)}
+        <Box mt={2}>
+          <Grid container spacing={2}>
+            <Grid item xs={6}>
+              <Typography variant="body2" color="textSecondary">Entry</Typography>
+              <Typography variant="body1">${opp.entry.toFixed(6)}</Typography>
+            </Grid>
+            <Grid item xs={6}>
+              <Typography variant="body2" color="textSecondary">Confidence</Typography>
+              <Typography variant="body1">{(opp.confidence_score * 100).toFixed(1)}%</Typography>
+            </Grid>
+            {renderTimeframeDetails(opp)}
+          </Grid>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+
+  const renderTable = () => (
+    <TableContainer component={Paper}>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Symbol</TableCell>
+            <TableCell>Signal Type</TableCell>
+            <TableCell>Regime</TableCell>
+            <TableCell>MTF Align</TableCell>
+            <TableCell>Patterns</TableCell>
+            <TableCell>Volume</TableCell>
+            <TableCell>Entry</TableCell>
+            <TableCell>SL</TableCell>
+            <TableCell>TP</TableCell>
+            <TableCell>Confidence</TableCell>
+            <TableCell>RR</TableCell>
+            <TableCell>Details</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {filteredAndSortedOpportunities.map((opp) => (
+            <TableRow key={opp.symbol}>
+              <TableCell>{opp.symbol}</TableCell>
+              <TableCell>
+                <Chip
+                  icon={getDirectionIcon(opp.signal_type)}
+                  label={opp.signal_type}
+                  color={getDirectionColor(opp.signal_type)}
+                  size="small"
+                />
+              </TableCell>
+              <TableCell>
+                <Chip
+                  label={opp.regime}
+                  color={getRegimeColor(opp.regime)}
+                  size="small"
+                />
+              </TableCell>
+              <TableCell>
+                <Box display="flex" gap={0.5}>
+                  {opp.mtf_alignment?.details && Object.entries(opp.mtf_alignment.details).map(([category, data]) => (
+                    <Chip
+                      key={category}
+                      label={`${category[0]}:${data.score.toFixed(1)}`}
+                      color={getTimeframeColor(data.score)}
+                      size="small"
+                    />
+                  ))}
+                </Box>
+              </TableCell>
+              <TableCell>
+                <Box display="flex" gap={0.5}>
+                  {opp.mtf_alignment?.details?.patterns?.types?.map((pattern, index) => (
+                    <Chip
+                      key={index}
+                      label={pattern.type}
+                      size="small"
+                      variant="outlined"
+                    />
+                  ))}
+                </Box>
+              </TableCell>
+              <TableCell>
+                <Box display="flex" gap={0.5}>
+                  {opp.mtf_alignment?.details?.volume?.analysis?.map((analysis, index) => (
+                    <Chip
+                      key={index}
+                      label={`${analysis.timeframe}:${analysis.trend.direction}`}
+                      color={analysis.trend.direction === 'INCREASING' ? 'success' : 'error'}
+                      size="small"
+                    />
+                  ))}
+                </Box>
+              </TableCell>
+              <TableCell>${opp.entry.toFixed(6)}</TableCell>
+              <TableCell>${opp.stop_loss.toFixed(6)}</TableCell>
+              <TableCell>${opp.take_profit.toFixed(6)}</TableCell>
+              <TableCell>{(opp.confidence_score * 100).toFixed(1)}%</TableCell>
+              <TableCell>{opp.risk_reward.toFixed(2)}</TableCell>
+              <TableCell>
+                <IconButton
+                  size="small"
+                  onClick={() => {
+                    setSelectedOpportunity(opp);
+                    setDetailsOpen(true);
+                  }}
+                >
+                  <InfoIcon />
+                </IconButton>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+
   if (loading && opportunities.length === 0) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -323,108 +643,95 @@ const Opportunities = () => {
       </Box>
 
       {viewMode === 'table' ? (
-        <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>Symbol</TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
-                  Signal Type
-                  <IconButton size="small" onClick={() => handleSort('signal_type')}>
-                    <SortIcon fontSize="small" />
-                  </IconButton>
-                </TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>Entry</TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>SL</TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>TP</TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
-                  Confidence
-                  <IconButton size="small" onClick={() => handleSort('confidence_score')}>
-                    <SortIcon fontSize="small" />
-                  </IconButton>
-                </TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
-                  RR
-                  <IconButton size="small" onClick={() => handleSort('risk_reward')}>
-                    <SortIcon fontSize="small" />
-                  </IconButton>
-                </TableCell>
-                <TableCell sx={{ px: { xs: 1, sm: 2 } }}>Details</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredAndSortedOpportunities.map((opp) => (
-                <TableRow key={opp.symbol}>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>{opp.symbol}</TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
-                    <Chip
-                      icon={getDirectionIcon(opp.signal_type)}
-                      label={opp.signal_type}
-                      color={getDirectionColor(opp.signal_type)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>${opp.entry.toFixed(6)}</TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>${opp.stop_loss.toFixed(6)}</TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>${opp.take_profit.toFixed(6)}</TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
-                    <Chip
-                      label={`${(opp.confidence_score * 100).toFixed(1)}%`}
-                      color={opp.confidence_score > 0.7 ? 'success' : opp.confidence_score > 0.4 ? 'warning' : 'error'}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
-                    {((opp.take_profit - opp.entry) / (opp.entry - opp.stop_loss)).toFixed(2)}
-                  </TableCell>
-                  <TableCell sx={{ px: { xs: 1, sm: 2 } }}>
-                    <Tooltip title="View Details">
-                      <IconButton size="small">
-                        <InfoIcon />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        renderTable()
       ) : (
         <Grid container spacing={3}>
           {filteredAndSortedOpportunities.map((opp) => (
             <Grid item xs={12} md={6} key={opp.symbol}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                    <Typography variant="h6">{opp.symbol}</Typography>
-                    <Chip
-                      icon={getDirectionIcon(opp.signal_type)}
-                      label={opp.signal_type}
-                      color={getDirectionColor(opp.signal_type)}
-                      size="small"
-                    />
-                  </Box>
-                  {renderChart(opp)}
-                  <Box mt={2}>
-                    <Grid container spacing={2}>
-                      <Grid item xs={6}>
-                        <Typography variant="body2" color="textSecondary">Entry</Typography>
-                        <Typography variant="body1">${opp.entry.toFixed(6)}</Typography>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <Typography variant="body2" color="textSecondary">Confidence</Typography>
-                        <Typography variant="body1">{(opp.confidence_score * 100).toFixed(1)}%</Typography>
-                      </Grid>
-                    </Grid>
-                  </Box>
-                </CardContent>
-              </Card>
+              {renderCard(opp)}
             </Grid>
           ))}
         </Grid>
       )}
 
-      {/* ... existing details dialog ... */}
+      {/* Details Dialog */}
+      <Dialog
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        {selectedOpportunity && (
+          <DialogContent>
+            <Box p={2}>
+              <Typography variant="h6" gutterBottom>
+                {selectedOpportunity.symbol} Details
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12}>
+                  {renderChart(selectedOpportunity)}
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="textSecondary">Signal Type</Typography>
+                  <Typography variant="body1">{selectedOpportunity.signal_type}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="textSecondary">Market Regime</Typography>
+                  <Typography variant="body1">{selectedOpportunity.regime}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="textSecondary">Entry Price</Typography>
+                  <Typography variant="body1">${selectedOpportunity.entry.toFixed(6)}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="textSecondary">Stop Loss</Typography>
+                  <Typography variant="body1">${selectedOpportunity.stop_loss.toFixed(6)}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="textSecondary">Take Profit</Typography>
+                  <Typography variant="body1">${selectedOpportunity.take_profit.toFixed(6)}</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" color="textSecondary">Risk/Reward</Typography>
+                  <Typography variant="body1">
+                    {((selectedOpportunity.take_profit - selectedOpportunity.entry) / 
+                      (selectedOpportunity.entry - selectedOpportunity.stop_loss)).toFixed(2)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography variant="body2" color="textSecondary">Timeframe Alignment</Typography>
+                  <Box display="flex" gap={1} flexWrap="wrap" mt={1}>
+                    {selectedOpportunity.mtf_alignment?.details && 
+                      Object.entries(selectedOpportunity.mtf_alignment.details).map(([tf, data]) => (
+                        <Chip
+                          key={tf}
+                          label={`${tf}: ${data.direction} (${data.strength.toFixed(2)})`}
+                          color={getTimeframeColor(data.strength)}
+                          size="small"
+                        />
+                    ))}
+                  </Box>
+                </Grid>
+                {selectedOpportunity.reasons && selectedOpportunity.reasons.length > 0 && (
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="textSecondary">Signal Reasons</Typography>
+                    <Box display="flex" gap={1} flexWrap="wrap" mt={1}>
+                      {selectedOpportunity.reasons.map((reason, index) => (
+                        <Chip
+                          key={index}
+                          label={reason}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  </Grid>
+                )}
+              </Grid>
+            </Box>
+          </DialogContent>
+        )}
+      </Dialog>
     </Box>
   );
 };

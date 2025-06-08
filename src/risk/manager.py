@@ -139,133 +139,195 @@ class RiskManager:
                     
         return None
         
-    def calculate_position_size(
-        self,
-        symbol: str,
-        entry_price: float,
-        direction: str,
-        market_state: Dict,
-        signal_confidence: float = 1.0
-    ) -> Tuple[float, float]:
-        """
-        Calculate position size and leverage based on risk parameters.
-        Returns (position_size, leverage)
-        """
+    def calculate_position_size(self, symbol: str, current_price: float, direction: str, indicators: Dict, confidence: float) -> float:
+        """Calculate position size based on market regime, volatility, and confidence."""
         try:
-            self.reset_daily_stats()
-            params = self.risk_params[self.risk_mode]
+            # Get account balance
+            balance = self.account_balance
+            if balance <= 0:
+                logger.warning("Invalid account balance for position sizing")
+                return 0.0
             
-            # Check daily loss limit
-            if abs(self.daily_stats['pnl']) >= self.account_balance * params['max_daily_loss']:
-                logger.warning("Daily loss limit reached")
-                return 0.0, 1.0
-                
-            # Check maximum drawdown
-            if self.daily_stats['max_drawdown'] >= params['max_drawdown']:
-                logger.warning("Maximum drawdown reached")
-                return 0.0, 1.0
-                
-            # Check maximum open trades
-            if len(self.positions) >= params['max_open_trades']:
-                logger.warning("Maximum open trades reached")
-                return 0.0, 1.0
-                
-            # Calculate base position size
-            position_value = self.account_balance * params['max_position_size']
+            # Get market regime
+            regime = indicators.get('regime', 'UNKNOWN')
+            regime_strength = indicators.get('regime_strength', 0.0)
             
-            # Adjust for signal confidence
-            position_value *= signal_confidence
+            # Get volatility metrics
+            atr = indicators.get('atr', 0.0)
+            bb_width = indicators.get('bollinger_bands', {}).get('width', 0.0)
             
-            # Calculate leverage based on volatility
-            atr = market_state.get('indicators', {}).get('atr', 0)
-            if atr > 0:
-                # Adjust leverage based on volatility (lower leverage for higher volatility)
-                volatility_factor = min(1.0, 0.02 / atr)  # Normalize ATR to 2% of price
-                leverage = min(
-                    params['max_leverage'],
-                    params['max_leverage'] * volatility_factor
-                )
-            else:
-                leverage = 1.0
-                
-            # Adjust position size for leverage
-            position_size = (position_value * leverage) / entry_price
+            # Calculate base risk per trade (percentage of account)
+            base_risk = self.risk_params[self.risk_mode]['risk_per_trade']
             
-            # Check position correlation
-            if not self._check_position_correlation(symbol, params['max_correlation']):
-                logger.warning(f"Position correlation too high for {symbol}")
-                return 0.0, 1.0
-                
-            return position_size, leverage
+            # Adjust risk based on market regime
+            if regime == 'TRENDING':
+                risk_multiplier = 1.2  # Increase risk in trending markets
+            elif regime == 'RANGING':
+                risk_multiplier = 0.8  # Decrease risk in ranging markets
+            else:  # VOLATILE
+                risk_multiplier = 0.6  # Significantly reduce risk in volatile markets
+            
+            # Adjust risk based on regime strength
+            risk_multiplier *= (0.5 + regime_strength * 0.5)  # Scale between 50% and 100% of multiplier
+            
+            # Adjust risk based on volatility
+            volatility_factor = 1.0
+            if atr > 0 and current_price > 0:
+                atr_percent = atr / current_price
+                if atr_percent > 0.05:  # High volatility
+                    volatility_factor = 0.7
+                elif atr_percent > 0.02:  # Medium volatility
+                    volatility_factor = 0.85
+            
+            # Adjust risk based on Bollinger Band width
+            if bb_width > 0.05:  # Wide bands
+                volatility_factor *= 0.8
+            
+            # Calculate final risk amount
+            risk_amount = balance * base_risk * risk_multiplier * volatility_factor
+            
+            # Adjust for confidence
+            risk_amount *= confidence
+            
+            # Calculate position size based on stop loss distance
+            stop_loss = self.calculate_stop_loss(symbol, current_price, direction, indicators)
+            if stop_loss is None or stop_loss == current_price:
+                logger.warning("Invalid stop loss for position sizing")
+                return 0.0
+            
+            stop_loss_distance = abs(current_price - stop_loss)
+            if stop_loss_distance == 0:
+                logger.warning("Zero stop loss distance")
+                return 0.0
+            
+            position_size = risk_amount / stop_loss_distance
+            
+            # Apply position size limits
+            max_position = balance * self.risk_params[self.risk_mode]['max_position_size']
+            position_size = min(position_size, max_position)
+            
+            # Apply minimum position size
+            min_position = self.risk_params[self.risk_mode]['max_position_size'] * 0.001
+            if position_size < min_position:
+                logger.debug("Position size below minimum threshold")
+                return 0.0
+            
+            return position_size
             
         except Exception as e:
-            logger.error(f"Error calculating position size for {symbol}: {e}")
-            return 0.0, 1.0
-            
-    def calculate_stop_loss(
-        self,
-        symbol: str,
-        entry_price: float,
-        direction: str,
-        market_state: Dict
-    ) -> float:
-        """Calculate stop loss level based on market conditions."""
+            logger.error(f"Error calculating position size: {e}")
+            return 0.0
+
+    def calculate_stop_loss(self, symbol: str, current_price: float, direction: str, indicators: Dict) -> Optional[float]:
+        """Calculate stop loss level based on market structure and volatility."""
         try:
-            params = self.risk_params[self.risk_mode]
-            indicators = market_state.get('indicators', {})
+            # Get market regime
+            regime = indicators.get('regime', 'UNKNOWN')
             
-            # Get ATR for volatility-based stop loss
-            atr = indicators.get('atr', 0)
-            if atr == 0:
-                # Fallback to percentage-based stop loss
-                return entry_price * (1 - params['stop_loss_pct'] if direction == 'LONG' else 1 + params['stop_loss_pct'])
-                
-            # Calculate stop loss based on ATR
+            # Get volatility metrics
+            atr = indicators.get('atr', 0.0)
+            
+            # Calculate base ATR multiplier based on regime
+            if regime == 'TRENDING':
+                atr_multiplier = 2.0
+            elif regime == 'RANGING':
+                atr_multiplier = 1.5
+            else:  # VOLATILE
+                atr_multiplier = 2.5
+            
+            # Calculate initial stop loss based on ATR
             if direction == 'LONG':
-                stop_loss = entry_price - (2 * atr)  # 2 ATR below entry
-            else:
-                stop_loss = entry_price + (2 * atr)  # 2 ATR above entry
-                
-            # Ensure stop loss is not too close to entry
-            min_distance = entry_price * params['stop_loss_pct']
-            if abs(stop_loss - entry_price) < min_distance:
-                stop_loss = entry_price * (1 - params['stop_loss_pct'] if direction == 'LONG' else 1 + params['stop_loss_pct'])
-                
+                stop_loss = current_price - (atr * atr_multiplier)
+            else:  # SHORT
+                stop_loss = current_price + (atr * atr_multiplier)
+            
+            # Get structure levels
+            structure_levels = indicators.get('structure_levels', {})
+            if structure_levels:
+                if direction == 'LONG':
+                    # Find nearest support level below current price
+                    support_levels = [level for level in structure_levels.get('supports', []) if level < current_price]
+                    if support_levels:
+                        nearest_support = max(support_levels)
+                        # Use the higher of ATR-based stop loss or structure-based stop loss
+                        stop_loss = max(stop_loss, nearest_support)
+                else:  # SHORT
+                    # Find nearest resistance level above current price
+                    resistance_levels = [level for level in structure_levels.get('resistances', []) if level > current_price]
+                    if resistance_levels:
+                        nearest_resistance = min(resistance_levels)
+                        # Use the lower of ATR-based stop loss or structure-based stop loss
+                        stop_loss = min(stop_loss, nearest_resistance)
+            
+            # Validate stop loss
+            if direction == 'LONG' and stop_loss >= current_price:
+                logger.warning("Invalid stop loss for LONG position")
+                return None
+            elif direction == 'SHORT' and stop_loss <= current_price:
+                logger.warning("Invalid stop loss for SHORT position")
+                return None
+            
             return stop_loss
             
         except Exception as e:
-            logger.error(f"Error calculating stop loss for {symbol}: {e}")
-            return entry_price * (0.98 if direction == 'LONG' else 1.02)
-            
-    def calculate_take_profit(
-        self,
-        symbol: str,
-        entry_price: float,
-        stop_loss: float,
-        direction: str,
-        market_state: Dict
-    ) -> float:
-        """Calculate take profit level based on risk:reward ratio."""
+            logger.error(f"Error calculating stop loss: {e}")
+            return None
+
+    def calculate_take_profit(self, symbol: str, current_price: float, direction: str, indicators: Dict) -> Optional[float]:
+        """Calculate take profit level based on market structure and volatility."""
         try:
-            params = self.risk_params[self.risk_mode]
+            # Get market regime
+            regime = indicators.get('regime', 'UNKNOWN')
             
-            # Calculate risk amount
-            risk = abs(entry_price - stop_loss)
+            # Get volatility metrics
+            atr = indicators.get('atr', 0.0)
             
-            # Calculate take profit based on minimum risk:reward ratio
-            reward = risk * (params['take_profit_pct'] / params['stop_loss_pct'])
+            # Calculate base ATR multiplier based on regime
+            if regime == 'TRENDING':
+                atr_multiplier = 3.0  # Wider take profit in trending markets
+            elif regime == 'RANGING':
+                atr_multiplier = 2.0  # Tighter take profit in ranging markets
+            else:  # VOLATILE
+                atr_multiplier = 4.0  # Widest take profit in volatile markets
             
+            # Calculate initial take profit based on ATR
             if direction == 'LONG':
-                take_profit = entry_price + reward
-            else:
-                take_profit = entry_price - reward
-                
+                take_profit = current_price + (atr * atr_multiplier)
+            else:  # SHORT
+                take_profit = current_price - (atr * atr_multiplier)
+            
+            # Get structure levels
+            structure_levels = indicators.get('structure_levels', {})
+            if structure_levels:
+                if direction == 'LONG':
+                    # Find next resistance level above current price
+                    resistance_levels = [level for level in structure_levels.get('resistances', []) if level > current_price]
+                    if resistance_levels:
+                        next_resistance = min(resistance_levels)
+                        # Use the lower of ATR-based take profit or structure-based take profit
+                        take_profit = min(take_profit, next_resistance)
+                else:  # SHORT
+                    # Find next support level below current price
+                    support_levels = [level for level in structure_levels.get('supports', []) if level < current_price]
+                    if support_levels:
+                        next_support = max(support_levels)
+                        # Use the higher of ATR-based take profit or structure-based take profit
+                        take_profit = max(take_profit, next_support)
+            
+            # Validate take profit
+            if direction == 'LONG' and take_profit <= current_price:
+                logger.warning("Invalid take profit for LONG position")
+                return None
+            elif direction == 'SHORT' and take_profit >= current_price:
+                logger.warning("Invalid take profit for SHORT position")
+                return None
+            
             return take_profit
             
         except Exception as e:
-            logger.error(f"Error calculating take profit for {symbol}: {e}")
-            return entry_price * (1.02 if direction == 'LONG' else 0.98)
-            
+            logger.error(f"Error calculating take profit: {e}")
+            return None
+
     def add_position(
         self,
         symbol: str,

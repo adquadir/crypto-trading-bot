@@ -492,6 +492,26 @@ const Signals = () => {
       }
     });
 
+  const getRegimeColor = (regime) => {
+    switch(regime) {
+      case 'TRENDING':
+        return 'success';
+      case 'RANGING':
+        return 'info';
+      case 'VOLATILE':
+        return 'warning';
+      default:
+        return 'default';
+    }
+  };
+
+  const getTimeframeColor = (strength) => {
+    if (strength >= 0.8) return 'success';
+    if (strength >= 0.6) return 'info';
+    if (strength >= 0.4) return 'warning';
+    return 'error';
+  };
+
   if (loading && !signals.length) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -619,12 +639,20 @@ const Signals = () => {
                 <CardContent>
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                     <Typography variant="h6">{signal.symbol}</Typography>
-                    <Chip
-                      label={signal.action?.toUpperCase() || 'UNKNOWN'}
-                      color={signal.action === 'buy' ? 'success' : 'error'}
-                      size="small"
-                    />
+                    <Box display="flex" gap={1}>
+                      <Chip
+                        label={signal.signal_type}
+                        color={signal.signal_type === 'LONG' ? 'success' : 'error'}
+                        size="small"
+                      />
+                      <Chip
+                        label={signal.regime}
+                        color={getRegimeColor(signal.regime)}
+                        size="small"
+                      />
+                    </Box>
                   </Box>
+
                   <Grid container spacing={1}>
                     <Grid item xs={6}>
                       <Typography color="textSecondary" variant="body2">
@@ -650,45 +678,82 @@ const Signals = () => {
                         ${(signal.price || 0).toFixed(2)}
                       </Typography>
                     </Grid>
-                    <Grid item xs={6}>
-                      <Typography color="textSecondary" variant="body2">
-                        Time
+
+                    {/* Multi-timeframe Alignment */}
+                    <Grid item xs={12}>
+                      <Divider sx={{ my: 1 }} />
+                      <Typography color="textSecondary" variant="body2" gutterBottom>
+                        Timeframe Alignment
                       </Typography>
-                      <Typography variant="body1">
+                      <Box display="flex" gap={1} flexWrap="wrap">
+                        {signal.mtf_alignment?.details && Object.entries(signal.mtf_alignment.details).map(([tf, data]) => (
+                          <Chip
+                            key={tf}
+                            label={`${tf}: ${data.direction}`}
+                            color={getTimeframeColor(data.strength)}
+                            size="small"
+                          />
+                        ))}
+                      </Box>
+                    </Grid>
+
+                    {/* Market Regime Details */}
+                    <Grid item xs={12}>
+                      <Divider sx={{ my: 1 }} />
+                      <Typography color="textSecondary" variant="body2" gutterBottom>
+                        Market Regime Details
+                      </Typography>
+                      <Box display="flex" gap={1} flexWrap="wrap">
+                        {signal.regime === 'TRENDING' && (
+                          <Chip
+                            label={`ADX: ${signal.indicators?.adx?.value?.toFixed(1) || 'N/A'}`}
+                            color="success"
+                            size="small"
+                          />
+                        )}
+                        {signal.regime === 'RANGING' && (
+                          <Chip
+                            label={`BB Width: ${signal.indicators?.bollinger_bands?.width?.toFixed(3) || 'N/A'}`}
+                            color="info"
+                            size="small"
+                          />
+                        )}
+                        {signal.regime === 'VOLATILE' && (
+                          <Chip
+                            label={`ATR: ${signal.indicators?.atr?.toFixed(2) || 'N/A'}`}
+                            color="warning"
+                            size="small"
+                          />
+                        )}
+                      </Box>
+                    </Grid>
+
+                    {/* Signal Reasons */}
+                    {signal.reasons && signal.reasons.length > 0 && (
+                      <Grid item xs={12}>
+                        <Divider sx={{ my: 1 }} />
+                        <Typography color="textSecondary" variant="body2" gutterBottom>
+                          Signal Reasons
+                        </Typography>
+                        <Box display="flex" gap={1} flexWrap="wrap">
+                          {signal.reasons.map((reason, index) => (
+                            <Chip
+                              key={index}
+                              label={reason}
+                              size="small"
+                              variant="outlined"
+                            />
+                          ))}
+                        </Box>
+                      </Grid>
+                    )}
+
+                    {/* Time */}
+                    <Grid item xs={12}>
+                      <Typography color="textSecondary" variant="body2" align="right">
                         {new Date(signal.timestamp).toLocaleTimeString()}
                       </Typography>
                     </Grid>
-                    {signal.indicators && (
-                      <>
-                        <Grid item xs={12}>
-                          <Divider sx={{ my: 1 }} />
-                        </Grid>
-                        <Grid item xs={4}>
-                          <Typography color="textSecondary" variant="body2">
-                            MACD
-                          </Typography>
-                          <Typography variant="body2">
-                            {signal.indicators.macd?.value?.toFixed(2) || 'N/A'}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={4}>
-                          <Typography color="textSecondary" variant="body2">
-                            RSI
-                          </Typography>
-                          <Typography variant="body2">
-                            {signal.indicators.rsi?.toFixed(2) || 'N/A'}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={4}>
-                          <Typography color="textSecondary" variant="body2">
-                            BB
-                          </Typography>
-                          <Typography variant="body2">
-                            {signal.indicators.bb?.middle?.toFixed(2) || 'N/A'}
-                          </Typography>
-                        </Grid>
-                      </>
-                    )}
                   </Grid>
                 </CardContent>
               </Card>
