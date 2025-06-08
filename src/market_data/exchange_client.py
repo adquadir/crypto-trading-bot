@@ -18,6 +18,7 @@ from pathlib import Path
 import random
 import numpy as np
 from .websocket_client import MarketDataWebSocket
+from .config import config
 
 logger = logging.getLogger(__name__)
 

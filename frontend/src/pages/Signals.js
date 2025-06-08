@@ -300,173 +300,101 @@ const Signals = () => {
   };
 
   const connectWebSocket = () => {
-    // Prevent multiple connection attempts
-    if (wsRef.current?.readyState === WebSocket.OPEN || 
-        wsRef.current?.readyState === WebSocket.CONNECTING) {
-      return;
+    if (wsRef.current) {
+      wsRef.current.close();
     }
 
-    try {
-      // Clear any existing connection timeout
-      if (connectionTimeoutRef.current) {
-        clearTimeout(connectionTimeoutRef.current);
-      }
+    const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+    wsRef.current = ws;
 
-      // Create connection timeout
-      connectionTimeoutRef.current = setTimeout(() => {
-        if (wsRef.current?.readyState !== WebSocket.OPEN) {
-          console.error('WebSocket connection timeout');
-          handleWebSocketError({ code: 1006, reason: 'Connection timeout' });
-        }
-      }, 10000); // 10 second timeout
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+      setConnectionDetails(prev => ({
+        ...prev,
+        status: 'connected',
+        lastConnected: new Date(),
+        reconnectAttempts: 0,
+        lastError: null
+      }));
+      setError(null);
+      missedHeartbeatsRef.current = 0;
+    };
 
-      // Ensure we have valid WebSocket URL
-      const wsUrl = `${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`;
-      if (!wsUrl || wsUrl.includes('undefined')) {
-        throw new Error('Invalid WebSocket URL');
-      }
-
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (connectionTimeoutRef.current) {
-          clearTimeout(connectionTimeoutRef.current);
-          connectionTimeoutRef.current = null;
-        }
-        
-        console.log('WebSocket Connected');
-        updateConnectionStatus('connected', null);
-        setError(null);
-        missedHeartbeatsRef.current = 0;
-        setConnectionDetails(prev => ({
-          ...prev,
-          lastConnected: new Date(),
-          reconnectAttempts: 0
-        }));
-
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
-        }
-
-        startHeartbeat(ws);
-        measureLatency(ws);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          // Handle connection status message
-          if (data.type === 'connection_status') {
-            console.log('Connection status:', data.status, data.message);
-            return;
-          }
-          
-          // Handle error messages from server
-          if (data.type === 'error') {
-            console.error('Server error:', data.message);
-            setError(data.message);
-            return;
-          }
-          
-          // Handle heartbeat response
-          if (data.type === 'pong') {
-            missedHeartbeatsRef.current = 0;
-            if (data.timestamp) {
-              const latency = Date.now() - data.timestamp;
-              setConnectionDetails(prev => ({
-                ...prev,
-                latency
-              }));
-            }
-            return;
-          }
-
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'heartbeat') {
+          missedHeartbeatsRef.current = 0;
+          setConnectionDetails(prev => ({
+            ...prev,
+            latency: Date.now() - data.timestamp
+          }));
+        } else if (data.type === 'signal_update') {
           setSignals(prev => {
-            const newSignals = [...prev, data];
-            return newSignals.slice(-100);
+            const updated = [...prev];
+            const index = updated.findIndex(s => s.symbol === data.signal.symbol);
+            if (index >= 0) {
+              updated[index] = data.signal;
+            } else {
+              updated.push(data.signal);
+            }
+            return updated;
           });
           setLastUpdated(new Date());
-        } catch (err) {
-          console.error('Error parsing WebSocket message:', err);
-          setError('Error processing server message');
         }
-      };
+      } catch (err) {
+        console.error('Error processing WebSocket message:', err);
+      }
+    };
 
-      ws.onerror = (event) => {
-        clearTimeout(connectionTimeoutRef.current);
-        console.error('WebSocket Error:', event);
-        handleWebSocketError(event);
-      };
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setConnectionDetails(prev => ({
+        ...prev,
+        status: 'error',
+        lastError: error
+      }));
+      setError('WebSocket connection error');
+    };
 
-      ws.onclose = (event) => {
-        clearTimeout(connectionTimeoutRef.current);
-        console.log('WebSocket Disconnected:', event.code, event.reason);
-        updateConnectionStatus('disconnected', {
-          code: event.code,
-          reason: event.reason
-        });
-        
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-          heartbeatIntervalRef.current = null;
-        }
-        
-        if (latencyTimeoutRef.current) {
-          clearTimeout(latencyTimeoutRef.current);
-          latencyTimeoutRef.current = null;
-        }
-        
-        if (event.code !== 1000) {
-          reconnectWebSocket();
-        }
-      };
-    } catch (err) {
-      console.error('Error creating WebSocket:', err);
-      updateConnectionStatus('error', {
-        message: 'Failed to establish WebSocket connection',
-        error: err.message
-      });
-      setError('Failed to establish WebSocket connection');
-      
-      // Attempt reconnection after a delay
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      setConnectionDetails(prev => ({
+        ...prev,
+        status: 'disconnected',
+        reconnectAttempts: prev.reconnectAttempts + 1
+      }));
+
+      // Exponential backoff for reconnection
+      const delay = Math.min(baseReconnectDelay * Math.pow(2, connectionDetails.reconnectAttempts), maxReconnectDelay);
       setTimeout(() => {
-        if (wsRef.current?.readyState !== WebSocket.OPEN) {
-          reconnectWebSocket();
+        if (connectionDetails.reconnectAttempts < maxReconnectAttempts) {
+          console.log(`Attempting to reconnect WebSocket in ${delay}ms...`);
+          connectWebSocket();
+        } else {
+          setError('Maximum reconnection attempts reached');
         }
-      }, 1000);
-    }
+      }, delay);
+    };
   };
 
   useEffect(() => {
-    fetchSignals();
     connectWebSocket();
-
     return () => {
       if (wsRef.current) {
-        try {
-          wsRef.current.close(1000, 'Component unmounting');
-        } catch (err) {
-          console.error('Error closing WebSocket:', err);
-        }
-        wsRef.current = null;
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      if (connectionTimeoutRef.current) {
-        clearTimeout(connectionTimeoutRef.current);
-        connectionTimeoutRef.current = null;
+        wsRef.current.close();
       }
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
-        heartbeatIntervalRef.current = null;
+      }
+      if (latencyTimeoutRef.current) {
+        clearTimeout(latencyTimeoutRef.current);
+      }
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
       }
     };
-  }, [retryCount]);
+  }, []);
 
   const handleSort = (field) => {
     if (sortBy === field) {
