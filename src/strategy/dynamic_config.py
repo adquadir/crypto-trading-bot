@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 import numpy as np
 from dataclasses import dataclass, field
 import logging
@@ -25,6 +25,121 @@ class StrategyProfile:
     max_drawdown: float
     volatility_factor: float = 1.0
     confidence_threshold: float = 0.7
+
+class StrategyConfig:
+    def __init__(self):
+        self.profiles = {}
+        self.current_profile = None
+        self.config_path = Path(__file__).parent / 'config' / 'strategy_profiles.json'
+        self.load_strategy_profiles()
+
+    def load_strategy_profiles(self) -> None:
+        """Load strategy profiles from JSON file."""
+        try:
+            if self.config_path.exists():
+                with open(self.config_path, 'r') as f:
+                    self.profiles = json.load(f)
+                logger.info(f"Loaded {len(self.profiles)} strategy profiles")
+            else:
+                logger.warning(f"Strategy profiles file not found at {self.config_path}")
+                self.profiles = self._get_default_profiles()
+                self._save_profiles()
+        except Exception as e:
+            logger.error(f"Error loading strategy profiles: {str(e)}")
+            self.profiles = self._get_default_profiles()
+
+    def _save_profiles(self) -> None:
+        """Save strategy profiles to JSON file."""
+        try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.config_path, 'w') as f:
+                json.dump(self.profiles, f, indent=2)
+            logger.info("Strategy profiles saved successfully")
+        except Exception as e:
+            logger.error(f"Error saving strategy profiles: {str(e)}")
+
+    def _get_default_profiles(self) -> Dict[str, Dict[str, Any]]:
+        """Get default strategy profiles."""
+        return {
+            'conservative': {
+                'max_position_size': 0.1,
+                'max_leverage': 2,
+                'min_risk_reward': 3.0,
+                'max_drawdown': 0.05,
+                'min_confidence': 0.8,
+                'max_correlation': 0.5,
+                'min_volume_24h': 1000000,
+                'max_spread': 0.02,
+                'min_liquidity': 100000,
+                'max_volatility': 0.5,
+                'min_funding_rate': -0.001,
+                'max_funding_rate': 0.001
+            },
+            'moderate': {
+                'max_position_size': 0.2,
+                'max_leverage': 3,
+                'min_risk_reward': 2.0,
+                'max_drawdown': 0.1,
+                'min_confidence': 0.6,
+                'max_correlation': 0.7,
+                'min_volume_24h': 500000,
+                'max_spread': 0.03,
+                'min_liquidity': 50000,
+                'max_volatility': 0.8,
+                'min_funding_rate': -0.002,
+                'max_funding_rate': 0.002
+            },
+            'aggressive': {
+                'max_position_size': 0.3,
+                'max_leverage': 5,
+                'min_risk_reward': 1.5,
+                'max_drawdown': 0.15,
+                'min_confidence': 0.4,
+                'max_correlation': 0.8,
+                'min_volume_24h': 100000,
+                'max_spread': 0.05,
+                'min_liquidity': 10000,
+                'max_volatility': 1.0,
+                'min_funding_rate': -0.003,
+                'max_funding_rate': 0.003
+            }
+        }
+
+    def switch_profile(self, profile_name: str) -> None:
+        """Switch to a different strategy profile."""
+        if profile_name not in self.profiles:
+            logger.error(f"Profile {profile_name} not found")
+            return
+        
+        self.current_profile = profile_name
+        logger.info(f"Switched to {profile_name} strategy profile")
+
+    def get_current_profile(self) -> Optional[Dict[str, Any]]:
+        """Get the current strategy profile settings."""
+        if not self.current_profile:
+            logger.warning("No strategy profile selected")
+            return None
+        return self.profiles.get(self.current_profile)
+
+    def update_profile(self, profile_name: str, settings: Dict[str, Any]) -> None:
+        """Update a strategy profile with new settings."""
+        if profile_name not in self.profiles:
+            logger.error(f"Profile {profile_name} not found")
+            return
+        
+        self.profiles[profile_name].update(settings)
+        self._save_profiles()
+        logger.info(f"Updated {profile_name} strategy profile")
+
+    def get_profile_names(self) -> list:
+        """Get list of available profile names."""
+        return list(self.profiles.keys())
+
+# Create a singleton instance
+strategy_config = StrategyConfig()
+
+# Export the instance
+__all__ = ['strategy_config']
 
 class DynamicStrategyConfig:
     def __init__(self, config_path: str = "config/strategy_profiles.json"):

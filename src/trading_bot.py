@@ -158,71 +158,39 @@ class TradingBot:
         try:
             logger.info("Starting trading bot...")
             
-            # Initialize exchange client
-            await self.exchange_client.initialize()
+            # Initialize strategy profiles
+            self.strategy_config.load_strategy_profiles()
+            self.strategy_config.switch_profile('moderate')
             
-            # Set initial strategy profile
-            self.signal_generator.set_strategy_profile(self.config['strategy']['default_profile'])
+            # Initialize symbol discovery
+            self.symbol_discovery = SymbolDiscovery()
+            await self.symbol_discovery.initialize()
             
-            # Start main trading loop
-            while not self._shutdown_event.is_set():
-                try:
-                    # Discover trading opportunities
-                    opportunities = await self.symbol_discovery.scan_opportunities()
-                    
-                    for opportunity in opportunities:
-                        symbol = opportunity.symbol
-                        # Get market data
-                        market_data = await self.symbol_discovery.get_market_data(symbol)
-                        if not market_data:
-                            continue
-                            
-                        # Calculate indicators with dynamic parameters
-                        indicators = self.signal_generator.calculate_indicators(
-                            market_data,
-                            self.signal_generator.strategy_config.get_symbol_specific_params(
-                                symbol,
-                                opportunity.confidence
-                            )
-                        )
-                        
-                        # Generate signals
-                        signal = self.signal_generator.generate_signals(
-                            symbol,
-                            indicators,
-                            opportunity.confidence
-                        )
-                        
-                        if signal and signal['signal_type'] != "NEUTRAL":
-                            # Check risk limits
-                            risk_limits = self.signal_generator.get_risk_limits()
-                            if self.risk_manager.can_open_trade(symbol, risk_limits):
-                                # Execute trade
-                                trade_result = await self._execute_trade(symbol, signal)
-                                if trade_result:
-                                    # Update strategy parameters based on trade result
-                                    self.signal_generator.update_performance(trade_result)
-                                    
-                                    # Update volatility parameters
-                                    if 'volatility' in opportunity:
-                                        self.signal_generator.update_volatility(
-                                            symbol,
-                                            opportunity.volatility
-                                        )
-                                        
-                    # Sleep to prevent excessive API calls
-                    await asyncio.sleep(self.config['trading']['scan_interval'])
-                    
-                except Exception as e:
-                    logger.error(f"Error in trading loop: {e}")
-                    await asyncio.sleep(5)  # Wait before retrying
-                    
+            # Get initial symbols
+            symbols = await self.symbol_discovery.get_symbols()
+            logger.info(f"Initialized with {len(symbols)} symbols")
+            
+            # Initialize exchange client with symbols
+            await self.exchange_client.initialize(symbols)
+            
+            # Initialize WebSocket manager
+            await self.ws_manager.initialize()
+            
+            # Start background tasks
+            self.tasks = [
+                asyncio.create_task(self._monitor_market_conditions()),
+                asyncio.create_task(self._process_signals()),
+                asyncio.create_task(self._update_positions()),
+                asyncio.create_task(self._health_check())
+            ]
+            
+            logger.info("Trading bot started successfully")
+            
         except Exception as e:
-            logger.error(f"Fatal error in trading bot: {e}")
-            raise
-        finally:
+            logger.error(f"Error starting trading bot: {str(e)}")
             await self.stop()
-            
+            raise
+
     async def _execute_trade(self, symbol: str, signal: Dict) -> Optional[Dict]:
         """Execute a trade based on the signal."""
         try:
@@ -429,8 +397,24 @@ class TradingBot:
     async def stop(self):
         """Stop the trading bot."""
         logger.info("Stopping trading bot...")
-        self._shutdown_event.set()
-        await self.exchange_client.close()
+        
+        # Cancel all background tasks
+        if hasattr(self, 'tasks'):
+            for task in self.tasks:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        
+        # Close exchange client
+        if hasattr(self, 'exchange_client'):
+            await self.exchange_client.close()
+        
+        # Close WebSocket manager
+        if hasattr(self, 'ws_manager'):
+            await self.ws_manager.close()
+        
         logger.info("Trading bot stopped")
         
     def get_trade_history(self) -> List[Dict]:
@@ -546,3 +530,133 @@ class TradingBot:
         })
         # Keep only last 1000 adjustments
         self.parameter_history = self.parameter_history[-1000:]
+
+    async def _monitor_market_conditions(self):
+        """Monitor market conditions and update strategy parameters."""
+        while True:
+            try:
+                # Get current market conditions
+                market_conditions = await self.symbol_discovery.get_market_conditions()
+                
+                # Update strategy parameters based on market conditions
+                for symbol, conditions in market_conditions.items():
+                    self.signal_generator.update_market_conditions(symbol, conditions)
+                
+                # Sleep for monitoring interval
+                await asyncio.sleep(self.config['trading']['monitor_interval'])
+                
+            except Exception as e:
+                logger.error(f"Error in market monitoring: {str(e)}")
+                await asyncio.sleep(5)
+
+    async def _process_signals(self):
+        """Process trading signals and execute trades."""
+        while True:
+            try:
+                # Get trading opportunities
+                opportunities = await self.symbol_discovery.scan_opportunities()
+                
+                for opportunity in opportunities:
+                    symbol = opportunity.symbol
+                    
+                    # Get market data
+                    market_data = await self.symbol_discovery.get_market_data(symbol)
+                    if not market_data:
+                        continue
+                    
+                    # Calculate indicators
+                    indicators = self.signal_generator.calculate_indicators(
+                        market_data,
+                        self.signal_generator.strategy_config.get_symbol_specific_params(
+                            symbol,
+                            opportunity.confidence
+                        )
+                    )
+                    
+                    # Generate signals
+                    signal = self.signal_generator.generate_signals(
+                        symbol,
+                        indicators,
+                        opportunity.confidence
+                    )
+                    
+                    if signal and signal['signal_type'] != "NEUTRAL":
+                        # Check risk limits
+                        risk_limits = self.signal_generator.get_risk_limits()
+                        if self.risk_manager.can_open_trade(symbol, risk_limits):
+                            # Execute trade
+                            trade_result = await self._execute_trade(symbol, signal)
+                            if trade_result:
+                                # Update strategy parameters
+                                self.signal_generator.update_performance(trade_result)
+                                
+                                # Update volatility parameters
+                                if 'volatility' in opportunity:
+                                    self.signal_generator.update_volatility(
+                                        symbol,
+                                        opportunity.volatility
+                                    )
+                
+                # Sleep for signal processing interval
+                await asyncio.sleep(self.config['trading']['signal_interval'])
+                
+            except Exception as e:
+                logger.error(f"Error in signal processing: {str(e)}")
+                await asyncio.sleep(5)
+
+    async def _update_positions(self):
+        """Update and manage open positions."""
+        while True:
+            try:
+                # Get open positions
+                positions = await self.exchange_client.get_open_positions()
+                
+                for position in positions:
+                    symbol = position['symbol']
+                    
+                    # Get current market data
+                    market_data = await self.symbol_discovery.get_market_data(symbol)
+                    if not market_data:
+                        continue
+                    
+                    # Check if position should be closed
+                    if self.signal_generator.should_close_position(position, market_data):
+                        await self._close_position(position)
+                    
+                    # Update stop loss and take profit
+                    elif self.signal_generator.should_update_levels(position, market_data):
+                        new_levels = self.signal_generator.calculate_new_levels(position, market_data)
+                        await self._update_position_levels(position, new_levels)
+                
+                # Sleep for position update interval
+                await asyncio.sleep(self.config['trading']['position_interval'])
+                
+            except Exception as e:
+                logger.error(f"Error in position updates: {str(e)}")
+                await asyncio.sleep(5)
+
+    async def _health_check(self):
+        """Perform health checks on the trading system."""
+        while True:
+            try:
+                # Check exchange connection
+                if not await self.exchange_client.check_connection():
+                    logger.error("Exchange connection lost, attempting to reconnect...")
+                    await self.exchange_client.reconnect()
+                
+                # Check WebSocket connection
+                if not await self.ws_manager.check_connection():
+                    logger.error("WebSocket connection lost, attempting to reconnect...")
+                    await self.ws_manager.reconnect()
+                
+                # Check data freshness
+                stale_data = await self.symbol_discovery.check_data_freshness()
+                if stale_data:
+                    logger.warning(f"Stale data detected for symbols: {stale_data}")
+                
+                # Sleep for health check interval
+                await asyncio.sleep(self.config['trading']['health_check_interval'])
+                
+            except Exception as e:
+                logger.error(f"Error in health check: {str(e)}")
+                await asyncio.sleep(5)
