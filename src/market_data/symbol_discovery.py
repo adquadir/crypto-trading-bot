@@ -1485,3 +1485,9 @@ class SymbolDiscovery:
         except Exception as e:
             logger.error(f"Error checking volume trend: {e}")
             return False 
+
+    async def initialize(self) -> None:
+        """Initialize the symbol discovery process."""
+        logger.info("Initializing symbol discovery...")
+        await self._load_symbols()
+        logger.info(f"Symbol discovery initialized with {len(self.symbols)} symbols") 
