@@ -637,7 +637,9 @@ const Signals = () => {
             <Typography variant="h6" gutterBottom>
               Latest Signals
             </Typography>
-            <DataFreshnessPanel />
+            {signals.length > 0 && (
+              <DataFreshnessPanel signal={signals[signals.length - 1]} />
+            )}
             {signals.length === 0 ? (
               <Typography color="textSecondary">
                 No signals available
