@@ -1490,4 +1490,14 @@ class SymbolDiscovery:
         """Initialize the symbol discovery process."""
         logger.info("Initializing symbol discovery...")
         await self._load_symbols()
-        logger.info(f"Symbol discovery initialized with {len(self.symbols)} symbols") 
+        logger.info(f"Symbol discovery initialized with {len(self.symbols)} symbols")
+
+    async def _load_symbols(self) -> None:
+        """Load symbols from the exchange."""
+        try:
+            symbols = await self.exchange_client.get_all_symbols()
+            self.symbols = symbols
+            logger.info(f"Loaded {len(self.symbols)} symbols from exchange")
+        except Exception as e:
+            logger.error(f"Error loading symbols: {e}")
+            self.symbols = [] 
