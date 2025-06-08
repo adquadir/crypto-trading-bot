@@ -25,193 +25,68 @@ class SignalGenerator:
         self.signal_tracker = SignalTracker()
         self.confidence_calibrator = ConfidenceCalibrator()
         
-    def calculate_indicators(self, market_data: Dict, params: Dict = None) -> Dict:
-        """Calculate technical indicators from market data."""
+    def calculate_indicators(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate technical indicators for the given dataframe."""
+        indicators = {}
+        
         try:
-            # Validate market data
-            if not market_data or 'klines' not in market_data:
-                logger.error("Invalid market data: missing 'klines' key")
-                return {}
-            
-            klines = market_data['klines']
-            if not klines or len(klines) == 0:
-                logger.error("Empty klines data")
-                return {}
-            
-            logger.debug(f"Processing {len(klines)} klines")
-            
-            # Extract price data
-            df = pd.DataFrame(klines)
-            
-            # Validate required columns
-            required_columns = ['open', 'high', 'low', 'close', 'volume']
-            if not all(col in df.columns for col in required_columns):
-                logger.error(f"Missing required columns in market data. Available columns: {df.columns.tolist()}")
-                return {}
-            
-            # Convert numeric columns
-            for col in required_columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                logger.debug(f"Column {col} stats - min: {df[col].min()}, max: {df[col].max()}, mean: {df[col].mean()}")
-            
-            # Drop any rows with NaN values
-            initial_len = len(df)
-            df.dropna(inplace=True)
-            if len(df) < initial_len:
-                logger.warning(f"Dropped {initial_len - len(df)} rows with NaN values")
-            
-            # Validate data points
-            min_required_points = 20  # Minimum required for most indicators
-            if len(df) < min_required_points:
-                logger.warning(f"Insufficient data points: {len(df)} < {min_required_points}")
-                return {}
-            
-            # Get current price
-            current_price = float(df['close'].iloc[-1])
-            logger.debug(f"Current price: {current_price}")
-            
-            # Handle potential NaN/inf values from ta calculations
-            def safe_float(val, default=0.0):
-                try:
-                    f = float(val)
-                    if not np.isfinite(f):
-                        logger.debug(f"Non-finite value encountered: {val}, using default: {default}")
-                        return default
-                    return f
-                except Exception as e:
-                    logger.debug(f"Error converting to float: {val}, error: {e}, using default: {default}")
-                    return default
-
-            # Calculate indicators with error handling
-            try:
-                logger.debug("Calculating MACD...")
-                macd = ta.trend.MACD(
-                    df['close'],
-                    window_slow=params.get('macd_slow_period', 26),
-                    window_fast=params.get('macd_fast_period', 12),
-                    window_sign=params.get('macd_signal_period', 9)
-                )
-            macd_value = safe_float(macd.macd().iloc[-1])
-            macd_signal = safe_float(macd.macd_signal().iloc[-1])
-            macd_histogram = safe_float(macd.macd_diff().iloc[-1])
-                logger.debug(f"MACD values - value: {macd_value}, signal: {macd_signal}, histogram: {macd_histogram}")
-            except Exception as e:
-                logger.error(f"Error calculating MACD: {e}")
-                macd_value = macd_signal = macd_histogram = 0.0
-
-            try:
-                logger.debug("Calculating RSI...")
-                rsi = ta.momentum.RSIIndicator(
-                    df['close'],
-                    window=14
-                )
-                rsi_value = safe_float(rsi.rsi().iloc[-1], 50.0)
-                logger.debug(f"RSI value: {rsi_value}")
-            except Exception as e:
-                logger.error(f"Error calculating RSI: {e}")
-                rsi_value = 50.0
-
-            try:
-                logger.debug("Calculating Bollinger Bands...")
-                bb = ta.volatility.BollingerBands(
-                    df['close'],
-                    window=20,
-                    window_dev=params.get('bb_std_dev', 2)
-                )
-            bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
-            bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
-            bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
-                logger.debug(f"Bollinger Bands - upper: {bb_upper}, middle: {bb_middle}, lower: {bb_lower}")
-            except Exception as e:
-                logger.error(f"Error calculating Bollinger Bands: {e}")
-                bb_upper = bb_middle = bb_lower = current_price
-
-            # Adjust ADX window based on available data points
-            adx_window = min(14, len(df) - 1)  # Ensure window size doesn't exceed available data
-            try:
-                logger.debug(f"Calculating ADX with window size {adx_window}...")
-                adx = ta.trend.ADXIndicator(
-                    df['high'],
-                    df['low'],
-                    df['close'],
-                    window=adx_window
-                )
-            adx_df = pd.DataFrame({
-                'adx': adx.adx(),
-                'adx_pos': adx.adx_pos(),
-                'adx_neg': adx.adx_neg()
-            })
-            adx_df = adx_df.replace([np.inf, -np.inf], np.nan).fillna(0)
-            adx_value = float(adx_df['adx'].iloc[-1])
-            adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
-            adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
-                logger.debug(f"ADX values - value: {adx_value}, DI+: {adx_di_plus}, DI-: {adx_di_minus}")
-            except Exception as e:
-                logger.error(f"Error calculating ADX: {e}")
-                adx_value = adx_di_plus = adx_di_minus = 0.0
-
-            try:
-                logger.debug("Calculating ATR...")
-                atr = ta.volatility.AverageTrueRange(
-                    df['high'],
-                    df['low'],
-                    df['close'],
-                    window=min(14, len(df) - 1)  # Adjust window size
-                )
-            atr_value = safe_float(atr.average_true_range().iloc[-1])
-                logger.debug(f"ATR value: {atr_value}")
-            except Exception as e:
-                logger.error(f"Error calculating ATR: {e}")
-                atr_value = 0.0
-
-            try:
-                logger.debug("Calculating CCI...")
-                cci = ta.trend.CCIIndicator(
-                    df['high'],
-                    df['low'],
-                    df['close'],
-                    window=min(20, len(df) - 1)  # Adjust window size
-                )
-            cci_value = safe_float(cci.cci().iloc[-1])
-                logger.debug(f"CCI value: {cci_value}")
-            except Exception as e:
-                logger.error(f"Error calculating CCI: {e}")
-                cci_value = 0.0
-
-            indicators = {
-                'macd': {
-                    'value': macd_value,
-                    'signal': macd_signal,
-                    'histogram': macd_histogram
-                },
-                'macd_signal': macd_signal,
-                'rsi': rsi_value,
-                'bollinger_bands': {
-                    'upper': bb_upper,
-                    'middle': bb_middle,
-                    'lower': bb_lower
-                },
-                'bb_upper': bb_upper,
-                'bb_lower': bb_lower,
-                'adx': {
-                    'value': adx_value,
-                    'di_plus': adx_di_plus,
-                    'di_minus': adx_di_minus
-                },
-                'plus_di': adx_di_plus,
-                'minus_di': adx_di_minus,
-                'atr': atr_value,
-                'cci': cci_value,
-                'current_price': current_price
+            # MACD
+            macd = ta.trend.MACD(df['close'])
+            indicators['macd'] = {
+                'value': safe_float(macd.macd().iloc[-1]),
+                'signal': safe_float(macd.macd_signal().iloc[-1]),
+                'histogram': safe_float(macd.macd_diff().iloc[-1])
             }
-            
-            logger.debug("Successfully calculated all indicators")
-            return indicators
-            
         except Exception as e:
-            logger.error(f"Error calculating indicators: {e}")
-            return {}
-            
+            logger.error(f"Error calculating MACD: {str(e)}")
+            indicators['macd'] = {'value': 0, 'signal': 0, 'histogram': 0}
+        
+        try:
+            # RSI
+            rsi = ta.momentum.RSIIndicator(df['close'])
+            indicators['rsi'] = safe_float(rsi.rsi().iloc[-1])
+        except Exception as e:
+            logger.error(f"Error calculating RSI: {str(e)}")
+            indicators['rsi'] = 50
+        
+        try:
+            # Bollinger Bands
+            bb = ta.volatility.BollingerBands(df['close'])
+            indicators['bb'] = {
+                'upper': safe_float(bb.bollinger_hband().iloc[-1]),
+                'middle': safe_float(bb.bollinger_mavg().iloc[-1]),
+                'lower': safe_float(bb.bollinger_lband().iloc[-1])
+            }
+        except Exception as e:
+            logger.error(f"Error calculating Bollinger Bands: {str(e)}")
+            indicators['bb'] = {'upper': 0, 'middle': 0, 'lower': 0}
+        
+        try:
+            # ADX
+            adx = ta.trend.ADXIndicator(df['high'], df['low'], df['close'])
+            indicators['adx'] = safe_float(adx.adx().iloc[-1])
+        except Exception as e:
+            logger.error(f"Error calculating ADX: {str(e)}")
+            indicators['adx'] = 0
+        
+        try:
+            # ATR
+            atr = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'])
+            indicators['atr'] = safe_float(atr.average_true_range().iloc[-1])
+        except Exception as e:
+            logger.error(f"Error calculating ATR: {str(e)}")
+            indicators['atr'] = 0
+        
+        try:
+            # CCI
+            cci = ta.trend.CCIIndicator(df['high'], df['low'], df['close'])
+            indicators['cci'] = safe_float(cci.cci().iloc[-1])
+        except Exception as e:
+            logger.error(f"Error calculating CCI: {str(e)}")
+            indicators['cci'] = 0
+        
+        return indicators
+
     async def generate_signals(self, market_data: Dict) -> Optional[Dict]:
         """Generate trading signals based on market data."""
         try:
