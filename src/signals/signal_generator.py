@@ -1513,4 +1513,165 @@ class SignalGenerator:
             
         except Exception as e:
             logger.error(f"Error calculating ADX alignment: {e}")
-            return 0.0 
+            return 0.0
+
+    def _generate_trending_signal(self, market_data: Dict, indicators: Dict) -> Optional[Dict]:
+        """Generate signal for trending market regime."""
+        try:
+            # Get trend direction and strength
+            adx = indicators.get('adx', {}).get('value', 0)
+            di_plus = indicators.get('adx', {}).get('di_plus', 0)
+            di_minus = indicators.get('adx', {}).get('di_minus', 0)
+            
+            # Calculate ATR and structure levels
+            atr = indicators.get('atr', 0)
+            current_price = market_data.get('current_price', 0)
+            
+            # Determine trend direction
+            if di_plus > di_minus and adx > 25:  # Strong uptrend
+                direction = 'LONG'
+                entry = current_price
+                stop_loss = entry - (atr * 2.0)  # Wider stop in trending market
+                take_profit = entry + (atr * 3.0)  # Higher reward target
+            elif di_minus > di_plus and adx > 25:  # Strong downtrend
+                direction = 'SHORT'
+                entry = current_price
+                stop_loss = entry + (atr * 2.0)
+                take_profit = entry - (atr * 3.0)
+            else:
+                return None  # Not a strong enough trend
+                
+            # Calculate confidence based on trend strength
+            confidence = min(adx / 50, 1.0)  # Normalize ADX to 0-1 range
+            
+            return {
+                'direction': direction,
+                'entry': entry,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'confidence': confidence,
+                'regime': 'TRENDING',
+                'indicators': {
+                    'adx': adx,
+                    'di_plus': di_plus,
+                    'di_minus': di_minus,
+                    'atr': atr
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating trending signal: {e}")
+            return None
+            
+    def _generate_ranging_signal(self, market_data: Dict, indicators: Dict) -> Optional[Dict]:
+        """Generate signal for ranging market regime."""
+        try:
+            # Get range boundaries
+            bb = indicators.get('bollinger_bands', {})
+            bb_upper = bb.get('upper', 0)
+            bb_lower = bb.get('lower', 0)
+            bb_middle = bb.get('middle', 0)
+            current_price = market_data.get('current_price', 0)
+            
+            # Calculate ATR for stop loss
+            atr = indicators.get('atr', 0)
+            
+            # Check if price is near range boundaries
+            range_size = bb_upper - bb_lower
+            if range_size == 0:
+                return None
+                
+            price_position = (current_price - bb_lower) / range_size
+            
+            # Generate signals based on price position
+            if price_position < 0.2:  # Near lower boundary
+                direction = 'LONG'
+                entry = current_price
+                stop_loss = entry - (atr * 1.5)  # Tighter stop in ranging market
+                take_profit = bb_middle  # Target middle of range
+            elif price_position > 0.8:  # Near upper boundary
+                direction = 'SHORT'
+                entry = current_price
+                stop_loss = entry + (atr * 1.5)
+                take_profit = bb_middle
+            else:
+                return None  # Price in middle of range
+                
+            # Calculate confidence based on range consistency
+            bb_width = (bb_upper - bb_lower) / bb_middle
+            confidence = max(0.6, 1.0 - (bb_width * 10))  # Higher confidence for tighter ranges
+            
+            return {
+                'direction': direction,
+                'entry': entry,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'confidence': confidence,
+                'regime': 'RANGING',
+                'indicators': {
+                    'bb_upper': bb_upper,
+                    'bb_lower': bb_lower,
+                    'bb_middle': bb_middle,
+                    'atr': atr
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating ranging signal: {e}")
+            return None
+            
+    def _generate_volatile_signal(self, market_data: Dict, indicators: Dict) -> Optional[Dict]:
+        """Generate signal for volatile market regime."""
+        try:
+            # Get volatility metrics
+            atr = indicators.get('atr', 0)
+            current_price = market_data.get('current_price', 0)
+            atr_percent = atr / current_price if current_price > 0 else 0
+            
+            # Get recent price action
+            recent_highs = market_data.get('highs', [])[-5:]
+            recent_lows = market_data.get('lows', [])[-5:]
+            
+            if not recent_highs or not recent_lows:
+                return None
+                
+            # Calculate volatility-based levels
+            recent_range = max(recent_highs) - min(recent_lows)
+            range_percent = recent_range / current_price if current_price > 0 else 0
+            
+            # Only generate signals if volatility is high enough
+            if atr_percent < 0.02 or range_percent < 0.03:  # Minimum volatility thresholds
+                return None
+                
+            # Determine direction based on recent price action
+            if current_price > (max(recent_highs) + min(recent_lows)) / 2:
+                direction = 'LONG'
+                entry = current_price
+                stop_loss = entry - (atr * 2.5)  # Wider stop in volatile market
+                take_profit = entry + (atr * 4.0)  # Higher reward target
+            else:
+                direction = 'SHORT'
+                entry = current_price
+                stop_loss = entry + (atr * 2.5)
+                take_profit = entry - (atr * 4.0)
+                
+            # Calculate confidence based on volatility
+            confidence = max(0.5, 1.0 - (atr_percent * 20))  # Lower confidence in high volatility
+            
+            return {
+                'direction': direction,
+                'entry': entry,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'confidence': confidence,
+                'regime': 'VOLATILE',
+                'indicators': {
+                    'atr': atr,
+                    'atr_percent': atr_percent,
+                    'range_percent': range_percent
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating volatile signal: {e}")
+            return None 

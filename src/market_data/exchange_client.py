@@ -155,6 +155,7 @@ class ExchangeClient:
         proxy_list: Optional[List[str]] = None,
         failover_ports: Optional[List[str]] = None,
         proxy_config: Optional[Dict[str, str]] = None,
+        scalping_mode: bool = False,
     ):
         self.symbols = symbol_set or {'BTCUSDT'}
         self.testnet = testnet
@@ -168,6 +169,9 @@ class ExchangeClient:
         self.cache = CacheManager()
         self._stale_data_alerts = {}  # Track stale data alerts
         self._alert_threshold = 3  # Number of consecutive stale data occurrences before alert
+        self.scalping_mode = scalping_mode
+        self.base_url = "https://testnet.binance.vision/api" if testnet else "https://api.binance.com/api"
+        self.ws_base_url = "wss://testnet.binance.vision/ws" if testnet else "wss://stream.binance.com:9443/ws"
 
         # Load proxy configuration from environment variables
         self.proxy_list = proxy_list or os.getenv('PROXY_PORTS', '10001,10002,10003').split(',')
@@ -195,16 +199,26 @@ class ExchangeClient:
         self.ws_symbols = set()
         
         # Cache TTLs (in seconds)
-        self.ttl = {
-            'ohlcv': config.get('ohlcv_cache_ttl', 60),  # Default 1 minute
-            'ticker': config.get('ticker_cache_ttl', 5),  # Default 5 seconds
-            'orderbook': config.get('orderbook_cache_ttl', 1),  # Default 1 second
-            'scalping': {
-                'ohlcv': config.get('scalping_ohlcv_cache_ttl', 5),  # 5 seconds for scalping
-                'ticker': config.get('scalping_ticker_cache_ttl', 1),  # 1 second for scalping
-                'orderbook': config.get('scalping_orderbook_cache_ttl', 0.5)  # 0.5 seconds for scalping
+        if scalping_mode:
+            self.cache_ttls = {
+                'ohlcv': 5,  # 5 seconds for scalping
+                'orderbook': 2,  # 2 seconds for scalping
+                'ticker': 2,  # 2 seconds for scalping
+                'trades': 2,  # 2 seconds for scalping
+                'open_interest': 5,  # 5 seconds for scalping
+                'funding_rate': 60,  # 1 minute for scalping
+                'volatility': 60  # 1 minute for scalping
             }
-        }
+        else:
+            self.cache_ttls = {
+                'ohlcv': config.get('ohlcv_cache_ttl', 60),  # Default 1 minute
+                'orderbook': config.get('orderbook_cache_ttl', 5),  # Default 5 seconds
+                'ticker': config.get('ticker_cache_ttl', 5),  # Default 5 seconds
+                'trades': config.get('trades_cache_ttl', 5),  # Default 5 seconds
+                'open_interest': config.get('open_interest_cache_ttl', 60),  # Default 1 minute
+                'funding_rate': config.get('funding_rate_cache_ttl', 300),  # Default 5 minutes
+                'volatility': config.get('volatility_cache_ttl', 300)  # Default 5 minutes
+            }
 
     def _setup_proxy(self):
         """Setup proxy configuration."""
@@ -657,7 +671,7 @@ class ExchangeClient:
         """Setup websocket for a specific symbol."""
         try:
             ws = await self.session.ws_connect(
-                f"wss://stream.binance.com:9443/ws/{symbol.lower()}@depth",
+                f"{self.ws_base_url}/{symbol.lower()}@depth",
                 proxy=f"http://{self.proxy_host}:{self.proxy_port}",
                 proxy_auth=self.proxy_auth,
                 timeout=aiohttp.ClientTimeout(total=10)
@@ -692,7 +706,7 @@ class ExchangeClient:
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(
-                    "https://api.binance.com/api/v3/ping",
+                    f"{self.base_url}/v3/ping",
                     proxy=f"http://{self.proxy_host}:{self.proxy_port}",
                     proxy_auth=self.proxy_auth
                 ) as response:
@@ -848,7 +862,7 @@ class ExchangeClient:
             self.ws_client = MarketDataWebSocket(
                 self,
                 symbols,
-                cache_ttl=min(self.ttl['scalping'].values())  # Use smallest TTL
+                cache_ttl=min(self.cache_ttls.values())  # Use smallest TTL
             )
             
             # Register callbacks
@@ -898,9 +912,9 @@ class ExchangeClient:
         """Get the appropriate cache TTL based on data type and trading mode."""
         try:
             if is_scalping:
-                ttl = self.ttl['scalping'].get(data_type, self.ttl[data_type])
+                ttl = self.cache_ttls.get(data_type, self.cache_ttls['ohlcv'])
             else:
-                ttl = self.ttl[data_type]
+                ttl = self.cache_ttls[data_type]
                 
             # Adjust TTL based on market volatility
             if data_type in ['orderbook', 'ticker']:
@@ -914,7 +928,7 @@ class ExchangeClient:
             
         except Exception as e:
             logger.error(f"Error getting cache TTL: {e}")
-            return self.ttl[data_type]  # Return default TTL on error
+            return self.cache_ttls[data_type]  # Return default TTL on error
             
     def _get_market_volatility(self) -> float:
         """Calculate current market volatility."""
@@ -1107,7 +1121,7 @@ class ExchangeClient:
         """Check for stale data and trigger alerts if necessary."""
         try:
             key = f"{symbol}_{data_type}"
-            if age > self.ttl[data_type]:
+            if age > self.cache_ttls[data_type]:
                 if key not in self._stale_data_alerts:
                     self._stale_data_alerts[key] = {
                         'count': 1,

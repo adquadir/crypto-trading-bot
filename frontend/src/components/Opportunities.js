@@ -196,6 +196,41 @@ const PatternAnalysis = ({ signal }) => {
   );
 };
 
+const DataFreshnessPanel = ({ opportunity }) => {
+  const getFreshnessColor = (age) => {
+    if (age <= 5) return 'success';
+    if (age <= 10) return 'warning';
+    return 'error';
+  };
+
+  const formatAge = (age) => {
+    if (age < 1) return `${(age * 1000).toFixed(0)}ms`;
+    return `${age.toFixed(1)}s`;
+  };
+
+  if (!opportunity.data_freshness) return null;
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+        Data Freshness
+      </Typography>
+      <Grid container spacing={1}>
+        {Object.entries(opportunity.data_freshness).map(([type, age]) => (
+          <Grid item xs={6} sm={4} key={type}>
+            <Chip
+              label={`${type}: ${formatAge(age)}`}
+              color={getFreshnessColor(age)}
+              size="small"
+              sx={{ m: 0.5 }}
+            />
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
+  );
+};
+
 const Opportunities = () => {
   const [opportunities, setOpportunities] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -514,6 +549,7 @@ const Opportunities = () => {
             <TableCell>TP</TableCell>
             <TableCell>Confidence</TableCell>
             <TableCell>RR</TableCell>
+            <TableCell>Freshness</TableCell>
             <TableCell>Details</TableCell>
           </TableRow>
         </TableHead>
@@ -577,6 +613,20 @@ const Opportunities = () => {
               <TableCell>${opp.take_profit.toFixed(6)}</TableCell>
               <TableCell>{(opp.confidence_score * 100).toFixed(1)}%</TableCell>
               <TableCell>{opp.risk_reward.toFixed(2)}</TableCell>
+              <TableCell>
+                {opp.data_freshness && (
+                  <Box display="flex" gap={0.5}>
+                    {Object.entries(opp.data_freshness).map(([type, age]) => (
+                      <Chip
+                        key={type}
+                        label={`${type[0]}:${age.toFixed(1)}s`}
+                        color={getFreshnessColor(age)}
+                        size="small"
+                      />
+                    ))}
+                  </Box>
+                )}
+              </TableCell>
               <TableCell>
                 <IconButton
                   size="small"
@@ -774,6 +824,9 @@ const Opportunities = () => {
                     </Box>
                   </Grid>
                 )}
+                <Grid item xs={12}>
+                  <DataFreshnessPanel opportunity={selectedOpportunity} />
+                </Grid>
               </Grid>
             </Box>
           </DialogContent>
