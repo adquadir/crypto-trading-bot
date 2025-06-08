@@ -29,8 +29,12 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import axios from 'axios';
 import config from '../config';
+import { useWebSocket } from '../contexts/WebSocketContext';
+import SignalChart from '../components/SignalChart';
+import DataFreshnessPanel from '../components/DataFreshnessPanel';
 
 const Signals = () => {
+  const { isConnected, lastMessage } = useWebSocket();
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -396,6 +400,23 @@ const Signals = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (lastMessage) {
+      try {
+        if (lastMessage.type === 'signal') {
+          setSignals(prevSignals => {
+            const newSignals = [...prevSignals, lastMessage.data];
+            // Keep only the last 100 signals
+            return newSignals.slice(-100);
+          });
+        }
+      } catch (err) {
+        console.error('Error processing WebSocket message:', err);
+        setError('Error processing signal data');
+      }
+    }
+  }, [lastMessage]);
+
   const handleSort = (field) => {
     if (sortBy === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -442,41 +463,6 @@ const Signals = () => {
     if (strength >= 0.6) return 'info';
     if (strength >= 0.4) return 'warning';
     return 'error';
-  };
-
-  const DataFreshnessPanel = ({ signal }) => {
-    if (!signal?.data_freshness) return null;
-    
-    const getFreshnessColor = (age, maxAge) => {
-      const ratio = age / maxAge;
-      if (ratio < 0.5) return 'success';
-      if (ratio < 0.8) return 'warning';
-      return 'error';
-    };
-    
-    return (
-      <Card>
-        <CardHeader title="Data Freshness" />
-        <CardContent>
-          <Grid container spacing={2}>
-            {Object.entries(signal.data_freshness).map(([type, age]) => (
-              <Grid item xs={6} key={type}>
-                <Box display="flex" alignItems="center">
-                  <Typography variant="body2" style={{ marginRight: 8 }}>
-                    {type}:
-                  </Typography>
-                  <Chip
-                    label={`${age.toFixed(1)}s`}
-                    color={getFreshnessColor(age, signal.max_allowed_freshness[type])}
-                    size="small"
-                  />
-                </Box>
-              </Grid>
-            ))}
-          </Grid>
-        </CardContent>
-      </Card>
-    );
   };
 
   const DebugPanel = ({ rejectionStats }) => {
@@ -646,187 +632,31 @@ const Signals = () => {
       )}
 
       <Grid container spacing={3}>
-        {filteredAndSortedSignals.length === 0 ? (
-          <Grid item xs={12}>
-            <Paper sx={{ p: 3, textAlign: 'center' }}>
-              <Typography variant="h6" color="textSecondary">
-                {signals.length === 0 ? 'No signals available' : 'No signals match your filter'}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Latest Signals
+            </Typography>
+            <DataFreshnessPanel />
+            {signals.length === 0 ? (
+              <Typography color="textSecondary">
+                No signals available
               </Typography>
-            </Paper>
-          </Grid>
-        ) : (
-          filteredAndSortedSignals.map((signal) => (
-            <Grid item xs={12} sm={6} md={4} key={`${signal.symbol}-${signal.timestamp}`}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                    <Typography variant="h6">{signal.symbol}</Typography>
-                    <Box display="flex" gap={1}>
-                      <Chip
-                        label={signal.signal_type}
-                        color={signal.signal_type === 'LONG' ? 'success' : 'error'}
-                        size="small"
-                      />
-                      <Chip
-                        label={signal.regime}
-                        color={getRegimeColor(signal.regime)}
-                        size="small"
-                      />
-                    </Box>
-                  </Box>
-
-                  <Grid container spacing={1}>
-                    <Grid item xs={6}>
-                      <Typography color="textSecondary" variant="body2">
-                        Strategy
-                      </Typography>
-                      <Typography variant="body1">
-                        {signal.strategy || 'Unknown'}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography color="textSecondary" variant="body2">
-                        Confidence
-                      </Typography>
-                      <Typography variant="body1" color={signal.confidence >= 0.7 ? 'success.main' : 'warning.main'}>
-                        {((signal.confidence || 0) * 100).toFixed(1)}%
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography color="textSecondary" variant="body2">
-                        Price
-                      </Typography>
-                      <Typography variant="body1">
-                        ${(signal.price || 0).toFixed(2)}
-                      </Typography>
-                    </Grid>
-
-                    {/* Multi-timeframe Alignment */}
-                    <Grid item xs={12}>
-                      <Divider sx={{ my: 1 }} />
-                      <Typography color="textSecondary" variant="body2" gutterBottom>
-                        Timeframe Alignment
-                      </Typography>
-                      <Box display="flex" gap={1} flexWrap="wrap">
-                        {signal.mtf_alignment?.details && Object.entries(signal.mtf_alignment.details).map(([tf, data]) => (
-                          <Chip
-                            key={tf}
-                            label={`${tf}: ${data.direction}`}
-                            color={getTimeframeColor(data.strength)}
-                            size="small"
-                          />
-                        ))}
-                      </Box>
-                    </Grid>
-
-                    {/* Market Regime Details */}
-                    <Grid item xs={12}>
-                      <Divider sx={{ my: 1 }} />
-                      <Typography color="textSecondary" variant="body2" gutterBottom>
-                        Market Regime Details
-                      </Typography>
-                      <Box display="flex" gap={1} flexWrap="wrap">
-                        {signal.regime === 'TRENDING' && (
-                          <>
-                            <Chip
-                              label={`ADX: ${signal.indicators?.adx?.value?.toFixed(1) || 'N/A'}`}
-                              color="success"
-                              size="small"
-                            />
-                            <Chip
-                              label={`Confidence: ${(signal.regime_confidence * 100).toFixed(0)}%`}
-                              color={signal.regime_confidence > 0.7 ? "success" : "warning"}
-                              size="small"
-                            />
-                          </>
-                        )}
-                        {signal.regime === 'RANGING' && (
-                          <>
-                            <Chip
-                              label={`BB Width: ${signal.indicators?.bollinger_bands?.width?.toFixed(3) || 'N/A'}`}
-                              color="info"
-                              size="small"
-                            />
-                            <Chip
-                              label={`Confidence: ${(signal.regime_confidence * 100).toFixed(0)}%`}
-                              color={signal.regime_confidence > 0.7 ? "success" : "warning"}
-                              size="small"
-                            />
-                          </>
-                        )}
-                        {signal.regime === 'VOLATILE' && (
-                          <>
-                            <Chip
-                              label={`ATR: ${signal.indicators?.atr?.toFixed(2) || 'N/A'}`}
-                              color="warning"
-                              size="small"
-                            />
-                            <Chip
-                              label={`Confidence: ${(signal.regime_confidence * 100).toFixed(0)}%`}
-                              color={signal.regime_confidence > 0.7 ? "success" : "warning"}
-                              size="small"
-                            />
-                          </>
-                        )}
-                        {signal.is_transitioning && (
-                          <Chip
-                            label="Regime Transition"
-                            color="warning"
-                            size="small"
-                          />
-                        )}
-                      </Box>
-                      {signal.regime_scores && (
-                        <Box mt={1}>
-                          <Typography variant="caption" color="textSecondary">
-                            Regime Scores: {Object.entries(signal.regime_scores)
-                              .map(([regime, score]) => `${regime}: ${(score * 100).toFixed(0)}%`)
-                              .join(' | ')}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Grid>
-
-                    {/* Signal Reasons */}
-                    {signal.reasons && signal.reasons.length > 0 && (
-                      <Grid item xs={12}>
-                        <Divider sx={{ my: 1 }} />
-                        <Typography color="textSecondary" variant="body2" gutterBottom>
-                          Signal Reasons
-                        </Typography>
-                        <Box display="flex" gap={1} flexWrap="wrap">
-                          {signal.reasons.map((reason, index) => (
-                            <Chip
-                              key={index}
-                              label={reason}
-                              size="small"
-                              variant="outlined"
-                            />
-                          ))}
-                        </Box>
-                      </Grid>
-                    )}
-
-                    {/* Time */}
-                    <Grid item xs={12}>
-                      <Typography color="textSecondary" variant="body2" align="right">
-                        {new Date(signal.timestamp).toLocaleTimeString()}
-                      </Typography>
-                    </Grid>
+            ) : (
+              <Grid container spacing={2}>
+                {signals.map((signal, index) => (
+                  <Grid item xs={12} md={6} key={index}>
+                    <Card>
+                      <CardContent>
+                        <SignalChart signal={signal} />
+                      </CardContent>
+                    </Card>
                   </Grid>
-
-                  <Grid item xs={12}>
-                    <DataFreshnessPanel signal={signal} />
-                  </Grid>
-
-                  <Grid item xs={12}>
-                    <DebugPanel rejectionStats={signal.rejection_stats} />
-                  </Grid>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))
-        )}
+                ))}
+              </Grid>
+            )}
+          </Paper>
+        </Grid>
       </Grid>
     </Box>
   );
