@@ -205,20 +205,15 @@ class SymbolDiscovery:
             # Check cache first
             cache_key = f"market_data_{symbol}"
             cached_data = self.cache.get(cache_key)
-            
+            required_fields = ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']
             # If we have cached data, check if it has the new structure and is not expired
             if cached_data:
-                required_fields = ['klines', 'ticker_24h', 'orderbook', 'funding_rate', 'open_interest']
-                is_valid = all(field in cached_data for field in required_fields)
+                is_valid = all(field in cached_data and cached_data[field] not in (None, [], {}) for field in required_fields)
                 is_fresh = (time.time() - cached_data.get('timestamp', 0)) < self.cache_ttl
-                
                 if is_valid and is_fresh:
                     logger.debug(f"Using cached market data for {symbol}")
                     return cached_data
                 else:
-                    # Specifically check for old 'ticker' key in outdated cache
-                    if 'ticker' in cached_data and 'ticker_24h' not in cached_data:
-                        logger.error(f"Outdated cache format detected for {symbol}: 'ticker' found, but 'ticker_24h' missing. Clearing cache.")
                     logger.debug(f"Clearing outdated/invalid cache for {symbol}. Valid: {is_valid}, Fresh: {is_fresh}")
                     if cache_key in self.cache:
                         del self.cache[cache_key]
@@ -232,20 +227,19 @@ class SymbolDiscovery:
             open_interest = await self.exchange_client.get_open_interest(symbol)
 
             # Validate fetched data components
+            missing = []
             if klines is None or not klines:
-                logger.warning(f"Missing or empty klines for {symbol}")
-                return None
+                missing.append('klines')
             if funding_rate is None:
-                logger.warning(f"Missing funding rate for {symbol}")
-                return None
+                missing.append('funding_rate')
             if ticker is None:
-                logger.warning(f"Missing 24h ticker for {symbol}")
-                return None
+                missing.append('ticker_24h')
             if orderbook is None or not orderbook.get('bids') or not orderbook.get('asks'):
-                logger.warning(f"Missing or incomplete orderbook for {symbol}")
-                return None
+                missing.append('orderbook')
             if open_interest is None:
-                logger.warning(f"Missing open interest for {symbol}")
+                missing.append('open_interest')
+            if missing:
+                logger.warning(f"Missing or incomplete market data for {symbol}: {missing}. Not caching.")
                 return None
 
             # Structure the data
@@ -259,11 +253,14 @@ class SymbolDiscovery:
                 'timestamp': time.time()  # Add timestamp for cache expiration
             }
 
-            # Cache the data
-            self.cache[cache_key] = market_data
-            logger.debug(f"Cached fresh market data for {symbol}")
-
-            return market_data
+            # Only cache if all required fields are present and valid
+            if all(field in market_data and market_data[field] not in (None, [], {}) for field in required_fields):
+                self.cache[cache_key] = market_data
+                logger.debug(f"Cached fresh market data for {symbol}")
+                return market_data
+            else:
+                logger.warning(f"Fetched market data for {symbol} is incomplete, not caching. Missing: {[field for field in required_fields if market_data.get(field) in (None, [], {})]}")
+                return None
 
         except Exception as e:
             logger.error(f"Error fetching market data for {symbol}: {str(e)}")
