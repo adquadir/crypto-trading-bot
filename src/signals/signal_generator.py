@@ -78,29 +78,38 @@ class SignalGenerator:
             # Get current price
             current_price = float(df['close'].iloc[-1])
             
-            # Handle potential NaN values from ta calculations
-            macd_value = float(macd.macd().iloc[-1]) if not pd.isna(macd.macd().iloc[-1]) else 0.0
-            macd_signal = float(macd.macd_signal().iloc[-1]) if not pd.isna(macd.macd_signal().iloc[-1]) else 0.0
-            macd_histogram = float(macd.macd_diff().iloc[-1]) if not pd.isna(macd.macd_diff().iloc[-1]) else 0.0
-            rsi_value = float(rsi.rsi().iloc[-1]) if not pd.isna(rsi.rsi().iloc[-1]) else 50.0 # RSI default to 50
+            # Handle potential NaN/inf values from ta calculations
+            def safe_float(val, default=0.0):
+                try:
+                    f = float(val)
+                    if not np.isfinite(f):
+                        return default
+                    return f
+                except Exception:
+                    return default
+
+            macd_value = safe_float(macd.macd().iloc[-1])
+            macd_signal = safe_float(macd.macd_signal().iloc[-1])
+            macd_histogram = safe_float(macd.macd_diff().iloc[-1])
+            rsi_value = safe_float(rsi.rsi().iloc[-1], 50.0) # RSI default to 50
             
-            bb_upper = float(bb.bollinger_hband().iloc[-1]) if not pd.isna(bb.bollinger_hband().iloc[-1]) else current_price
-            bb_middle = float(bb.bollinger_mavg().iloc[-1]) if not pd.isna(bb.bollinger_mavg().iloc[-1]) else current_price
-            bb_lower = float(bb.bollinger_lband().iloc[-1]) if not pd.isna(bb.bollinger_lband().iloc[-1]) else current_price
+            bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
+            bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
+            bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
             
             # Handle ADX calculations with zero division protection
             try:
-                adx_value = float(adx.adx().iloc[-1]) if not pd.isna(adx.adx().iloc[-1]) else 0.0
-                adx_di_plus = float(adx.adx_pos().iloc[-1]) if not pd.isna(adx.adx_pos().iloc[-1]) else 0.0
-                adx_di_minus = float(adx.adx_neg().iloc[-1]) if not pd.isna(adx.adx_neg().iloc[-1]) else 0.0
+                adx_value = safe_float(adx.adx().iloc[-1])
+                adx_di_plus = safe_float(adx.adx_pos().iloc[-1])
+                adx_di_minus = safe_float(adx.adx_neg().iloc[-1])
             except (ZeroDivisionError, ValueError) as e:
                 logger.warning(f"ADX calculation error for {symbol}: {e}. Using default values.")
                 adx_value = 0.0
                 adx_di_plus = 0.0
                 adx_di_minus = 0.0
             
-            atr_value = float(atr.average_true_range().iloc[-1]) if not pd.isna(atr.average_true_range().iloc[-1]) else 0.0
-            cci_value = float(cci.cci().iloc[-1]) if not pd.isna(cci.cci().iloc[-1]) else 0.0
+            atr_value = safe_float(atr.average_true_range().iloc[-1])
+            cci_value = safe_float(cci.cci().iloc[-1])
 
             return {
                 'macd': {
