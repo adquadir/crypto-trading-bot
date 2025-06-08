@@ -317,6 +317,12 @@ class SymbolDiscovery:
             # Volume factor (15%)
             volume_threshold = self.min_volume_24h if self.min_volume_24h > 0 else 1.0
             volume_score = min(opportunity.volume_24h / volume_threshold, 2.0)
+            
+            # Check for recent volume spike (3-bar volume surge)
+            recent_volume_surge = self._check_volume_surge(opportunity.symbol)
+            if recent_volume_surge:
+                volume_score *= 1.2  # Boost score if volume is surging
+                
             logger.debug(f"Volume score for {opportunity.symbol}: {volume_score:.2f} (volume: {opportunity.volume_24h:.2f}, threshold: {volume_threshold:.2f})")
             score += volume_score * 0.15
             
@@ -325,20 +331,28 @@ class SymbolDiscovery:
             logger.debug(f"Risk-reward score for {opportunity.symbol}: {rr_score:.2f} (RR: {opportunity.risk_reward:.2f}, min: {self.min_risk_reward:.2f})")
             score += rr_score * 0.15
             
-            # Volatility factor (10%)
-            vol_score = 1.0 - abs(opportunity.volatility - 0.03) / 0.03  # Target 3% volatility
+            # Volatility factor (15% - increased from 10%)
+            vol_score = 1.0 - abs(opportunity.volatility - 0.015) / 0.015  # Target 1.5% volatility for scalping
             logger.debug(f"Volatility score for {opportunity.symbol}: {vol_score:.2f} (vol: {opportunity.volatility:.4f})")
-            score += vol_score * 0.1
+            score += vol_score * 0.15
             
             # Leverage factor (5%)
             lev_score = 1.0 - (opportunity.leverage / self.max_leverage)
             logger.debug(f"Leverage score for {opportunity.symbol}: {lev_score:.2f} (lev: {opportunity.leverage:.2f}, max: {self.max_leverage:.2f})")
             score += lev_score * 0.05
             
-            # Technical indicators (25%)
+            # Technical indicators (20% - reduced from 25%)
             tech_score = self._calculate_technical_score(opportunity.indicators)
             logger.debug(f"Technical score for {opportunity.symbol}: {tech_score:.2f}")
-            score += tech_score * 0.25
+            score += tech_score * 0.20
+            
+            # Apply risk/reward confidence scaling
+            if opportunity.risk_reward > 1.5:
+                score *= 1.1
+                logger.debug(f"Boosting score for {opportunity.symbol} due to good risk/reward ratio")
+            elif opportunity.risk_reward < 1.0:
+                score *= 0.9
+                logger.debug(f"Reducing score for {opportunity.symbol} due to poor risk/reward ratio")
             
             final_score = min(score, 1.0)
             logger.debug(f"Final opportunity score for {opportunity.symbol}: {final_score:.2f}")
@@ -1299,4 +1313,30 @@ class SymbolDiscovery:
             return 0.0
         except Exception as e:
             logger.error(f"Error in get_current_volatility: {e}")
-            return 0.0 
+            return 0.0
+
+    def _check_volume_surge(self, symbol: str) -> bool:
+        """Check if there's a recent volume surge (3-bar volume increase)."""
+        try:
+            if symbol not in self.cache:
+                return False
+                
+            market_data = self.cache[symbol]
+            if 'klines' not in market_data:
+                return False
+                
+            klines = market_data['klines']
+            if len(klines) < 3:
+                return False
+                
+            # Get last 3 volumes
+            volumes = [float(k['volume']) for k in klines[-3:]]
+            if len(volumes) < 3:
+                return False
+                
+            # Check if each bar has higher volume than the previous
+            return volumes[2] > volumes[1] > volumes[0]
+            
+        except Exception as e:
+            logger.error(f"Error checking volume surge for {symbol}: {e}")
+            return False 

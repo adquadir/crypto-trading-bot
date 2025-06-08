@@ -203,18 +203,23 @@ class SignalGenerator:
                 signal_strength -= 1.0
                 reasons.append("Price above upper Bollinger Band (bearish)")
 
+            # Dynamic ADX influence for scalping
             adx = indicators['adx']
-            if adx['value'] > 25:
+            adx_value = adx.get('value', 0)
+            if adx_value > 15:
                 signal_strength *= 1.2
-                reasons.append("Strong trend (ADX > 25)")
+                reasons.append("Strong trend (ADX > 15)")
+            elif adx_value < 10:
+                signal_strength *= 0.8
+                reasons.append("Weak trend (ADX < 10)")
 
-            # Lower confidence normalization
+            # Lower confidence normalization for scalping
             confidence = min(abs(signal_strength) / 2.5, 1.0)
             
-            # Determine signal direction based on strength
-            if signal_strength >= 1.0:
+            # More sensitive direction thresholds for scalping
+            if signal_strength >= 0.75:
                 direction = 'LONG'
-            elif signal_strength <= -1.0:
+            elif signal_strength <= -0.75:
                 direction = 'SHORT'
             else:
                 direction = 'NEUTRAL'
