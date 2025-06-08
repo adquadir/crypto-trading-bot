@@ -176,7 +176,10 @@ class TradingBot:
             await self.exchange_client.initialize(symbols)
             
             # Initialize WebSocket manager
-            self.ws_manager = MarketDataWebSocket()
+            self.ws_manager = MarketDataWebSocket(
+                exchange_client=self.exchange_client,
+                symbols=symbols
+            )
             await self.ws_manager.initialize(symbols)
             
             # Start background tasks
