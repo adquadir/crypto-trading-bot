@@ -450,4 +450,47 @@ class DynamicStrategyConfig:
 
     def get_profiles(self):
         """Return a list of available strategy profile names."""
-        return list(self.profiles.keys()) 
+        return list(self.profiles.keys())
+
+    def switch_profile(self, profile_name: str) -> None:
+        """Switch to a different strategy profile.
+        
+        Args:
+            profile_name: Name of the profile to switch to
+        """
+        if profile_name not in self.profiles:
+            raise ValueError(f"Profile '{profile_name}' not found")
+        
+        self.current_profile = self.profiles[profile_name]
+        logger.info(f"Switched to {profile_name} strategy profile")
+        
+        # Update strategy parameters based on the new profile
+        self._update_strategy_parameters()
+    
+    def _update_strategy_parameters(self) -> None:
+        """Update strategy parameters based on current profile."""
+        if not self.current_profile:
+            return
+            
+        # Update risk parameters
+        self.risk_level = self.current_profile['risk_level']
+        self.max_position_size = self.current_profile['max_position_size']
+        self.max_leverage = self.current_profile['max_leverage']
+        self.stop_loss_pct = self.current_profile['stop_loss_pct']
+        self.take_profit_pct = self.current_profile['take_profit_pct']
+        self.max_drawdown = self.current_profile['max_drawdown']
+        
+        # Update market data parameters
+        self.min_volume = self.current_profile['min_volume']
+        self.min_market_cap = self.current_profile['min_market_cap']
+        self.max_spread = self.current_profile['max_spread']
+        self.min_liquidity = self.current_profile['min_liquidity']
+        self.max_slippage = self.current_profile['max_slippage']
+        
+        # Update indicator parameters
+        self.indicators = self.current_profile['indicators']
+        
+        # Update timeframes
+        self.timeframes = self.current_profile['timeframes']
+        
+        logger.info(f"Updated strategy parameters for {self.risk_level} risk level") 

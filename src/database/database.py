@@ -1,10 +1,12 @@
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, text, MetaData
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 import os
 from dotenv import load_dotenv
 from .models import Base, Strategy # Import Base and Strategy
 import logging
+from contextlib import contextmanager
+from typing import Generator, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -14,19 +16,73 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Get database URL from environment variable or use default SQLite
-SQLALCHEMY_DATABASE_URL = os.getenv(
+DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "sqlite:///./trading_bot.db"
 )
 
 # Create SQLAlchemy engine
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
-)
+engine = create_engine(DATABASE_URL)
 
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create Base and MetaData
+Base = declarative_base()
+metadata = MetaData()
+
+class Database:
+    """Database management class for the trading bot."""
+    
+    def __init__(self):
+        self.engine = engine
+        self.SessionLocal = SessionLocal
+        self.Base = Base
+        self.metadata = metadata
+    
+    async def init_db(self) -> None:
+        """Initialize the database and create tables."""
+        try:
+            # Create tables
+            self.Base.metadata.create_all(bind=self.engine)
+            logger.info("Database initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing database: {str(e)}")
+            raise
+    
+    @contextmanager
+    def get_db(self) -> Generator[Session, None, None]:
+        """Get a database session.
+        
+        Yields:
+            Session: Database session
+        """
+        db = self.SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+    
+    async def check_connection(self) -> bool:
+        """Check database connection.
+        
+        Returns:
+            bool: True if connection is successful, False otherwise
+        """
+        try:
+            with self.get_db() as db:
+                db.execute("SELECT 1")
+            return True
+        except Exception as e:
+            logger.error(f"Database connection error: {str(e)}")
+            return False
+
+# Initialize database
+db = Database()
+
+async def init_db() -> None:
+    """Initialize the database."""
+    await db.init_db()
 
 def update_db_schema():
     """Update database schema to match models while preserving data."""
@@ -151,4 +207,6 @@ def get_db():
     try:
         yield db
     finally:
-        db.close() 
+        db.close()
+
+__all__ = ['Database', 'SessionLocal', 'init_db', 'db'] 
