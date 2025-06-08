@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
 from src.signals.signal_generator import SignalGenerator
 from src.utils.config import load_config
-from src.market_data.websocket import MarketDataWebSocket
+from src.market_data.websocket_client import MarketDataWebSocket
 
 logger = logging.getLogger(__name__)
 
