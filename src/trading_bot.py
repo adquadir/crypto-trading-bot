@@ -180,7 +180,7 @@ class TradingBot:
                 exchange_client=self.exchange_client,
                 symbols=symbols
             )
-            await self.ws_manager.initialize(symbols)
+            await self.ws_manager.start()
             
             # Start background tasks
             self.tasks = [
@@ -417,9 +417,9 @@ class TradingBot:
         if hasattr(self, 'exchange_client'):
             await self.exchange_client.close()
 
-        # Close WebSocket manager
+        # Stop the WebSocket manager
         if hasattr(self, 'ws_manager'):
-            await self.ws_manager.close()
+            await self.ws_manager.stop()
 
         logger.info("Trading bot stopped")
         

@@ -1283,3 +1283,7 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error getting market data for {symbol}: {str(e)}")
             return {}
+
+    async def get_all_symbols(self):
+        # Replace this with actual logic to fetch symbols from the exchange
+        return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
