@@ -856,21 +856,16 @@ class ExchangeClient:
                 self.logger.error(f"Error updating funding rates: {str(e)}")
                 await asyncio.sleep(5)
 
-    async def _update_volatility(self):
-        """Background task to update volatility metrics."""
+    async def _update_volatility_metrics(self) -> None:
+        """Update volatility metrics for all symbols."""
         while True:
             try:
                 for symbol in self.symbols:
-                    volatility = await self.calculate_volatility(symbol)
-                    if volatility:
-                        self.cache[symbol]['volatility'] = {
-                            'value': volatility,
-                            'timestamp': time.time()
-                        }
-                await asyncio.sleep(self.cache_ttls['volatility'])
+                    await self._update_volatility(symbol)
+                await asyncio.sleep(60)  # Update every minute
             except Exception as e:
-                self.logger.error(f"Error updating volatility: {str(e)}")
-                await asyncio.sleep(5)
+                logger.error(f"Error updating volatility metrics: {e}")
+                await asyncio.sleep(5)  # Wait before retrying
 
     async def close(self):
         """Clean up resources."""
