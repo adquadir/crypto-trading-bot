@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import numpy as np
 from functools import lru_cache
 import warnings
+from src.strategy.dynamic_config import strategy_config
 
 # Load environment variables
 load_dotenv()
@@ -108,10 +109,33 @@ OPPORTUNITIES_LOCK = asyncio.Lock()  # Add lock for concurrent access
 
 @app.on_event("startup")
 async def startup_event():
-    await exchange_client.initialize()
-    # Start symbol discovery scan on startup
-    asyncio.create_task(symbol_discovery.scan_opportunities())
-    logger.info("API server started")
+    """Initialize components on startup."""
+    try:
+        # Initialize database
+        await init_db()
+        
+        # Initialize strategy profiles
+        strategy_config.load_strategy_profiles()
+        strategy_config.switch_profile('moderate')
+        
+        # Initialize symbol discovery
+        symbol_discovery = SymbolDiscovery()
+        await symbol_discovery.initialize()
+        
+        # Get initial symbols from symbol discovery
+        symbols = await symbol_discovery.get_symbols()
+        logger.info(f"Initialized with {len(symbols)} symbols")
+        
+        # Initialize exchange client with symbols
+        await exchange_client.initialize(symbols)
+        
+        # Initialize WebSocket manager
+        await ws_manager.initialize()
+        
+        logger.info("Application startup completed successfully")
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():

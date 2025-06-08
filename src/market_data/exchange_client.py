@@ -743,31 +743,61 @@ class ExchangeClient:
                 logger.error(f"Health check failed: {e}")
             await asyncio.sleep(self.health_check_interval)
 
-    async def initialize(self):
-        """Initialize the exchange client and verify API keys."""
-        try:
-            logger.info("Initializing exchange client...")
-            
-            # Test API key validity
+    async def initialize(self, symbols):
+        """Initialize the exchange client with a set of symbols."""
+        self.symbols = set(symbols)
+        self.logger.info(f"Initialized ExchangeClient with {len(self.symbols)} symbols")
+        
+        # Initialize cache for each symbol
+        for symbol in self.symbols:
+            self.cache[symbol] = {
+                'ohlcv': {},
+                'orderbook': {},
+                'ticker': {},
+                'trades': {},
+                'open_interest': {},
+                'funding_rate': {},
+                'volatility': {}
+            }
+        
+        # Start background tasks
+        asyncio.create_task(self._update_funding_rates())
+        asyncio.create_task(self._update_volatility())
+        
+        return True
+
+    async def _update_funding_rates(self):
+        """Background task to update funding rates."""
+        while True:
             try:
-                account_info = self.client.get_account()
-                if 'balances' not in account_info:
-                    raise ValueError("Invalid API response - check key permissions")
-                logger.info("API keys validated successfully")
-                logger.debug(f"Account permissions: {account_info.get('permissions', 'N/A')}")
-            except BinanceAPIException as e:
-                logger.error(f"API Key Error: {e.status_code} - {e.message}")
-                if e.status_code == 401:
-                    logger.error("Invalid API keys - please check your .env file")
-                raise
-            
-            self.session = aiohttp.ClientSession()
-            self.health_check_task = asyncio.create_task(self._health_check_loop())
-            logger.info("Exchange client initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize exchange client: {str(e)}")
-            raise
-            
+                for symbol in self.symbols:
+                    funding_rate = await self.get_funding_rate(symbol)
+                    if funding_rate:
+                        self.cache[symbol]['funding_rate'] = {
+                            'value': funding_rate,
+                            'timestamp': time.time()
+                        }
+                await asyncio.sleep(self.cache_ttls['funding_rate'])
+            except Exception as e:
+                self.logger.error(f"Error updating funding rates: {str(e)}")
+                await asyncio.sleep(5)
+
+    async def _update_volatility(self):
+        """Background task to update volatility metrics."""
+        while True:
+            try:
+                for symbol in self.symbols:
+                    volatility = await self.calculate_volatility(symbol)
+                    if volatility:
+                        self.cache[symbol]['volatility'] = {
+                            'value': volatility,
+                            'timestamp': time.time()
+                        }
+                await asyncio.sleep(self.cache_ttls['volatility'])
+            except Exception as e:
+                self.logger.error(f"Error updating volatility: {str(e)}")
+                await asyncio.sleep(5)
+
     async def close(self):
         """Clean up resources."""
         self._shutdown_event.set()
@@ -882,7 +912,7 @@ class ExchangeClient:
         """Handle WebSocket kline updates."""
         try:
             cache_key = f"{symbol}_ohlcv"
-            self.cache[cache_key] = data
+            self.cache[symbol]['ohlcv'] = data
             self.cache_timestamps[cache_key] = time.time()
             logger.debug(f"Updated OHLCV cache for {symbol}")
         except Exception as e:
@@ -892,7 +922,7 @@ class ExchangeClient:
         """Handle WebSocket trade updates."""
         try:
             cache_key = f"{symbol}_ticker"
-            self.cache[cache_key] = data
+            self.cache[symbol]['ticker'] = data
             self.cache_timestamps[cache_key] = time.time()
             logger.debug(f"Updated ticker cache for {symbol}")
         except Exception as e:
@@ -902,7 +932,7 @@ class ExchangeClient:
         """Handle WebSocket order book updates."""
         try:
             cache_key = f"{symbol}_orderbook"
-            self.cache[cache_key] = data
+            self.cache[symbol]['orderbook'] = data
             self.cache_timestamps[cache_key] = time.time()
             logger.debug(f"Updated orderbook cache for {symbol}")
         except Exception as e:
@@ -950,7 +980,7 @@ class ExchangeClient:
                     volatilities.append(self._volatility_cache[symbol])
                 else:
                     # Calculate volatility from recent price data
-                    klines = self.cache.get(f"{symbol}_ohlcv")
+                    klines = self.cache[symbol]['ohlcv']
                     if klines and len(klines) >= 20:
                         closes = [float(k['close']) for k in klines[-20:]]
                         returns = np.diff(closes) / closes[:-1]
@@ -1050,7 +1080,7 @@ class ExchangeClient:
             # Implement REST API call here
             data = await self._fetch_ohlcv_rest(symbol, timeframe)
             if data:
-                self.cache[cache_key] = data
+                self.cache[symbol]['ohlcv'] = data
                 self.cache_timestamps[cache_key] = time.time()
             return data
         except Exception as e:
@@ -1072,7 +1102,7 @@ class ExchangeClient:
             # Implement REST API call here
             data = await self._fetch_ticker_rest(symbol)
             if data:
-                self.cache[cache_key] = data
+                self.cache[symbol]['ticker'] = data
                 self.cache_timestamps[cache_key] = time.time()
             return data
         except Exception as e:
@@ -1094,7 +1124,7 @@ class ExchangeClient:
             # Implement REST API call here
             data = await self._fetch_orderbook_rest(symbol)
             if data:
-                self.cache[cache_key] = data
+                self.cache[symbol]['orderbook'] = data
                 self.cache_timestamps[cache_key] = time.time()
             return data
         except Exception as e:
@@ -1164,7 +1194,7 @@ class ExchangeClient:
             self._check_stale_data(symbol, data_type, age)
             
             # Check data quality
-            data = self.cache[cache_key]
+            data = self.cache[symbol][data_type]
             if not self._validate_data_quality(data, data_type):
                 logger.warning(f"Poor data quality for {cache_key}")
                 return False
