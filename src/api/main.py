@@ -14,13 +14,15 @@ from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
 from src.signals.signal_generator import SignalGenerator
 from src.config import EXCHANGE_CONFIG
 from src.database.models import Trade, TradingSignal, Strategy, PerformanceMetrics
-from src.database.database import SessionLocal
+from src.database.database import SessionLocal, Database, init_db
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 import numpy as np
 from functools import lru_cache
 import warnings
-from src.strategy.dynamic_config import strategy_config
+from src.strategy.dynamic_config import strategy_config, DynamicStrategyConfig
+from src.market_data.websocket_client import MarketDataWebSocket
+from src.risk.risk_manager import RiskManager
 
 # Load environment variables
 load_dotenv()
@@ -107,6 +109,12 @@ OPPORTUNITIES_CACHE = {}
 OPPORTUNITIES_CACHE_DURATION = 60  # Cache for 60 seconds
 OPPORTUNITIES_LOCK = asyncio.Lock()  # Add lock for concurrent access
 
+# Global instances
+db = Database()
+ws_manager = MarketDataWebSocket()
+strategy_config = DynamicStrategyConfig()
+risk_manager = RiskManager()
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup."""
@@ -119,22 +127,18 @@ async def startup_event():
         strategy_config.switch_profile('moderate')
         
         # Initialize symbol discovery
-        symbol_discovery = SymbolDiscovery()
         await symbol_discovery.initialize()
-        
-        # Get initial symbols from symbol discovery
         symbols = await symbol_discovery.get_symbols()
-        logger.info(f"Initialized with {len(symbols)} symbols")
         
         # Initialize exchange client with symbols
         await exchange_client.initialize(symbols)
         
         # Initialize WebSocket manager
-        await ws_manager.initialize()
+        await ws_manager.initialize(symbols)
         
-        logger.info("Application startup completed successfully")
+        logger.info("API startup complete")
     except Exception as e:
-        logger.error(f"Error during startup: {str(e)}")
+        logger.error(f"Error during API startup: {str(e)}")
         raise
 
 @app.on_event("shutdown")

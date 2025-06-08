@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -142,120 +143,98 @@ strategy_config = StrategyConfig()
 __all__ = ['strategy_config']
 
 class DynamicStrategyConfig:
-    def __init__(self, config_path: str = "config/strategy_profiles.json"):
-        self.config_path = Path(config_path)
-        self.config_path.parent.mkdir(exist_ok=True)
-        self.profiles: Dict[str, StrategyProfile] = {}
-        self.current_profile: Optional[StrategyProfile] = None
-        self.performance_history = []
-        self.volatility_history = {}
-        self._load_profiles()
-        
-    def _load_profiles(self):
+    def __init__(self):
+        self.profiles = {}
+        self.current_profile = None
+        self.profile_file = "strategy_profiles.json"
+        self.load_strategy_profiles()  # Load profiles on initialization
+
+    def load_strategy_profiles(self):
         """Load strategy profiles from JSON file."""
-        if self.config_path.exists():
-            try:
-                with open(self.config_path, 'r') as f:
-                    data = json.load(f)
-                    for profile_data in data['profiles']:
-                        profile = StrategyProfile(**profile_data)
-                        self.profiles[profile.name] = profile
+        try:
+            if os.path.exists(self.profile_file):
+                with open(self.profile_file, 'r') as f:
+                    self.profiles = json.load(f)
                 logger.info(f"Loaded {len(self.profiles)} strategy profiles")
-            except Exception as e:
-                logger.error(f"Error loading strategy profiles: {e}")
-                self._create_default_profiles()
-        else:
-            self._create_default_profiles()
-            
-    def _create_default_profiles(self):
-        """Create default strategy profiles if none exist."""
-        default_profiles = {
-            "conservative": StrategyProfile(
-                name="conservative",
-                description="Low risk, stable returns",
-                macd_fast_period=12,
-                macd_slow_period=26,
-                macd_signal_period=9,
-                rsi_overbought=70,
-                rsi_oversold=30,
-                bb_std_dev=2.0,
-                max_position_size=0.1,
-                max_leverage=2.0,
-                risk_per_trade=0.01,
-                max_daily_loss=0.02,
-                max_drawdown=0.05,
-                volatility_factor=0.8,
-                confidence_threshold=0.8
-            ),
-            "moderate": StrategyProfile(
-                name="moderate",
-                description="Balanced risk and returns",
-                macd_fast_period=10,
-                macd_slow_period=21,
-                macd_signal_period=7,
-                rsi_overbought=75,
-                rsi_oversold=25,
-                bb_std_dev=2.2,
-                max_position_size=0.15,
-                max_leverage=3.0,
-                risk_per_trade=0.015,
-                max_daily_loss=0.03,
-                max_drawdown=0.08,
-                volatility_factor=1.0,
-                confidence_threshold=0.7
-            ),
-            "aggressive": StrategyProfile(
-                name="aggressive",
-                description="Higher risk, higher potential returns",
-                macd_fast_period=8,
-                macd_slow_period=17,
-                macd_signal_period=5,
-                rsi_overbought=80,
-                rsi_oversold=20,
-                bb_std_dev=2.5,
-                max_position_size=0.2,
-                max_leverage=5.0,
-                risk_per_trade=0.02,
-                max_daily_loss=0.04,
-                max_drawdown=0.12,
-                volatility_factor=1.2,
-                confidence_threshold=0.6
-            )
-        }
-        self.profiles = default_profiles
-        self._save_profiles()
-        
-    def _save_profiles(self):
+            else:
+                # Create default profiles if file doesn't exist
+                self.profiles = {
+                    'conservative': {
+                        'risk_level': 'low',
+                        'max_position_size': 0.1,
+                        'max_leverage': 2,
+                        'stop_loss_pct': 0.02,
+                        'take_profit_pct': 0.04,
+                        'max_drawdown': 0.05,
+                        'min_volume': 1000000,
+                        'min_market_cap': 100000000,
+                        'max_spread': 0.002,
+                        'min_liquidity': 100000,
+                        'max_slippage': 0.001,
+                        'timeframes': ['1m', '5m', '15m'],
+                        'indicators': {
+                            'rsi': {'period': 14, 'overbought': 70, 'oversold': 30},
+                            'macd': {'fast': 12, 'slow': 26, 'signal': 9},
+                            'bollinger': {'period': 20, 'std_dev': 2},
+                            'atr': {'period': 14}
+                        }
+                    },
+                    'moderate': {
+                        'risk_level': 'medium',
+                        'max_position_size': 0.2,
+                        'max_leverage': 3,
+                        'stop_loss_pct': 0.03,
+                        'take_profit_pct': 0.06,
+                        'max_drawdown': 0.1,
+                        'min_volume': 500000,
+                        'min_market_cap': 50000000,
+                        'max_spread': 0.003,
+                        'min_liquidity': 50000,
+                        'max_slippage': 0.002,
+                        'timeframes': ['1m', '5m', '15m', '1h'],
+                        'indicators': {
+                            'rsi': {'period': 14, 'overbought': 75, 'oversold': 25},
+                            'macd': {'fast': 12, 'slow': 26, 'signal': 9},
+                            'bollinger': {'period': 20, 'std_dev': 2.5},
+                            'atr': {'period': 14}
+                        }
+                    },
+                    'aggressive': {
+                        'risk_level': 'high',
+                        'max_position_size': 0.3,
+                        'max_leverage': 5,
+                        'stop_loss_pct': 0.04,
+                        'take_profit_pct': 0.08,
+                        'max_drawdown': 0.15,
+                        'min_volume': 250000,
+                        'min_market_cap': 25000000,
+                        'max_spread': 0.004,
+                        'min_liquidity': 25000,
+                        'max_slippage': 0.003,
+                        'timeframes': ['1m', '5m', '15m', '1h', '4h'],
+                        'indicators': {
+                            'rsi': {'period': 14, 'overbought': 80, 'oversold': 20},
+                            'macd': {'fast': 12, 'slow': 26, 'signal': 9},
+                            'bollinger': {'period': 20, 'std_dev': 3},
+                            'atr': {'period': 14}
+                        }
+                    }
+                }
+                self.save_strategy_profiles()
+                logger.info("Created default strategy profiles")
+        except Exception as e:
+            logger.error(f"Error loading strategy profiles: {str(e)}")
+            raise
+
+    def save_strategy_profiles(self):
         """Save strategy profiles to JSON file."""
         try:
-            data = {
-                'profiles': [
-                    {
-                        'name': profile.name,
-                        'description': profile.description,
-                        'macd_fast_period': profile.macd_fast_period,
-                        'macd_slow_period': profile.macd_slow_period,
-                        'macd_signal_period': profile.macd_signal_period,
-                        'rsi_overbought': profile.rsi_overbought,
-                        'rsi_oversold': profile.rsi_oversold,
-                        'bb_std_dev': profile.bb_std_dev,
-                        'max_position_size': profile.max_position_size,
-                        'max_leverage': profile.max_leverage,
-                        'risk_per_trade': profile.risk_per_trade,
-                        'max_daily_loss': profile.max_daily_loss,
-                        'max_drawdown': profile.max_drawdown,
-                        'volatility_factor': profile.volatility_factor,
-                        'confidence_threshold': profile.confidence_threshold
-                    }
-                    for profile in self.profiles.values()
-                ]
-            }
-            with open(self.config_path, 'w') as f:
-                json.dump(data, f, indent=4)
+            with open(self.profile_file, 'w') as f:
+                json.dump(self.profiles, f, indent=4)
             logger.info("Strategy profiles saved successfully")
         except Exception as e:
             logger.error(f"Error saving strategy profiles: {e}")
-            
+
     def set_profile(self, profile_name: str):
         """Set the current strategy profile."""
         if profile_name in self.profiles:
@@ -271,7 +250,7 @@ class DynamicStrategyConfig:
             for key, value in kwargs.items():
                 if hasattr(profile, key):
                     setattr(profile, key, value)
-            self._save_profiles()
+            self.save_strategy_profiles()
             logger.info(f"Updated {profile_name} profile parameters")
         else:
             logger.error(f"Profile {profile_name} not found")
