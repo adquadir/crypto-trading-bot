@@ -38,7 +38,8 @@ class TradingBot:
         self.exchange_client = ExchangeClient(
             api_key=os.getenv('BINANCE_API_KEY'),
             api_secret=os.getenv('BINANCE_API_SECRET'),
-            testnet=os.getenv('USE_TESTNET', 'False').lower() == 'true' # Use USE_TESTNET from .env
+            testnet=os.getenv('USE_TESTNET', 'False').lower() == 'true', # Use USE_TESTNET from .env
+            scalping_mode=True
         )
         self.market_processor = MarketDataProcessor()
         self.signal_engine = SignalEngine()
@@ -164,7 +165,6 @@ class TradingBot:
             self.strategy_config.switch_profile('moderate')  # Default to moderate profile
             
             # Initialize exchange client first
-            self.exchange_client = ExchangeClient(scalping_mode=True)  # Enable scalping mode
             await self.exchange_client.initialize([])  # Initialize with empty symbols list first
             
             # Initialize symbol discovery with exchange client and scalping mode

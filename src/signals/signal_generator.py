@@ -91,9 +91,9 @@ class SignalGenerator:
                     window_fast=params.get('macd_fast_period', 12),
                     window_sign=params.get('macd_signal_period', 9)
                 )
-                macd_value = safe_float(macd.macd().iloc[-1])
-                macd_signal = safe_float(macd.macd_signal().iloc[-1])
-                macd_histogram = safe_float(macd.macd_diff().iloc[-1])
+            macd_value = safe_float(macd.macd().iloc[-1])
+            macd_signal = safe_float(macd.macd_signal().iloc[-1])
+            macd_histogram = safe_float(macd.macd_diff().iloc[-1])
                 logger.debug(f"MACD values - value: {macd_value}, signal: {macd_signal}, histogram: {macd_histogram}")
             except Exception as e:
                 logger.error(f"Error calculating MACD: {e}")
@@ -118,9 +118,9 @@ class SignalGenerator:
                     window=20,
                     window_dev=params.get('bb_std_dev', 2)
                 )
-                bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
-                bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
-                bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
+            bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
+            bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
+            bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
                 logger.debug(f"Bollinger Bands - upper: {bb_upper}, middle: {bb_middle}, lower: {bb_lower}")
             except Exception as e:
                 logger.error(f"Error calculating Bollinger Bands: {e}")
@@ -136,15 +136,15 @@ class SignalGenerator:
                     df['close'],
                     window=adx_window
                 )
-                adx_df = pd.DataFrame({
-                    'adx': adx.adx(),
-                    'adx_pos': adx.adx_pos(),
-                    'adx_neg': adx.adx_neg()
-                })
-                adx_df = adx_df.replace([np.inf, -np.inf], np.nan).fillna(0)
-                adx_value = float(adx_df['adx'].iloc[-1])
-                adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
-                adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
+            adx_df = pd.DataFrame({
+                'adx': adx.adx(),
+                'adx_pos': adx.adx_pos(),
+                'adx_neg': adx.adx_neg()
+            })
+            adx_df = adx_df.replace([np.inf, -np.inf], np.nan).fillna(0)
+            adx_value = float(adx_df['adx'].iloc[-1])
+            adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
+            adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
                 logger.debug(f"ADX values - value: {adx_value}, DI+: {adx_di_plus}, DI-: {adx_di_minus}")
             except Exception as e:
                 logger.error(f"Error calculating ADX: {e}")
@@ -158,7 +158,7 @@ class SignalGenerator:
                     df['close'],
                     window=min(14, len(df) - 1)  # Adjust window size
                 )
-                atr_value = safe_float(atr.average_true_range().iloc[-1])
+            atr_value = safe_float(atr.average_true_range().iloc[-1])
                 logger.debug(f"ATR value: {atr_value}")
             except Exception as e:
                 logger.error(f"Error calculating ATR: {e}")
@@ -172,7 +172,7 @@ class SignalGenerator:
                     df['close'],
                     window=min(20, len(df) - 1)  # Adjust window size
                 )
-                cci_value = safe_float(cci.cci().iloc[-1])
+            cci_value = safe_float(cci.cci().iloc[-1])
                 logger.debug(f"CCI value: {cci_value}")
             except Exception as e:
                 logger.error(f"Error calculating CCI: {e}")
