@@ -25,10 +25,24 @@ class SignalGenerator:
         try:
             # Extract price data
             df = pd.DataFrame(market_data['klines'])
-            df['close'] = pd.to_numeric(df['close'])
-            df['high'] = pd.to_numeric(df['high'])
-            df['low'] = pd.to_numeric(df['low'])
-            df['volume'] = pd.to_numeric(df['volume'])
+            
+            # Validate required columns
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
+            if not all(col in df.columns for col in required_columns):
+                logger.error(f"Missing required columns in market data. Available columns: {df.columns.tolist()}")
+                return {}
+            
+            # Convert numeric columns
+            for col in required_columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Drop any rows with NaN values
+            df.dropna(inplace=True)
+            
+            # Validate data points
+            if len(df) < 20:  # Minimum required data points
+                logger.warning(f"Insufficient data points: {len(df)}")
+                return {}
             
             # Calculate MACD
             macd = ta.trend.MACD(
@@ -88,28 +102,54 @@ class SignalGenerator:
                 except Exception:
                     return default
 
-            macd_value = safe_float(macd.macd().iloc[-1])
-            macd_signal = safe_float(macd.macd_signal().iloc[-1])
-            macd_histogram = safe_float(macd.macd_diff().iloc[-1])
-            rsi_value = safe_float(rsi.rsi().iloc[-1], 50.0) # RSI default to 50
-            
-            bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
-            bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
-            bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
-            
-            # After ADX calculation, fill NaN/inf with 0
-            adx_df = pd.DataFrame({
-                'adx': adx.adx(),
-                'adx_pos': adx.adx_pos(),
-                'adx_neg': adx.adx_neg()
-            })
-            adx_df = adx_df.replace([np.inf, -np.inf], np.nan).fillna(0)
-            adx_value = float(adx_df['adx'].iloc[-1])
-            adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
-            adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
-            
-            atr_value = safe_float(atr.average_true_range().iloc[-1])
-            cci_value = safe_float(cci.cci().iloc[-1])
+            # Calculate indicators with error handling
+            try:
+                macd_value = safe_float(macd.macd().iloc[-1])
+                macd_signal = safe_float(macd.macd_signal().iloc[-1])
+                macd_histogram = safe_float(macd.macd_diff().iloc[-1])
+            except Exception as e:
+                logger.error(f"Error calculating MACD: {e}")
+                macd_value = macd_signal = macd_histogram = 0.0
+
+            try:
+                rsi_value = safe_float(rsi.rsi().iloc[-1], 50.0)
+            except Exception as e:
+                logger.error(f"Error calculating RSI: {e}")
+                rsi_value = 50.0
+
+            try:
+                bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
+                bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
+                bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
+            except Exception as e:
+                logger.error(f"Error calculating Bollinger Bands: {e}")
+                bb_upper = bb_middle = bb_lower = current_price
+
+            try:
+                adx_df = pd.DataFrame({
+                    'adx': adx.adx(),
+                    'adx_pos': adx.adx_pos(),
+                    'adx_neg': adx.adx_neg()
+                })
+                adx_df = adx_df.replace([np.inf, -np.inf], np.nan).fillna(0)
+                adx_value = float(adx_df['adx'].iloc[-1])
+                adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
+                adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
+            except Exception as e:
+                logger.error(f"Error calculating ADX: {e}")
+                adx_value = adx_di_plus = adx_di_minus = 0.0
+
+            try:
+                atr_value = safe_float(atr.average_true_range().iloc[-1])
+            except Exception as e:
+                logger.error(f"Error calculating ATR: {e}")
+                atr_value = 0.0
+
+            try:
+                cci_value = safe_float(cci.cci().iloc[-1])
+            except Exception as e:
+                logger.error(f"Error calculating CCI: {e}")
+                cci_value = 0.0
 
             return {
                 'macd': {
@@ -541,9 +581,33 @@ class SignalGenerator:
     def _resample_dataframe(self, df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
         """Resample OHLCV data to a different timeframe."""
         try:
-            # Ensure timestamp is datetime
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            # Create a copy to avoid modifying the original
+            df = df.copy()
+            
+            # Ensure all required columns exist
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
+            if not all(col in df.columns for col in required_columns):
+                logger.error(f"Missing required columns. Available columns: {df.columns.tolist()}")
+                return pd.DataFrame()
+            
+            # Convert numeric columns
+            for col in required_columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Handle timestamp
+            if 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            elif 'time' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['time'], unit='ms')
+            else:
+                logger.error("No timestamp column found in dataframe")
+                return pd.DataFrame()
+            
+            # Set timestamp as index
             df.set_index('timestamp', inplace=True)
+            
+            # Sort by timestamp
+            df.sort_index(inplace=True)
             
             # Resample OHLCV data
             resampled = df.resample(timeframe).agg({
@@ -560,11 +624,16 @@ class SignalGenerator:
             # Reset index to make timestamp a column again
             resampled.reset_index(inplace=True)
             
+            # Validate resampled data
+            if len(resampled) < 20:  # Minimum required data points
+                logger.warning(f"Insufficient data points after resampling: {len(resampled)}")
+                return pd.DataFrame()
+            
             return resampled
             
         except Exception as e:
             logger.error(f"Error resampling dataframe: {e}")
-            return pd.DataFrame()  # Return empty DataFrame on error
+            return pd.DataFrame()
 
     def _calculate_mtf_alignment(self, indicators: Dict) -> Dict:
         """Calculate multi-timeframe alignment with enhanced analysis."""
