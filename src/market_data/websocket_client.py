@@ -45,15 +45,35 @@ class MarketDataWebSocket:
                 logger.error(f"Error connecting to WebSocket: {e}")
                 raise
         logger.error("Failed to connect to WebSocket after maximum retries.")
+        raise ConnectionError("Failed to connect to WebSocket after maximum retries.")
+
+    async def subscribe(self):
+        """Subscribe to Binance streams."""
+        streams = []
+        for symbol in self.symbols:
+            symbol_lower = symbol.lower()
+            streams.extend([
+                f"{symbol_lower}@kline_1m",  # 1-minute klines
+                f"{symbol_lower}@trade",     # Trades
+                f"{symbol_lower}@depth20@100ms"  # Order book (20 levels)
+            ])
+        subscription_message = {
+            "method": "SUBSCRIBE",
+            "params": streams,
+            "id": 1
+        }
+        await self.connection.send(json.dumps(subscription_message))
+        logger.info(f"Subscribed to streams: {streams}")
 
     async def start(self):
         """Start the WebSocket client."""
         await self.connect()
+        await self.subscribe()  # Subscribe to streams after connecting
         self.running = True  # Set running to True before entering the loop
         while self.running:
             try:
                 message = await self.connection.recv()
-                await self._process_message(json.loads(message))
+                await self._handle_message(message)
             except websockets.exceptions.ConnectionClosed:
                 logger.error("WebSocket connection closed unexpectedly.")
                 break
@@ -61,11 +81,12 @@ class MarketDataWebSocket:
                 logger.error(f"Error in WebSocket message processing: {e}")
                 break
 
-    async def _process_message(self, message: Dict):
+    async def _handle_message(self, message: str):
         """Process incoming WebSocket message."""
         try:
-            stream = message.get('stream', '')
-            data = message.get('data', {})
+            message_dict = json.loads(message)
+            stream = message_dict.get('stream', '')
+            data = message_dict.get('data', {})
 
             if not stream or not data:
                 return

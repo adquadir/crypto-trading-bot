@@ -235,6 +235,9 @@ class ExchangeClient:
         self.order_books = {}
         self.last_trade_price = {}
 
+        # Initialize running attribute
+        self.running = False
+
     def _setup_proxy(self):
         """Setup proxy configuration."""
         if not self.proxy_config:
@@ -746,22 +749,10 @@ class ExchangeClient:
                 await asyncio.sleep(5)  # Wait before retrying
 
     async def close(self):
-        """Clean up resources."""
-        self._shutdown_event.set()
-        if self.health_check_task:
-            self.health_check_task.cancel()
-            try:
-                await self.health_check_task
-            except asyncio.CancelledError:
-                pass
-        if self.session:
-            await self.session.close()
-        for symbol, ws in self.ws_connections.items():
-            try:
-                await ws.close()
-                logger.debug(f"Closed websocket for {symbol}")
-            except Exception as e:
-                logger.error(f"Error closing websocket for {symbol}: {e}")
+        """Close all WebSocket connections."""
+        for symbol, ws_client in self.ws_clients.items():
+            if ws_client:
+                await ws_client.close()
         logger.info("Exchange client shutdown complete")
 
     def _get_next_proxy(self) -> str:
@@ -1001,14 +992,58 @@ class ExchangeClient:
 
     async def initialize(self, symbols: Optional[List[str]] = None):
         """Initialize the exchange client with optional symbols."""
-        symbols = symbols or []
+        self.symbols = symbols or []  # Update self.symbols with the provided list
         # Initialize WebSocket clients for each symbol
-        for symbol in symbols:
+        for symbol in self.symbols:
             await self._initialize_websocket(symbol)
-        logger.info(f"Initialized exchange client with {len(symbols)} symbols.")
+        logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
 
     async def _handle_kline_update(self, symbol: str, kline_data: dict):
         """Handle kline update from WebSocket."""
         # Update the last trade price
         self.last_trade_price[symbol] = float(kline_data['k']['c'])
         logger.debug(f"Updated last trade price for {symbol}: {self.last_trade_price[symbol]}")
+
+    async def _check_proxy_health(self):
+        """Check the health of the current proxy."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get('https://api.binance.com/api/v3/ping', proxy=self.proxy) as response:
+                    return response.status == 200
+        except Exception as e:
+            logger.error(f"Error checking proxy health: {e}")
+            return False
+
+    async def _health_check_loop(self):
+        """Monitor the health of the proxy and reconnect if necessary."""
+        while self.running:
+            if not await self._check_proxy_health():
+                logger.warning("Proxy health check failed. Attempting to reconnect...")
+                await self._handle_connection_error()
+            await asyncio.sleep(60)  # Check every minute
+
+    async def _handle_connection_error(self):
+        """Handle connection errors by reconnecting."""
+        logger.info("Handling connection error...")
+        await self.close()
+        await self.initialize(self.symbols)
+
+    async def _find_best_proxy(self):
+        """Find the best proxy based on latency."""
+        # Placeholder for proxy selection logic
+        return "http://example-proxy.com:8080"
+
+    async def _test_proxy_connection(self, proxy: str):
+        """Test the connection to a proxy."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get('https://api.binance.com/api/v3/ping', proxy=proxy) as response:
+                    return response.status == 200
+        except Exception as e:
+            logger.error(f"Error testing proxy connection: {e}")
+            return False
+
+    def _get_cache_ttl(self, data_type: str) -> int:
+        """Get the cache TTL for a specific data type."""
+        # Placeholder for cache TTL logic
+        return 60  # Default TTL in seconds
