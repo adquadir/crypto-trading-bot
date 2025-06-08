@@ -824,25 +824,29 @@ async def get_opportunities(
             reverse=True
         )[:limit]
         
+        # Transform opportunities to match frontend format
+        formatted_opportunities = [
+            {
+                "symbol": opp.symbol,
+                "signal_type": opp.direction,  # Changed from direction to signal_type
+                "entry": opp.entry_price,  # Changed from entry_price to entry
+                "take_profit": opp.take_profit,
+                "stop_loss": opp.stop_loss,
+                "confidence_score": opp.confidence,  # Changed from confidence to confidence_score
+                "leverage": opp.leverage,
+                "risk_reward": opp.risk_reward,
+                "volume_24h": opp.volume_24h,
+                "volatility": opp.volatility,
+                "score": opp.score,
+                "indicators": opp.indicators,
+                "reasoning": opp.reasoning,
+                "price_history": opp.price_history if hasattr(opp, 'price_history') else None
+            }
+            for opp in sorted_opportunities
+        ]
+        
         return {
-            "opportunities": [
-                {
-                    "symbol": opp.symbol,
-                    "direction": opp.direction,
-                    "entry_price": opp.entry_price,
-                    "take_profit": opp.take_profit,
-                    "stop_loss": opp.stop_loss,
-                    "confidence": opp.confidence,
-                    "leverage": opp.leverage,
-                    "risk_reward": opp.risk_reward,
-                    "volume_24h": opp.volume_24h,
-                    "volatility": opp.volatility,
-                    "score": opp.score,
-                    "indicators": opp.indicators,
-                    "reasoning": opp.reasoning
-                }
-                for opp in sorted_opportunities
-            ],
+            "opportunities": formatted_opportunities,
             "total": len(filtered_opportunities),
             "filtered": len(sorted_opportunities),
             "parameters": {
