@@ -234,6 +234,7 @@ class SignalGenerator:
 
             # If we reach here, it means a BUY or SELL signal was generated.
             # Calculate entry, take profit, and stop loss levels
+            atr = indicators.get('atr', 0)
             MIN_DIST_PCT = 0.002  # 0.2%
             if pd.isna(atr) or atr <= 0:
                 entry = current_price
