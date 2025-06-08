@@ -25,27 +25,26 @@ class MarketDataWebSocket:
         self.running = False
 
     async def connect(self):
-        """Connect to WebSocket streams for all symbols."""
-        try:
-            # Create streams for each symbol
-            streams = []
-            for symbol in self.symbols:
-                symbol_lower = symbol.lower()
-                streams.extend([
-                    f"{symbol_lower}@kline_1m",  # 1-minute klines
-                    f"{symbol_lower}@trade",     # Trades
-                    f"{symbol_lower}@depth20@100ms"  # Order book (20 levels)
-                ])
-
-            # Connect to combined stream
-            stream_url = f"{self.ws_url}/stream?streams={'/'.join(streams)}"
-            self.connection = await websockets.connect(stream_url)
-            logger.info(f"Connected to WebSocket stream: {stream_url}")
-            self.running = True
-
-        except Exception as e:
-            logger.error(f"Error connecting to WebSocket: {e}")
-            raise
+        """Connect to the WebSocket stream."""
+        max_retries = 3
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                self.connection = await websockets.connect(self.stream_url)
+                logger.info(f"Connected to WebSocket stream: {self.stream_url}")
+                return
+            except websockets.exceptions.InvalidStatusCode as e:
+                if e.status_code == 451:
+                    logger.error(f"WebSocket connection rejected with status code 451. Retrying... (Attempt {retry_count + 1}/{max_retries})")
+                    retry_count += 1
+                    await asyncio.sleep(2)  # Wait before retrying
+                else:
+                    logger.error(f"Error connecting to WebSocket: {e}")
+                    raise
+            except Exception as e:
+                logger.error(f"Error connecting to WebSocket: {e}")
+                raise
+        logger.error("Failed to connect to WebSocket after maximum retries.")
 
     async def start(self):
         """Start processing WebSocket messages."""
