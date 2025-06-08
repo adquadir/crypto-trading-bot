@@ -20,6 +20,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
 from src.signals.signal_generator import SignalGenerator
 from src.utils.config import load_config
+from src.market_data.websocket import MarketDataWebSocket
 
 logger = logging.getLogger(__name__)
 
@@ -160,21 +161,23 @@ class TradingBot:
             
             # Initialize strategy profiles
             self.strategy_config.load_strategy_profiles()
-            self.strategy_config.switch_profile('moderate')
+            self.strategy_config.switch_profile('moderate')  # Default to moderate profile
             
-            # Initialize symbol discovery
-            self.symbol_discovery = SymbolDiscovery()
+            # Initialize exchange client first
+            self.exchange_client = ExchangeClient()
+            await self.exchange_client.initialize([])  # Initialize with empty symbols list first
+            
+            # Initialize symbol discovery with exchange client
+            self.symbol_discovery = SymbolDiscovery(self.exchange_client)
             await self.symbol_discovery.initialize()
             
-            # Get initial symbols
+            # Get symbols and update exchange client
             symbols = await self.symbol_discovery.get_symbols()
-            logger.info(f"Initialized with {len(symbols)} symbols")
-            
-            # Initialize exchange client with symbols
             await self.exchange_client.initialize(symbols)
             
             # Initialize WebSocket manager
-            await self.ws_manager.initialize()
+            self.ws_manager = MarketDataWebSocket()
+            await self.ws_manager.initialize(symbols)
             
             # Start background tasks
             self.tasks = [
