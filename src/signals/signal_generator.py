@@ -238,26 +238,32 @@ class SignalGenerator:
             MIN_DIST_PCT = 0.002  # 0.2%
             if pd.isna(atr) or atr <= 0:
                 entry = current_price
-                min_dist = entry * MIN_DIST_PCT
-                take_profit = entry + min_dist if direction == "LONG" else entry - min_dist
-                stop_loss = entry - min_dist if direction == "LONG" else entry + min_dist
+                min_risk = entry * MIN_DIST_PCT
+                min_reward = entry * MIN_DIST_PCT * 2  # Make reward at least 2x risk
+                take_profit = entry + min_reward if direction == "LONG" else entry - min_reward
+                stop_loss = entry - min_risk if direction == "LONG" else entry + min_risk
             else:
                 entry = current_price
-                min_dist = entry * MIN_DIST_PCT
+                min_risk = entry * MIN_DIST_PCT
+                min_reward = entry * MIN_DIST_PCT * 2
                 if direction == "LONG":
-                    tp_dist = max(atr * 2, min_dist)
-                    sl_dist = max(atr * 1, min_dist)
+                    tp_dist = max(atr * 2, min_reward)
+                    sl_dist = max(atr * 1, min_risk)
                     take_profit = entry + tp_dist
                     stop_loss = entry - sl_dist
                 else:
-                    tp_dist = max(atr * 2, min_dist)
-                    sl_dist = max(atr * 1, min_dist)
+                    tp_dist = max(atr * 2, min_reward)
+                    sl_dist = max(atr * 1, min_risk)
                     take_profit = entry - tp_dist
                     stop_loss = entry + sl_dist
 
             # Validation log for suspicious TP
             if abs(entry - take_profit) < 1e-6:
                 logger.warning(f"Suspicious TP detected for {symbol}: Entry ({entry}) ~= TP ({take_profit})")
+
+            # Risk-reward debug log
+            rr = abs(take_profit - entry) / max(abs(entry - stop_loss), 1e-6)
+            logger.debug(f"{symbol}  Entry={entry:.6f}, TP={take_profit:.6f}, SL={stop_loss:.6f}, RR={rr:.2f}")
 
             # Fallback stop loss / take profit
             if stop_loss is None:
