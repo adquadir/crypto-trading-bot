@@ -206,7 +206,7 @@ class SignalGenerator:
             elif current_price > bb_upper:
                 signal_strength -= 1.0
                 reasons.append("Price above upper Bollinger Band (bearish)")
-
+                
             # Dynamic ADX influence for scalping
             adx = indicators.get('adx', {})
             adx_value = adx.get('value', 0)
@@ -234,23 +234,30 @@ class SignalGenerator:
 
             # If we reach here, it means a BUY or SELL signal was generated.
             # Calculate entry, take profit, and stop loss levels
-            atr = indicators.get('atr', 0)
-            # Ensure ATR is a valid number
+            MIN_DIST_PCT = 0.002  # 0.2%
             if pd.isna(atr) or atr <= 0:
-                logger.warning(f"Invalid or zero ATR for {symbol}. Setting default trading levels.")
                 entry = current_price
-                take_profit = current_price * (1.0 + 0.005) if direction == "LONG" else current_price * (1.0 - 0.005)
-                stop_loss = current_price * (1.0 - 0.002) if direction == "LONG" else current_price * (1.0 + 0.002)
+                min_dist = entry * MIN_DIST_PCT
+                take_profit = entry + min_dist if direction == "LONG" else entry - min_dist
+                stop_loss = entry - min_dist if direction == "LONG" else entry + min_dist
             else:
+                entry = current_price
+                min_dist = entry * MIN_DIST_PCT
                 if direction == "LONG":
-                    entry = current_price
-                    take_profit = entry + (atr * 2)  # 2 ATR for take profit
-                    stop_loss = entry - (atr * 1)    # 1 ATR for stop loss
-                else:  # SHORT
-                    entry = current_price
-                    take_profit = entry - (atr * 2)  # 2 ATR for take profit
-                    stop_loss = entry + (atr * 1)    # 1 ATR for stop loss
-                
+                    tp_dist = max(atr * 2, min_dist)
+                    sl_dist = max(atr * 1, min_dist)
+                    take_profit = entry + tp_dist
+                    stop_loss = entry - sl_dist
+                else:
+                    tp_dist = max(atr * 2, min_dist)
+                    sl_dist = max(atr * 1, min_dist)
+                    take_profit = entry - tp_dist
+                    stop_loss = entry + sl_dist
+
+            # Validation log for suspicious TP
+            if abs(entry - take_profit) < 1e-6:
+                logger.warning(f"Suspicious TP detected for {symbol}: Entry ({entry}) ~= TP ({take_profit})")
+
             # Fallback stop loss / take profit
             if stop_loss is None:
                 stop_loss = entry - entry * 0.005  # 0.5% stop loss
