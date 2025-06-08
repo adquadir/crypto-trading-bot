@@ -425,7 +425,8 @@ class SymbolDiscovery:
                     logger.warning(f"Bollinger Band middle is zero or near-zero, skipping BB width calculation for technical score.")
             if 'atr' in indicators:
                 atr = indicators['atr']
-                if 0.01 <= atr <= 0.03:
+                atr_value = atr.get('value') if isinstance(atr, dict) else atr
+                if 0.01 <= atr_value <= 0.03:
                     score += weights['volatility'] * 1.0
             # OBV
             if 'obv' in indicators:
