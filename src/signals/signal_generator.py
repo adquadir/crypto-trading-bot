@@ -97,16 +97,16 @@ class SignalGenerator:
             bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
             bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
             
-            # Handle ADX calculations with zero division protection
-            try:
-                adx_value = safe_float(adx.adx().iloc[-1])
-                adx_di_plus = safe_float(adx.adx_pos().iloc[-1])
-                adx_di_minus = safe_float(adx.adx_neg().iloc[-1])
-            except (ZeroDivisionError, ValueError) as e:
-                logger.warning(f"ADX calculation error for {symbol}: {e}. Using default values.")
-                adx_value = 0.0
-                adx_di_plus = 0.0
-                adx_di_minus = 0.0
+            # After ADX calculation, fill NaN/inf with 0
+            adx_df = pd.DataFrame({
+                'adx': adx.adx(),
+                'adx_pos': adx.adx_pos(),
+                'adx_neg': adx.adx_neg()
+            })
+            adx_df = adx_df.replace([np.inf, -np.inf], np.nan).fillna(0)
+            adx_value = float(adx_df['adx'].iloc[-1])
+            adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
+            adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
             
             atr_value = safe_float(atr.average_true_range().iloc[-1])
             cci_value = safe_float(cci.cci().iloc[-1])
@@ -177,52 +177,40 @@ class SignalGenerator:
             signal_type = None
             reasons = []
             
-            # MACD Analysis
-            if indicators['macd']['value'] > indicators['macd']['signal']:
-                signal_strength += 0.5
-                reasons.append("MACD above signal line")
+            # Amplified indicator scoring
+            macd = indicators['macd']
+            if macd['value'] > macd['signal']:
+                signal_strength += 1.5
+                reasons.append("MACD bullish")
             else:
-                signal_strength -= 0.5
-                reasons.append("MACD below signal line")
-                
-            # RSI Analysis
+                signal_strength -= 1.5
+                reasons.append("MACD bearish")
+
             rsi = indicators['rsi']
             if rsi < 35:
                 signal_strength += 1.0
-                reasons.append("RSI oversold")
+                reasons.append("RSI bullish (oversold)")
             elif rsi > 65:
                 signal_strength -= 1.0
-                reasons.append("RSI overbought")
-                
-            # Bollinger Bands Analysis
+                reasons.append("RSI bearish (overbought)")
+
             current_price = indicators['current_price']
             bb = indicators['bollinger_bands']
             if current_price < bb['lower']:
                 signal_strength += 1.0
-                reasons.append("Price below lower Bollinger Band")
+                reasons.append("Price below lower Bollinger Band (bullish)")
             elif current_price > bb['upper']:
                 signal_strength -= 1.0
-                reasons.append("Price above upper Bollinger Band")
-                
-            # ADX Analysis
+                reasons.append("Price above upper Bollinger Band (bearish)")
+
             adx = indicators['adx']
-            if adx['value'] > 20:
-                if adx['di_plus'] > adx['di_minus']:
-                    signal_strength += 0.5
-                    reasons.append("Strong uptrend (ADX)")
-                else:
-                    signal_strength -= 0.5
-                    reasons.append("Strong downtrend (ADX)")
-                    
-            # CCI Analysis
-            cci = indicators['cci']
-            if cci > 100:
-                signal_strength += 1
-                reasons.append("CCI bullish")
-            elif cci < -100:
-                signal_strength -= 1
-                reasons.append("CCI bearish")
-                
+            if adx['value'] > 25:
+                signal_strength *= 1.2
+                reasons.append("Strong trend (ADX > 25)")
+
+            # Lower confidence normalization
+            confidence = min(abs(signal_strength) / 2.5, 1.0)
+            
             # Determine signal direction based on strength
             if signal_strength >= 1.0:
                 direction = 'LONG'
@@ -230,6 +218,9 @@ class SignalGenerator:
                 direction = 'SHORT'
             else:
                 direction = 'NEUTRAL'
+
+            if direction == 'NEUTRAL':
+                return None  # Skip invalid signals early
                 
             # If we reach here, it means a BUY or SELL signal was generated.
             # Calculate entry, take profit, and stop loss levels
@@ -257,7 +248,7 @@ class SignalGenerator:
                 'signal_type': signal_type,
                 'direction': direction,
                 'strength': signal_strength,
-                'confidence': abs(signal_strength) / 5.0,  # Normalize to 0-1 range
+                'confidence': confidence,
                 'reasons': reasons,
                 'timestamp': datetime.now().isoformat(),
                 'price': current_price,
@@ -269,7 +260,7 @@ class SignalGenerator:
                     'rsi': rsi,
                     'bollinger_bands': bb,
                     'adx': indicators['adx'], # Use the full adx dictionary
-                    'cci': cci,
+                    'cci': indicators['cci'],
                     'atr': atr
                 }
             }

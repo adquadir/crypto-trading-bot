@@ -859,10 +859,10 @@ class SymbolDiscovery:
                 opportunity.score = self.calculate_opportunity_score(opportunity)
 
                 # Check if the calculated score meets the minimum confidence requirement
-                # This is a redundancy if min_confidence filter is applied earlier, but good for clarity
-                if opportunity.confidence < self.min_confidence:
-                     logger.info(f"Opportunity for {symbol_name} discarded after scoring due to low confidence ({opportunity.confidence:.2f} < {self.min_confidence:.2f})")
-                     return None
+                # Lowered confidence cutoff for scalping
+                if opportunity.confidence < 0.35:
+                    logger.info(f"Opportunity for {symbol_name} discarded after scoring due to low confidence ({opportunity.confidence:.2f} < 0.35)")
+                    return None
 
                 return opportunity
 
