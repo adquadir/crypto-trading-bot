@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -55,6 +55,7 @@ import {
   Legend
 } from 'chart.js';
 import config from '../config';
+import { useWebSocket } from '../contexts/WebSocketContext';
 
 // Register ChartJS components
 ChartJS.register(
@@ -67,6 +68,17 @@ ChartJS.register(
   ChartTooltip,
   Legend
 );
+
+const getFreshnessColor = (age) => {
+  if (age <= 5) return 'success';
+  if (age <= 10) return 'warning';
+  return 'error';
+};
+
+const formatAge = (age) => {
+  if (age < 1) return `${(age * 1000).toFixed(0)}ms`;
+  return `${age.toFixed(1)}s`;
+};
 
 const TimeframeComparison = ({ signal }) => {
   const chartData = {
@@ -197,17 +209,6 @@ const PatternAnalysis = ({ signal }) => {
 };
 
 const DataFreshnessPanel = ({ opportunity }) => {
-  const getFreshnessColor = (age) => {
-    if (age <= 5) return 'success';
-    if (age <= 10) return 'warning';
-    return 'error';
-  };
-
-  const formatAge = (age) => {
-    if (age < 1) return `${(age * 1000).toFixed(0)}ms`;
-    return `${age.toFixed(1)}s`;
-  };
-
   if (!opportunity.data_freshness) return null;
 
   return (
