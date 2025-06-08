@@ -1501,3 +1501,7 @@ class SymbolDiscovery:
         except Exception as e:
             logger.error(f"Error loading symbols: {e}")
             self.symbols = [] 
+
+    async def get_symbols(self) -> list:
+        """Return the list of discovered symbols."""
+        return self.symbols 
