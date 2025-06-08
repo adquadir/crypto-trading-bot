@@ -72,9 +72,11 @@ class MarketDataProcessor:
                 # MACD (only calculate for smallest window)
                 if window == min(self.window_sizes):
                     macd = ta.trend.MACD(df['close'])
-                    indicators['macd'] = macd.macd().iloc[-1]
-                    indicators['macd_signal'] = macd.macd_signal().iloc[-1]
-                    indicators['macd_diff'] = macd.macd_diff().iloc[-1]
+                    indicators['macd'] = {
+                        'value': macd.macd().iloc[-1],
+                        'signal': macd.macd_signal().iloc[-1],
+                        'histogram': macd.macd_diff().iloc[-1]
+                    }
             
             # Momentum Indicators
             indicators['rsi'] = ta.momentum.RSIIndicator(df['close']).rsi().iloc[-1]
@@ -87,24 +89,51 @@ class MarketDataProcessor:
             
             # Volatility Indicators
             bb = ta.volatility.BollingerBands(df['close'])
-            indicators['bb_high'] = bb.bollinger_hband().iloc[-1]
-            indicators['bb_low'] = bb.bollinger_lband().iloc[-1]
-            indicators['bb_mid'] = bb.bollinger_mavg().iloc[-1]
-            indicators['atr'] = ta.volatility.AverageTrueRange(
-                df['high'], df['low'], df['close']
-            ).average_true_range().iloc[-1]
+            indicators['bollinger_bands'] = {
+                'upper': bb.bollinger_hband().iloc[-1],
+                'lower': bb.bollinger_lband().iloc[-1],
+                'middle': bb.bollinger_mavg().iloc[-1]
+            }
             
-            # Volume Indicators
-            indicators['obv'] = ta.volume.on_balance_volume(df['close'], df['volume']).iloc[-1]
-            indicators['vwap'] = ta.volume.volume_weighted_average_price(
-                df['high'], df['low'], df['close'], df['volume']
-            ).iloc[-1]
+            # ADX with error handling
+            with np.errstate(divide='ignore', invalid='ignore'):
+                adx = ta.trend.ADXIndicator(
+                    df['high'],
+                    df['low'],
+                    df['close'],
+                    window=14
+                )
+                adx_value = adx.adx().iloc[-1]
+                di_plus = adx.adx_pos().iloc[-1]
+                di_minus = adx.adx_neg().iloc[-1]
+                
+                # Handle NaN and inf values
+                adx_value = float(np.nan_to_num(adx_value, nan=0.0))
+                di_plus = float(np.nan_to_num(di_plus, nan=0.0))
+                di_minus = float(np.nan_to_num(di_minus, nan=0.0))
+                
+                indicators['adx'] = {
+                    'value': adx_value,
+                    'di_plus': di_plus,
+                    'di_minus': di_minus
+                }
             
-            logger.debug(f"Calculated indicators for {symbol}")
+            # ATR
+            atr = ta.volatility.AverageTrueRange(
+                df['high'],
+                df['low'],
+                df['close'],
+                window=14
+            )
+            indicators['atr'] = float(atr.average_true_range().iloc[-1])
+            
+            # Current price
+            indicators['current_price'] = float(df['close'].iloc[-1])
+            
             return indicators
             
         except Exception as e:
-            logger.error(f"Error calculating indicators for {symbol}: {str(e)}")
+            logger.error(f"Error calculating indicators for {symbol}: {e}")
             return {}
             
     def get_market_state(self, symbol: str) -> Dict:

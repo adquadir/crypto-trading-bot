@@ -178,15 +178,17 @@ class SignalGenerator:
             reasons = []
             
             # Amplified indicator scoring
-            macd = indicators['macd']
-            if macd['value'] > macd['signal']:
+            macd = indicators.get('macd', {})
+            macd_value = macd.get('value', 0)
+            macd_signal = macd.get('signal', 0)
+            if macd_value > macd_signal:
                 signal_strength += 1.5
                 reasons.append("MACD bullish")
             else:
                 signal_strength -= 1.5
                 reasons.append("MACD bearish")
 
-            rsi = indicators['rsi']
+            rsi = indicators.get('rsi', 50)
             if rsi < 35:
                 signal_strength += 1.0
                 reasons.append("RSI bullish (oversold)")
@@ -194,17 +196,19 @@ class SignalGenerator:
                 signal_strength -= 1.0
                 reasons.append("RSI bearish (overbought)")
 
-            current_price = indicators['current_price']
-            bb = indicators['bollinger_bands']
-            if current_price < bb['lower']:
+            current_price = indicators.get('current_price', 0)
+            bb = indicators.get('bollinger_bands', {})
+            bb_lower = bb.get('lower', current_price)
+            bb_upper = bb.get('upper', current_price)
+            if current_price < bb_lower:
                 signal_strength += 1.0
                 reasons.append("Price below lower Bollinger Band (bullish)")
-            elif current_price > bb['upper']:
+            elif current_price > bb_upper:
                 signal_strength -= 1.0
                 reasons.append("Price above upper Bollinger Band (bearish)")
 
             # Dynamic ADX influence for scalping
-            adx = indicators['adx']
+            adx = indicators.get('adx', {})
             adx_value = adx.get('value', 0)
             if adx_value > 15:
                 signal_strength *= 1.2
@@ -253,20 +257,11 @@ class SignalGenerator:
             if take_profit is None:
                 take_profit = entry + entry * 0.01  # 1% take profit
 
-            # ADX calculation with np.errstate and nan_to_num
-            with np.errstate(divide='ignore', invalid='ignore'):
-                adx_val = adx.adx().iloc[-1]
-                adx_pos = adx.adx_pos().iloc[-1]
-                adx_neg = adx.adx_neg().iloc[-1]
-                adx_val = float(np.nan_to_num(adx_val, nan=0.0))
-                adx_pos = float(np.nan_to_num(adx_pos, nan=0.0))
-                adx_neg = float(np.nan_to_num(adx_neg, nan=0.0))
-
-            logger.debug(f"Generated signal for {symbol}: {signal_type} ({direction}) with strength {signal_strength}")
+            logger.debug(f"Generated signal for {symbol}: {direction} with strength {signal_strength}")
             
             return {
                 'symbol': symbol,
-                'signal_type': signal_type,
+                'signal_type': direction,
                 'direction': direction,
                 'strength': signal_strength,
                 'confidence': confidence,
@@ -277,12 +272,12 @@ class SignalGenerator:
                 'take_profit': take_profit,
                 'stop_loss': stop_loss,
                 'indicators': {
-                    'macd': indicators['macd'],
+                    'macd': macd,
                     'rsi': rsi,
                     'bollinger_bands': bb,
-                    'adx': indicators['adx'], # Use the full adx dictionary
-                    'cci': indicators['cci'],
-                    'atr': atr
+                    'adx': adx,
+                    'atr': atr,
+                    'current_price': current_price
                 }
             }
             
