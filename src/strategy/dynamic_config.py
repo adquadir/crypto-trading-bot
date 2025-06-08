@@ -497,4 +497,9 @@ class DynamicStrategyConfig:
         # Update timeframes
         self.timeframes = self.current_profile['timeframes']
         
-        logger.info(f"Updated strategy parameters for {self.risk_level} risk level") 
+        logger.info(f"Updated strategy parameters for {self.risk_level} risk level")
+
+    async def stop(self):
+        """Stop the strategy."""
+        if hasattr(self, 'exchange_client'):
+            await self.exchange_client.close() 

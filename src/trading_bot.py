@@ -400,7 +400,7 @@ class TradingBot:
     async def stop(self):
         """Stop the trading bot."""
         logger.info("Stopping trading bot...")
-        
+
         # Cancel all background tasks
         if hasattr(self, 'tasks'):
             for task in self.tasks:
@@ -409,15 +409,15 @@ class TradingBot:
                     await task
                 except asyncio.CancelledError:
                     pass
-        
+
         # Close exchange client
         if hasattr(self, 'exchange_client'):
-        await self.exchange_client.close()
-        
+            await self.exchange_client.close()
+
         # Close WebSocket manager
         if hasattr(self, 'ws_manager'):
             await self.ws_manager.close()
-        
+
         logger.info("Trading bot stopped")
         
     def get_trade_history(self) -> List[Dict]:
