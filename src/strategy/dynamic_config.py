@@ -37,7 +37,7 @@ class StrategyConfig:
     def load_strategy_profiles(self) -> None:
         """Load strategy profiles from JSON file."""
         try:
-            if self.config_path.exists():
+        if self.config_path.exists():
                 with open(self.config_path, 'r') as f:
                     self.profiles = json.load(f)
                 logger.info(f"Loaded {len(self.profiles)} strategy profiles")
@@ -56,53 +56,57 @@ class StrategyConfig:
             with open(self.config_path, 'w') as f:
                 json.dump(self.profiles, f, indent=2)
             logger.info("Strategy profiles saved successfully")
-        except Exception as e:
+            except Exception as e:
             logger.error(f"Error saving strategy profiles: {str(e)}")
 
     def _get_default_profiles(self) -> Dict[str, Dict[str, Any]]:
-        """Get default strategy profiles."""
+        """Get default strategy profiles.
+        
+        Returns:
+            Dict[str, Dict[str, Any]]: Default strategy profiles
+        """
         return {
             'conservative': {
-                'max_position_size': 0.1,
+                'risk_per_trade': 0.01,  # 1% risk per trade
+                'max_open_trades': 3,
+                'min_risk_reward': 2.0,
+                'max_position_size': 0.1,  # 10% of portfolio
                 'max_leverage': 2,
-                'min_risk_reward': 3.0,
-                'max_drawdown': 0.05,
-                'min_confidence': 0.8,
-                'max_correlation': 0.5,
-                'min_volume_24h': 1000000,
-                'max_spread': 0.02,
-                'min_liquidity': 100000,
-                'max_volatility': 0.5,
-                'min_funding_rate': -0.001,
-                'max_funding_rate': 0.001
+                'timeframes': ['1h', '4h', '1d'],
+                'trend_thresholds': {
+                    'strong': 40,  # ADX threshold for strong trend
+                    'ema_pullback': 0.5,  # Maximum distance from EMA as percentage
+                    'rsi_overbought': 70,
+                    'rsi_oversold': 30
+                }
             },
             'moderate': {
-                'max_position_size': 0.2,
+                'risk_per_trade': 0.02,  # 2% risk per trade
+                'max_open_trades': 5,
+                'min_risk_reward': 1.5,
+                'max_position_size': 0.2,  # 20% of portfolio
                 'max_leverage': 3,
-                'min_risk_reward': 2.0,
-                'max_drawdown': 0.1,
-                'min_confidence': 0.6,
-                'max_correlation': 0.7,
-                'min_volume_24h': 500000,
-                'max_spread': 0.03,
-                'min_liquidity': 50000,
-                'max_volatility': 0.8,
-                'min_funding_rate': -0.002,
-                'max_funding_rate': 0.002
+                'timeframes': ['15m', '1h', '4h'],
+                'trend_thresholds': {
+                    'strong': 35,  # ADX threshold for strong trend
+                    'ema_pullback': 0.8,  # Maximum distance from EMA as percentage
+                    'rsi_overbought': 75,
+                    'rsi_oversold': 25
+                }
             },
             'aggressive': {
-                'max_position_size': 0.3,
+                'risk_per_trade': 0.03,  # 3% risk per trade
+                'max_open_trades': 8,
+                'min_risk_reward': 1.2,
+                'max_position_size': 0.3,  # 30% of portfolio
                 'max_leverage': 5,
-                'min_risk_reward': 1.5,
-                'max_drawdown': 0.15,
-                'min_confidence': 0.4,
-                'max_correlation': 0.8,
-                'min_volume_24h': 100000,
-                'max_spread': 0.05,
-                'min_liquidity': 10000,
-                'max_volatility': 1.0,
-                'min_funding_rate': -0.003,
-                'max_funding_rate': 0.003
+                'timeframes': ['5m', '15m', '1h'],
+                'trend_thresholds': {
+                    'strong': 30,  # ADX threshold for strong trend
+                    'ema_pullback': 1.0,  # Maximum distance from EMA as percentage
+                    'rsi_overbought': 80,
+                    'rsi_oversold': 20
+                }
             }
         }
 
@@ -234,7 +238,7 @@ class DynamicStrategyConfig:
             logger.info("Strategy profiles saved successfully")
         except Exception as e:
             logger.error(f"Error saving strategy profiles: {e}")
-
+            
     def set_profile(self, profile_name: str):
         """Set the current strategy profile."""
         if profile_name in self.profiles:
@@ -450,7 +454,7 @@ class DynamicStrategyConfig:
 
     def get_profiles(self):
         """Return a list of available strategy profile names."""
-        return list(self.profiles.keys())
+        return list(self.profiles.keys()) 
 
     def switch_profile(self, profile_name: str) -> None:
         """Switch to a different strategy profile.

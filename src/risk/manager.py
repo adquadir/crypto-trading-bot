@@ -266,7 +266,7 @@ class RiskManager:
             elif direction == 'SHORT' and stop_loss <= current_price:
                 logger.warning("Invalid stop loss for SHORT position")
                 return None
-            
+                
             return stop_loss
             
         except Exception as e:
@@ -321,13 +321,13 @@ class RiskManager:
             elif direction == 'SHORT' and take_profit >= current_price:
                 logger.warning("Invalid take profit for SHORT position")
                 return None
-            
+                
             return take_profit
             
         except Exception as e:
             logger.error(f"Error calculating take profit: {e}")
             return None
-
+            
     def add_position(
         self,
         symbol: str,

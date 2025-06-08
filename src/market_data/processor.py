@@ -28,7 +28,7 @@ class MarketDataProcessor:
             for key in expired_keys:
                 del self._resample_cache[key]
             self._last_cache_cleanup = current_time
-
+        
     def update_ohlcv(self, symbol: str, data: List[Dict]) -> bool:
         """Process and store OHLCV data with validation."""
         if not data:
@@ -86,7 +86,7 @@ class MarketDataProcessor:
                 timeframes['15m'] = self._resample_dataframe(df, '15T')
             except Exception as e:
                 logger.error(f"Error creating timeframes: {e}")
-                return {}
+            return {}
             
             # Calculate indicators for each timeframe
             tf_indicators = {}
@@ -334,7 +334,7 @@ class MarketDataProcessor:
                 'strength': 0.0,
                 'details': {}
             }
-
+            
     def get_market_state(self, symbol: str) -> Dict:
         """Get current market state including all indicators."""
         if symbol not in self.data_cache or self.data_cache[symbol].empty:

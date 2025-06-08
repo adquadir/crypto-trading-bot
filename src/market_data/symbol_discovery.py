@@ -378,17 +378,17 @@ class SignalTracker:
         }
 
 class SymbolDiscovery:
-    def __init__(self, exchange_client: ExchangeClient):
+    def __init__(self, exchange_client: ExchangeClient, scalping_mode: bool = False):
         self.exchange_client = exchange_client
         self.signal_generator = SignalGenerator()
         self.opportunities: Dict[str, TradingOpportunity] = {}
-        self.last_update = datetime.now()
+        self.last_update = {}
         self.update_interval = int(os.getenv('SYMBOL_UPDATE_INTERVAL', '3600'))  # Default 1 hour
         self._update_task = None
         self._processing_lock = asyncio.Lock()  # Add lock for concurrent processing
         self._discovery_lock = asyncio.Lock()
         self.cache = {}  # Simple dictionary for caching
-        self.cache_ttl = 300  # 5 minutes TTL
+        self.cache_ttl = 5 if scalping_mode else 300  # 5 seconds for scalping, 5 minutes for normal mode
         logger.info("SymbolDiscovery initialized with caching")
         
         # Load configuration from environment
@@ -430,6 +430,8 @@ class SymbolDiscovery:
         logger.info(f"max_funding_rate: {self.max_funding_rate}")
         logger.info(f"min_open_interest: {self.min_open_interest}")
         logger.info(f"max_symbols: {self.max_symbols}")
+        logger.info(f"cache_ttl: {self.cache_ttl} seconds")
+        logger.info(f"scalping_mode: {scalping_mode}")
         
         # Cache configuration
         self.cache_dir = Path('cache/signals')
@@ -1425,7 +1427,7 @@ class SymbolDiscovery:
             if len(volumes) < 20:
                 logger.debug("Insufficient data points for volume trend analysis")
                 return True  # Allow through if not enough data
-                
+
             # Calculate volume metrics
             vol_ma5 = np.mean(volumes[-5:])
             vol_ma20 = np.mean(volumes[-20:])
@@ -1440,8 +1442,8 @@ class SymbolDiscovery:
             recent_vol_std = np.std(volumes[-5:])
             if recent_vol_std > vol_mean * 2.0:
                 logger.warning(f"Sudden volume spike detected: {recent_vol_std/vol_mean:.2f}x average")
-                return False
-                
+            return False
+
             # 2. Check for volume trend consistency
             vol_trend = np.polyfit(range(len(volumes[-20:])), volumes[-20:], 1)[0]
             if abs(vol_trend) > vol_mean * 0.5:
@@ -1459,25 +1461,25 @@ class SymbolDiscovery:
                 # For confirmed signals, only check for extreme volume drops
                 if vol_ma5 < vol_ma20 * 0.1:  # Allow up to 90% volume drop
                     logger.warning(f"Extreme volume drop detected: {vol_ma5/vol_ma20:.2%} of average")
-                    return False
-                    
+                return False
+                
                 # Check for volume consistency with relaxed threshold
                 if vol_cv > 2.0:  # Allow higher coefficient of variation
                     logger.warning(f"High volume variation: {vol_cv:.2f}")
-                    return False
-                    
+                return False
+                
                 return True
             else:
                 # Standard checks for unconfirmed signals
                 if vol_ma5 < vol_ma20 * 0.2:  # Require at least 20% of average volume
                     logger.debug(f"Low recent volume: {vol_ma5/vol_ma20:.2%} of average")
-                    return False
-                    
+                return False
+                
                 # Check for volume consistency
                 if vol_cv > 1.5:  # Standard threshold for variation
                     logger.debug(f"High volume variation: {vol_cv:.2f}")
-                    return False
-                    
+                return False
+                
                 return True
             
         except Exception as e:

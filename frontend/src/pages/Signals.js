@@ -22,7 +22,8 @@ import {
   CardHeader,
   List,
   ListItem,
-  ListItemText
+  ListItemText,
+  Badge
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
@@ -520,6 +521,86 @@ const Signals = () => {
     );
   };
 
+  const SignalCard = ({ signal }) => {
+    const {
+      symbol,
+      signal_type,
+      entry_price,
+      stop_loss,
+      take_profit,
+      confidence,
+      mtf_alignment,
+      regime
+    } = signal;
+
+    return (
+      <Card className="mb-4">
+        <Card.Body>
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <h5 className="mb-0">{symbol}</h5>
+            <Badge bg={signal_type === 'LONG' ? 'success' : 'danger'}>
+              {signal_type}
+            </Badge>
+          </div>
+          
+          <div className="row mb-3">
+            <div className="col-md-4">
+              <div className="text-muted small">Entry Price</div>
+              <div>${entry_price.toFixed(2)}</div>
+            </div>
+            <div className="col-md-4">
+              <div className="text-muted small">Stop Loss</div>
+              <div>${stop_loss.toFixed(2)}</div>
+            </div>
+            <div className="col-md-4">
+              <div className="text-muted small">Take Profit</div>
+              <div>${take_profit.toFixed(2)}</div>
+            </div>
+          </div>
+
+          <div className="row mb-3">
+            <div className="col-md-4">
+              <div className="text-muted small">Confidence</div>
+              <div>{confidence.toFixed(2)}</div>
+            </div>
+            <div className="col-md-4">
+              <div className="text-muted small">Regime</div>
+              <div className="text-capitalize">{regime}</div>
+            </div>
+            <div className="col-md-4">
+              <div className="text-muted small">MTF Alignment</div>
+              <div>{mtf_alignment?.strength.toFixed(2) || 'N/A'}</div>
+            </div>
+          </div>
+
+          {mtf_alignment && (
+            <div className="mt-3">
+              <h6 className="mb-2">Timeframe Alignments</h6>
+              <div className="row">
+                {mtf_alignment.timeframes.map(tf => (
+                  <div key={tf} className="col-md-4 mb-2">
+                    <div className="text-muted small">{tf}</div>
+                    <div>
+                      {Object.entries(mtf_alignment.alignments[tf]).map(([type, aligned]) => (
+                        <Badge
+                          key={type}
+                          bg={aligned ? 'success' : 'secondary'}
+                          className="me-1"
+                        >
+                          {type}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card.Body>
+      </Card>
+    );
+  };
+
   if (loading && !signals.length) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -648,11 +729,7 @@ const Signals = () => {
               <Grid container spacing={2}>
                 {signals.map((signal, index) => (
                   <Grid item xs={12} md={6} key={index}>
-                    <Card>
-                      <CardContent>
-                        <SignalChart signal={signal} />
-                      </CardContent>
-                    </Card>
+                    <SignalCard signal={signal} />
                   </Grid>
                 ))}
               </Grid>

@@ -164,11 +164,11 @@ class TradingBot:
             self.strategy_config.switch_profile('moderate')  # Default to moderate profile
             
             # Initialize exchange client first
-            self.exchange_client = ExchangeClient()
+            self.exchange_client = ExchangeClient(scalping_mode=True)  # Enable scalping mode
             await self.exchange_client.initialize([])  # Initialize with empty symbols list first
             
-            # Initialize symbol discovery with exchange client
-            self.symbol_discovery = SymbolDiscovery(self.exchange_client)
+            # Initialize symbol discovery with exchange client and scalping mode
+            self.symbol_discovery = SymbolDiscovery(self.exchange_client, scalping_mode=True)
             await self.symbol_discovery.initialize()
             
             # Get symbols and update exchange client
@@ -188,12 +188,12 @@ class TradingBot:
             ]
             
             logger.info("Trading bot started successfully")
-            
+                    
         except Exception as e:
             logger.error(f"Error starting trading bot: {str(e)}")
             await self.stop()
             raise
-
+            
     async def _execute_trade(self, symbol: str, signal: Dict) -> Optional[Dict]:
         """Execute a trade based on the signal."""
         try:
@@ -412,7 +412,7 @@ class TradingBot:
         
         # Close exchange client
         if hasattr(self, 'exchange_client'):
-            await self.exchange_client.close()
+        await self.exchange_client.close()
         
         # Close WebSocket manager
         if hasattr(self, 'ws_manager'):

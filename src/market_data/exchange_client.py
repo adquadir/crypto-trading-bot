@@ -19,6 +19,7 @@ import random
 import numpy as np
 from .websocket_client import MarketDataWebSocket
 from .config import config
+import ccxt
 
 logger = logging.getLogger(__name__)
 
@@ -199,26 +200,27 @@ class ExchangeClient:
         self.ws_symbols = set()
         
         # Cache TTLs (in seconds)
-        if scalping_mode:
-            self.cache_ttls = {
-                'ohlcv': 5,  # 5 seconds for scalping
-                'orderbook': 2,  # 2 seconds for scalping
-                'ticker': 2,  # 2 seconds for scalping
-                'trades': 2,  # 2 seconds for scalping
-                'open_interest': 5,  # 5 seconds for scalping
-                'funding_rate': 60,  # 1 minute for scalping
-                'volatility': 60  # 1 minute for scalping
+        self.cache_ttls = {
+            'ohlcv': 5 if scalping_mode else 300,  # 5s or 5min
+            'orderbook': 2 if scalping_mode else 60,  # 2s or 1min
+            'ticker': 2 if scalping_mode else 60,  # 2s or 1min
+            'trades': 2 if scalping_mode else 60,  # 2s or 1min
+            'open_interest': 5 if scalping_mode else 300,  # 5s or 5min
+            'funding_rate': 300 if scalping_mode else 3600,  # 5min or 1h
+            'volatility': 300 if scalping_mode else 3600  # 5min or 1h
+        }
+
+        self.exchange = ccxt.binance({
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'future'
             }
-        else:
-            self.cache_ttls = {
-                'ohlcv': config.get('ohlcv_cache_ttl', 60),  # Default 1 minute
-                'orderbook': config.get('orderbook_cache_ttl', 5),  # Default 5 seconds
-                'ticker': config.get('ticker_cache_ttl', 5),  # Default 5 seconds
-                'trades': config.get('trades_cache_ttl', 5),  # Default 5 seconds
-                'open_interest': config.get('open_interest_cache_ttl', 60),  # Default 1 minute
-                'funding_rate': config.get('funding_rate_cache_ttl', 300),  # Default 5 minutes
-                'volatility': config.get('volatility_cache_ttl', 300)  # Default 5 minutes
-            }
+        })
+        self.open_interest_history = {}  # Store open interest history per symbol
+        self.history_length = 24  # Store 24 data points (1 hour with 5-min intervals)
+
+        # Initialize data freshness tracking
+        self.data_freshness = {}
 
     def _setup_proxy(self):
         """Setup proxy configuration."""
@@ -312,9 +314,11 @@ class ExchangeClient:
     async def get_ticker_24h(self, symbol: str) -> Dict:
         """Fetch 24-hour ticker statistics for a symbol."""
         try:
+            cache_key = f"ticker_24h_{symbol}"
+            max_age = self._get_cache_ttl('ticker', self.scalping_mode)
+            
             # Check cache first
-            cache_key = f'ticker_24h_{symbol}'
-            cached_data = self.cache.get(cache_key, max_age=60)  # Cache for 1 minute
+            cached_data = self.cache.get(cache_key, max_age=max_age)
             if cached_data:
                 logger.debug(f"Using cached 24h ticker for {symbol}")
                 return cached_data
@@ -394,9 +398,11 @@ class ExchangeClient:
     async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
         """Fetch order book data for a symbol."""
         try:
+            cache_key = f"orderbook_{symbol}_{limit}"
+            max_age = self._get_cache_ttl('orderbook', self.scalping_mode)
+            
             # Check cache first
-            cache_key = f'orderbook_{symbol}_{limit}'
-            cached_data = self.cache.get(cache_key, max_age=5)  # Cache for 5 seconds
+            cached_data = self.cache.get(cache_key, max_age=max_age)
             if cached_data:
                 logger.debug(f"Using cached orderbook for {symbol}")
                 return cached_data
@@ -498,9 +504,11 @@ class ExchangeClient:
     async def get_open_interest(self, symbol: str) -> float:
         """Fetch open interest for a symbol."""
         try:
+            cache_key = f"open_interest_{symbol}"
+            max_age = self._get_cache_ttl('open_interest', self.scalping_mode)
+            
             # Check cache first
-            cache_key = f'open_interest_{symbol}'
-            cached_data = self.cache.get(cache_key, max_age=60)  # Cache for 1 minute
+            cached_data = self.cache.get(cache_key, max_age=max_age)
             if cached_data is not None:
                 logger.debug(f"Using cached open interest for {symbol}")
                 return cached_data
@@ -546,9 +554,11 @@ class ExchangeClient:
     async def get_historical_data(self, symbol: str, interval: str, limit: int) -> List[Dict]:
         """Fetch historical market data (OHLCV) from Binance."""
         try:
+            cache_key = f"historical_{symbol}_{interval}_{limit}"
+            max_age = self._get_cache_ttl('ohlcv', self.scalping_mode)
+            
             # Check cache first
-            cache_key = f'historical_{symbol}_{interval}_{limit}'
-            cached_data = self.cache.get(cache_key, max_age=60)  # Cache for 1 minute
+            cached_data = self.cache.get(cache_key, max_age=max_age)
             if cached_data:
                 logger.debug(f"Using cached historical data for {symbol}")
                 return cached_data
@@ -743,28 +753,92 @@ class ExchangeClient:
                 logger.error(f"Health check failed: {e}")
             await asyncio.sleep(self.health_check_interval)
 
-    async def initialize(self, symbols):
-        """Initialize the exchange client with a set of symbols."""
-        self.symbols = set(symbols)
-        self.logger.info(f"Initialized ExchangeClient with {len(self.symbols)} symbols")
+    async def initialize(self, symbols: List[str]) -> None:
+        """Initialize exchange client with symbols.
         
-        # Initialize cache for each symbol
-        for symbol in self.symbols:
-            self.cache[symbol] = {
-                'ohlcv': {},
-                'orderbook': {},
-                'ticker': {},
-                'trades': {},
-                'open_interest': {},
-                'funding_rate': {},
-                'volatility': {}
-            }
+        Args:
+            symbols: List of trading pair symbols to track
+        """
+        try:
+            logger.info(f"Initializing exchange client with {len(symbols)} symbols")
+            self.symbols = set(symbols)
+            
+            # Initialize cache for each symbol
+            for symbol in self.symbols:
+                self.cache[symbol] = {
+                    'ohlcv': {},
+                    'orderbook': {},
+                    'ticker': {},
+                    'trades': {},
+                    'open_interest': {},
+                    'funding_rate': {},
+                    'volatility': {}
+                }
+            
+            # Setup proxy if configured
+            self._setup_proxy()
+            
+            # Initialize WebSocket clients for each symbol
+            for symbol in self.symbols:
+                await self._initialize_websocket(symbol)
+            
+            # Start background tasks
+            asyncio.create_task(self._update_funding_rates())
+            asyncio.create_task(self._update_volatility_metrics())
+            
+            logger.info("Exchange client initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Error initializing exchange client: {str(e)}")
+            raise
+            
+    async def _initialize_websocket(self, symbol: str) -> None:
+        """Initialize WebSocket client for a symbol.
         
-        # Start background tasks
-        asyncio.create_task(self._update_funding_rates())
-        asyncio.create_task(self._update_volatility())
-        
-        return True
+        Args:
+            symbol: Trading pair symbol
+        """
+        try:
+            # Create WebSocket client
+            ws_client = MarketDataWebSocket(
+                symbol=symbol,
+                on_message=self._handle_ws_message,
+                on_error=self._handle_ws_error,
+                on_close=self._handle_ws_close
+            )
+            
+            # Store client
+            self.ws_clients[symbol] = ws_client
+            
+            # Initialize subscriptions
+            self.ws_subscriptions[symbol] = set()
+            
+            # Connect and subscribe to channels
+            await ws_client.connect()
+            await ws_client.subscribe([
+                'ticker',
+                'trades',
+                'orderbook',
+                'kline'
+            ])
+            
+            # Update subscriptions
+            self.ws_subscriptions[symbol].update([
+                'ticker',
+                'trades',
+                'orderbook',
+                'kline'
+            ])
+            
+            # Start heartbeat monitoring
+            self.ws_last_message[symbol] = time.time()
+            asyncio.create_task(self._monitor_websocket_heartbeat(symbol))
+            
+            logger.info(f"WebSocket initialized for {symbol}")
+            
+        except Exception as e:
+            logger.error(f"Error initializing WebSocket for {symbol}: {str(e)}")
+            raise
 
     async def _update_funding_rates(self):
         """Background task to update funding rates."""
@@ -885,29 +959,6 @@ class ExchangeClient:
             logger.error(f"Error fetching market data for {symbol}: {e}")
             return {}
 
-    async def initialize(self, symbols: List[str]):
-        """Initialize the exchange client with WebSocket streaming."""
-        try:
-            # Initialize WebSocket client
-            self.ws_client = MarketDataWebSocket(
-                self,
-                symbols,
-                cache_ttl=min(self.cache_ttls.values())  # Use smallest TTL
-            )
-            
-            # Register callbacks
-            self.ws_client.register_callback('kline', self._handle_kline_update)
-            self.ws_client.register_callback('trade', self._handle_trade_update)
-            self.ws_client.register_callback('depth', self._handle_depth_update)
-            
-            # Start WebSocket client
-            asyncio.create_task(self.ws_client.start())
-            logger.info("WebSocket client initialized")
-            
-        except Exception as e:
-            logger.error(f"Error initializing exchange client: {e}")
-            raise
-
     async def _handle_kline_update(self, symbol: str, data: Dict):
         """Handle WebSocket kline updates."""
         try:
@@ -938,28 +989,20 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error handling depth update: {e}")
 
-    def _get_cache_ttl(self, data_type: str, is_scalping: bool = False) -> float:
-        """Get the appropriate cache TTL based on data type and trading mode."""
-        try:
-            if is_scalping:
-                ttl = self.cache_ttls.get(data_type, self.cache_ttls['ohlcv'])
-            else:
-                ttl = self.cache_ttls[data_type]
-                
-            # Adjust TTL based on market volatility
-            if data_type in ['orderbook', 'ticker']:
-                volatility = self._get_market_volatility()
-                if volatility > 0.02:  # High volatility
-                    ttl *= 0.5  # Reduce TTL by half
-                elif volatility < 0.005:  # Low volatility
-                    ttl *= 1.5  # Increase TTL by 50%
-                    
-            return ttl
+    def _get_cache_ttl(self, data_type: str, scalping_mode: bool = False) -> int:
+        """Get cache TTL for a specific data type.
+        
+        Args:
+            data_type: Type of data (ohlcv, orderbook, ticker, etc.)
+            scalping_mode: Whether to use scalping TTLs
             
-        except Exception as e:
-            logger.error(f"Error getting cache TTL: {e}")
-            return self.cache_ttls[data_type]  # Return default TTL on error
-            
+        Returns:
+            int: Cache TTL in seconds
+        """
+        if scalping_mode:
+            return self.cache_ttls.get(data_type, {}).get('scalping', 5)
+        return self.cache_ttls.get(data_type, {}).get('normal', 300)
+
     def _get_market_volatility(self) -> float:
         """Calculate current market volatility."""
         try:
@@ -1131,86 +1174,117 @@ class ExchangeClient:
             logger.error(f"Error fetching orderbook data: {e}")
             return None
 
-    def get_data_freshness(self, symbol: str, data_type: str) -> float:
-        """Get the age of the most recent data in seconds."""
-        if self.ws_client:
-            return self.ws_client.get_data_freshness(symbol)
+    def get_data_freshness(self, symbol: str) -> Dict[str, int]:
+        """Get data freshness timestamps for a symbol.
+        
+        Args:
+            symbol: Trading pair symbol
             
-        cache_key = f"{symbol}_{data_type}"
-        if cache_key in self.cache_timestamps:
-            return time.time() - self.cache_timestamps[cache_key]
-        return float('inf')
-
-    async def stop(self):
-        """Stop the exchange client and WebSocket connection."""
-        if self.ws_client:
-            await self.ws_client.stop()
-        logger.info("Exchange client stopped")
-
-    def _check_stale_data(self, symbol: str, data_type: str, age: float) -> None:
-        """Check for stale data and trigger alerts if necessary."""
+        Returns:
+            Dict[str, int]: Timestamps of when each data type was last updated
+        """
         try:
-            key = f"{symbol}_{data_type}"
-            if age > self.cache_ttls[data_type]:
-                if key not in self._stale_data_alerts:
-                    self._stale_data_alerts[key] = {
-                        'count': 1,
-                        'last_alert': time.time(),
-                        'max_age': age
-                    }
-                else:
-                    self._stale_data_alerts[key]['count'] += 1
-                    self._stale_data_alerts[key]['max_age'] = max(age, self._stale_data_alerts[key]['max_age'])
-                    
-                # Check if we should trigger an alert
-                if self._stale_data_alerts[key]['count'] >= self._alert_threshold:
-                    # Only alert if we haven't alerted in the last 5 minutes
-                    if time.time() - self._stale_data_alerts[key]['last_alert'] > 300:
-                        logger.warning(
-                            f"Persistent stale data detected for {symbol} {data_type}: "
-                            f"{self._stale_data_alerts[key]['count']} occurrences, "
-                            f"max age {self._stale_data_alerts[key]['max_age']:.1f}s"
-                        )
-                        self._stale_data_alerts[key]['last_alert'] = time.time()
-            else:
-                # Reset counter if data is fresh
-                if key in self._stale_data_alerts:
-                    del self._stale_data_alerts[key]
-                    
-        except Exception as e:
-            logger.error(f"Error checking stale data: {e}")
-            
-    def _is_cache_valid(self, cache_key: str, data_type: str, is_scalping: bool = False) -> bool:
-        """Check if cached data is still valid with enhanced validation."""
-        try:
-            if cache_key not in self.cache or cache_key not in self.cache_timestamps:
-                return False
+            if symbol not in self.data_freshness:
+                return {}
                 
-            ttl = self._get_cache_ttl(data_type, is_scalping)
-            age = time.time() - self.cache_timestamps[cache_key]
-            
-            # Check for stale data and trigger alerts
-            symbol = cache_key.split('_')[0]
-            self._check_stale_data(symbol, data_type, age)
-            
-            # Check data quality
-            data = self.cache[symbol][data_type]
-            if not self._validate_data_quality(data, data_type):
-                logger.warning(f"Poor data quality for {cache_key}")
-                return False
-                
-            # Check for stale data
-            if age > ttl:
-                logger.warning(f"Cache expired for {cache_key}: {age:.2f}s old (TTL: {ttl}s)")
-                return False
-                
-            # Check for data consistency
-            if not self._check_data_consistency(data, data_type):
-                logger.warning(f"Inconsistent data for {cache_key}")
-                return False
-                
-            return True
+            return self.data_freshness[symbol]
             
         except Exception as e:
-            logger.error(f"Error validating cache: {e}")
-            return False
+            logger.error(f"Error getting data freshness for {symbol}: {str(e)}")
+            return {}
+            
+    def _update_data_freshness(self, symbol: str, data_type: str) -> None:
+        """Update data freshness timestamp for a symbol and data type.
+        
+        Args:
+            symbol: Trading pair symbol
+            data_type: Type of data (ohlcv, orderbook, etc.)
+        """
+        try:
+            if symbol not in self.data_freshness:
+                self.data_freshness[symbol] = {}
+                
+            self.data_freshness[symbol][data_type] = int(time.time() * 1000)
+            
+        except Exception as e:
+            logger.error(f"Error updating data freshness for {symbol} {data_type}: {str(e)}")
+            
+    def _get_cached_data(self, key: str, max_age: int) -> Optional[Dict]:
+        """Get cached data if not expired.
+        
+        Args:
+            key: Cache key
+            max_age: Maximum age in seconds
+            
+        Returns:
+            Optional[Dict]: Cached data or None if expired
+        """
+        try:
+            if key not in self.cache:
+                return None
+                
+            data = self.cache[key]
+            if not data or 'timestamp' not in data:
+                return None
+                
+            age = time.time() - data['timestamp']
+            if age > max_age:
+                return None
+                
+            return data
+            
+        except Exception as e:
+            logger.error(f"Error getting cached data: {str(e)}")
+            return None
+            
+    def _cache_data(self, key: str, data: Dict) -> None:
+        """Cache data with timestamp.
+        
+        Args:
+            key: Cache key
+            data: Data to cache
+        """
+        try:
+            data['timestamp'] = time.time()
+            self.cache[key] = data
+            
+            # Update data freshness
+            symbol = key.split('_')[0]
+            data_type = key.split('_')[1]
+            self._update_data_freshness(symbol, data_type)
+            
+        except Exception as e:
+            logger.error(f"Error caching data: {str(e)}")
+            
+    def get_market_data(self, symbol: str) -> Dict[str, Any]:
+        """Get all market data for a symbol.
+        
+        Args:
+            symbol: Trading pair symbol
+            
+        Returns:
+            Dict[str, Any]: Market data including OHLCV, orderbook, ticker, etc.
+        """
+        try:
+            data = {
+                'symbol': symbol,
+                'timestamp': int(time.time() * 1000),
+                'ohlcv': self.get_ohlcv(symbol),
+                'orderbook': self.get_orderbook(symbol),
+                'ticker': self.get_ticker_24h(symbol),
+                'trades': self.get_recent_trades(symbol),
+                'open_interest': self.get_open_interest(symbol),
+                'funding_rate': self.get_funding_rate(symbol),
+                'volatility': self.get_volatility_metrics(symbol),
+                'data_freshness': self.get_data_freshness(symbol)
+            }
+            
+            # Add open interest history if available
+            if symbol in self.open_interest_history:
+                data['open_interest_history'] = list(self.open_interest_history[symbol])
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"Error getting market data for {symbol}: {str(e)}")
+            return {}

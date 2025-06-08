@@ -1,8 +1,8 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import logging
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from ta.trend import SMAIndicator, EMAIndicator
 from ta.momentum import RSIIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
@@ -11,6 +11,7 @@ from ..strategies.candle_cluster.detector import CandleClusterDetector
 import ta
 from .signal_tracker import SignalTracker, SignalProfile
 import json
+from .confidence_calibrator import ConfidenceCalibrator
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class SignalGenerator:
         self.strategy_config.set_profile("moderate")  # Default to moderate profile
         self.candle_detector = CandleClusterDetector()
         self.signal_tracker = SignalTracker()
+        self.confidence_calibrator = ConfidenceCalibrator()
         
     def calculate_indicators(self, market_data: Dict, params: Dict = None) -> Dict:
         """Calculate technical indicators from market data."""
@@ -89,9 +91,9 @@ class SignalGenerator:
                     window_fast=params.get('macd_fast_period', 12),
                     window_sign=params.get('macd_signal_period', 9)
                 )
-                macd_value = safe_float(macd.macd().iloc[-1])
-                macd_signal = safe_float(macd.macd_signal().iloc[-1])
-                macd_histogram = safe_float(macd.macd_diff().iloc[-1])
+            macd_value = safe_float(macd.macd().iloc[-1])
+            macd_signal = safe_float(macd.macd_signal().iloc[-1])
+            macd_histogram = safe_float(macd.macd_diff().iloc[-1])
                 logger.debug(f"MACD values - value: {macd_value}, signal: {macd_signal}, histogram: {macd_histogram}")
             except Exception as e:
                 logger.error(f"Error calculating MACD: {e}")
@@ -116,9 +118,9 @@ class SignalGenerator:
                     window=20,
                     window_dev=params.get('bb_std_dev', 2)
                 )
-                bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
-                bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
-                bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
+            bb_upper = safe_float(bb.bollinger_hband().iloc[-1], current_price)
+            bb_middle = safe_float(bb.bollinger_mavg().iloc[-1], current_price)
+            bb_lower = safe_float(bb.bollinger_lband().iloc[-1], current_price)
                 logger.debug(f"Bollinger Bands - upper: {bb_upper}, middle: {bb_middle}, lower: {bb_lower}")
             except Exception as e:
                 logger.error(f"Error calculating Bollinger Bands: {e}")
@@ -134,15 +136,15 @@ class SignalGenerator:
                     df['close'],
                     window=adx_window
                 )
-                adx_df = pd.DataFrame({
-                    'adx': adx.adx(),
-                    'adx_pos': adx.adx_pos(),
-                    'adx_neg': adx.adx_neg()
-                })
-                adx_df = adx_df.replace([np.inf, -np.inf], np.nan).fillna(0)
-                adx_value = float(adx_df['adx'].iloc[-1])
-                adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
-                adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
+            adx_df = pd.DataFrame({
+                'adx': adx.adx(),
+                'adx_pos': adx.adx_pos(),
+                'adx_neg': adx.adx_neg()
+            })
+            adx_df = adx_df.replace([np.inf, -np.inf], np.nan).fillna(0)
+            adx_value = float(adx_df['adx'].iloc[-1])
+            adx_di_plus = float(adx_df['adx_pos'].iloc[-1])
+            adx_di_minus = float(adx_df['adx_neg'].iloc[-1])
                 logger.debug(f"ADX values - value: {adx_value}, DI+: {adx_di_plus}, DI-: {adx_di_minus}")
             except Exception as e:
                 logger.error(f"Error calculating ADX: {e}")
@@ -156,7 +158,7 @@ class SignalGenerator:
                     df['close'],
                     window=min(14, len(df) - 1)  # Adjust window size
                 )
-                atr_value = safe_float(atr.average_true_range().iloc[-1])
+            atr_value = safe_float(atr.average_true_range().iloc[-1])
                 logger.debug(f"ATR value: {atr_value}")
             except Exception as e:
                 logger.error(f"Error calculating ATR: {e}")
@@ -170,7 +172,7 @@ class SignalGenerator:
                     df['close'],
                     window=min(20, len(df) - 1)  # Adjust window size
                 )
-                cci_value = safe_float(cci.cci().iloc[-1])
+            cci_value = safe_float(cci.cci().iloc[-1])
                 logger.debug(f"CCI value: {cci_value}")
             except Exception as e:
                 logger.error(f"Error calculating CCI: {e}")
@@ -546,7 +548,7 @@ class SignalGenerator:
             atr = (atr * (period - 1) + tr[i]) / period
             
         return np.concatenate(([np.nan], atr))
-
+            
     def update_volatility(self, symbol: str, volatility: float):
         """Update strategy parameters based on market volatility."""
         self.strategy_config.adapt_to_volatility(symbol, volatility)
@@ -846,674 +848,83 @@ class SignalGenerator:
             logger.error(f"Error resampling dataframe: {e}")
             return pd.DataFrame()
 
-    def _calculate_mtf_alignment(self, indicators: Dict) -> Dict:
-        """Calculate multi-timeframe alignment with enhanced analysis."""
+    def _calculate_mtf_alignment(
+        self,
+        symbol: str,
+        indicators: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Calculate multi-timeframe alignment.
+        
+        Args:
+            symbol: Trading pair symbol
+            indicators: Dictionary of calculated indicators
+            
+        Returns:
+            Optional[Dict[str, Any]]: MTF alignment data or None if not available
+        """
         try:
-            # Get indicators from all timeframes
-            tf_indicators = {
-                '1m': indicators.get('1m', {}),
-                '5m': indicators.get('5m', {}),
-                '15m': indicators.get('15m', {})
-            }
-            
-            # Validate minimum data points
-            min_data_points = 20
-            for tf, tf_data in tf_indicators.items():
-                if len(tf_data.get('close', [])) < min_data_points:
-                    logger.warning(f"Insufficient data points for {tf} timeframe")
-                    return {'strength': 0.0, 'trend': 'NEUTRAL', 'details': {}}
-            
-            # Calculate technical alignment
-            technical_alignment = self._calculate_technical_alignment(tf_indicators)
-            
-            # Calculate volume alignment
-            volume_alignment = self._calculate_volume_alignment(tf_indicators)
-            
-            # Calculate pattern alignment
-            pattern_alignment = self._calculate_pattern_alignment(tf_indicators)
-            
-            # Calculate overall alignment
-            alignment = {
-                'strength': (technical_alignment['score'] + volume_alignment['score'] + pattern_alignment['score']) / 3,
-                'trend': technical_alignment['trend'],
-                'details': {
-                    'technical': technical_alignment,
-                    'volume': volume_alignment,
-                    'patterns': pattern_alignment
-                }
-            }
-            
-            logger.info(f"MTF Alignment calculated: {alignment['strength']:.2f}")
-            logger.debug(f"MTF Alignment details: {alignment['details']}")
-            
-            return alignment
-            
-        except Exception as e:
-            logger.error(f"Error calculating MTF alignment: {e}")
-            return {'strength': 0.0, 'trend': 'NEUTRAL', 'details': {}}
-
-    def _calculate_technical_alignment(self, tf_indicators: Dict) -> Dict:
-        """Calculate technical indicator alignment across timeframes."""
-        try:
-            alignment_scores = []
-            trend_signals = []
-            
-            for tf, indicators in tf_indicators.items():
-                if not indicators:
-                    continue
-                    
-                # Calculate individual indicator alignments
-                macd_alignment = self._calculate_macd_alignment(indicators.get('macd', {}), indicators.get('macd', {}))
-                rsi_alignment = self._calculate_rsi_alignment(indicators.get('rsi', 50))
-                bb_alignment = self._calculate_bb_alignment(indicators.get('bollinger_bands', {}))
-                adx_alignment = self._calculate_adx_alignment(indicators.get('adx', {}))
-                ema_alignment = self._calculate_ema_alignment(
-                    indicators.get('ema_20', 0),
-                    indicators.get('ema_50', 0)
-                )
-                
-                # Calculate weighted score for this timeframe
-                tf_score = (
-                    macd_alignment * 0.3 +
-                    rsi_alignment * 0.2 +
-                    bb_alignment * 0.2 +
-                    adx_alignment * 0.15 +
-                    ema_alignment * 0.15
-                )
-                
-                alignment_scores.append(tf_score)
-                trend_signals.append(1 if tf_score > 0 else -1 if tf_score < 0 else 0)
-            
-            # Calculate overall trend
-            trend = 'NEUTRAL'
-            if all(signal > 0 for signal in trend_signals):
-                trend = 'BULLISH'
-            elif all(signal < 0 for signal in trend_signals):
-                trend = 'BEARISH'
-            
-            return {
-                'score': sum(alignment_scores) / len(alignment_scores) if alignment_scores else 0,
-                'trend': trend,
-                'details': {
-                    'scores': alignment_scores,
-                    'trend_signals': trend_signals
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error calculating technical alignment: {e}")
-            return {'score': 0.0, 'trend': 'NEUTRAL', 'details': {}}
-
-    def _calculate_volume_alignment(self, tf_indicators: Dict) -> Dict:
-        """Enhanced volume alignment calculation."""
-        try:
-            volume_scores = []
-            volume_trends = []
-            volume_details = []
-
-            for tf, indicators in tf_indicators.items():
-                if not indicators or 'volume' not in indicators:
-                    continue
-
-                volumes = indicators['volume']
-                if not volumes or len(volumes) < 20:
-                    continue
-
-                # Calculate volume profile
-                profile = self._calculate_volume_profile(volumes)
-                # Calculate volume delta
-                delta = self._calculate_volume_delta(volumes)
-                # Calculate volume trend
-                trend = self._calculate_volume_trend(volumes)
-
-                # Combine metrics
-                volume_score = (
-                    profile['score'] * 0.4 +
-                    delta['score'] * 0.4 +
-                    trend['score'] * 0.2
-                )
-
-                volume_scores.append(volume_score)
-                volume_trends.append(trend['direction'])
-                volume_details.append({
-                    'timeframe': tf,
-                    'profile': profile,
-                    'delta': delta,
-                    'trend': trend
-                })
-
-            # Calculate overall trend
-            trend = 'NEUTRAL'
-            if all(t == 'INCREASING' for t in volume_trends):
-                trend = 'INCREASING'
-            elif all(t == 'DECREASING' for t in volume_trends):
-                trend = 'DECREASING'
-
-            return {
-                'score': sum(volume_scores) / len(volume_scores) if volume_scores else 0,
-                'trend': trend,
-                'details': {
-                    'scores': volume_scores,
-                    'trends': volume_trends,
-                    'analysis': volume_details
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Error calculating volume alignment: {e}")
-            return {'score': 0.0, 'trend': 'NEUTRAL', 'details': {}}
-
-    def _calculate_volume_profile(self, volumes: List[float], num_bins: int = 10) -> Dict:
-        """Calculate volume profile analysis."""
-        try:
-            if len(volumes) < 20:
-                return {'score': 0.0, 'trend': 'NEUTRAL'}
-
-            # Calculate volume moving averages
-            short_ma = np.mean(volumes[-5:])
-            long_ma = np.mean(volumes[-20:])
-
-            # Calculate volume distribution
-            hist, bins = np.histogram(volumes, bins=num_bins)
-            volume_distribution = hist / np.sum(hist)
-
-            # Calculate volume trend
-            volume_trend = (short_ma - long_ma) / long_ma
-
-            # Calculate volume consistency
-            volume_std = np.std(volumes[-20:])
-            volume_mean = np.mean(volumes[-20:])
-            volume_consistency = 1 - (volume_std / volume_mean)
-
-            # Calculate overall score
-            score = (
-                volume_trend * 0.4 +  # Volume trend weight
-                volume_consistency * 0.3 +  # Volume consistency weight
-                (1 - np.max(volume_distribution)) * 0.3  # Volume distribution weight
-            )
-
-            # Determine trend
-            trend = 'NEUTRAL'
-            if volume_trend > 0.1:
-                trend = 'INCREASING'
-            elif volume_trend < -0.1:
-                trend = 'DECREASING'
-
-            return {
-                'score': score,
-                'trend': trend,
-                'details': {
-                    'volume_trend': volume_trend,
-                    'volume_consistency': volume_consistency,
-                    'distribution': volume_distribution.tolist()
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Error calculating volume profile: {e}")
-            return {'score': 0.0, 'trend': 'NEUTRAL'}
-
-    def _calculate_volume_delta(self, volumes: List[float]) -> Dict:
-        """Calculate volume delta analysis."""
-        try:
-            if len(volumes) < 20:
-                return {'score': 0.0, 'trend': 'NEUTRAL'}
-
-            # Calculate volume deltas
-            deltas = [volumes[i] - volumes[i-1] for i in range(1, len(volumes))]
-            recent_deltas = deltas[-5:]
-
-            # Calculate delta trend
-            delta_trend = np.mean(recent_deltas)
-            delta_std = np.std(recent_deltas)
-            delta_mean = np.mean(deltas)
-
-            # Calculate score
-            score = delta_trend / (delta_std + 1e-6)  # Avoid division by zero
-
-            # Determine trend
-            trend = 'NEUTRAL'
-            if score > 0.5:
-                trend = 'INCREASING'
-            elif score < -0.5:
-                trend = 'DECREASING'
-
-            return {
-                'score': score,
-                'trend': trend,
-                'details': {
-                    'delta_trend': delta_trend,
-                    'delta_std': delta_std,
-                    'delta_mean': delta_mean
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Error calculating volume delta: {e}")
-            return {'score': 0.0, 'trend': 'NEUTRAL'}
-
-    def _calculate_volume_trend(self, volumes: List[float]) -> Dict:
-        """Calculate volume trend analysis."""
-        try:
-            if len(volumes) < 20:
-                return {'score': 0.0, 'direction': 'NEUTRAL'}
-
-            # Calculate short and long-term moving averages
-            short_ma = np.mean(volumes[-5:])
-            long_ma = np.mean(volumes[-20:])
-
-            # Calculate trend strength
-            trend_strength = (short_ma - long_ma) / long_ma
-
-            # Determine direction
-            direction = 'NEUTRAL'
-            if trend_strength > 0.1:
-                direction = 'INCREASING'
-            elif trend_strength < -0.1:
-                direction = 'DECREASING'
-
-            return {
-                'score': trend_strength,
-                'direction': direction,
-                'details': {
-                    'short_ma': short_ma,
-                    'long_ma': long_ma,
-                    'strength': trend_strength
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Error calculating volume trend: {e}")
-            return {'score': 0.0, 'direction': 'NEUTRAL'}
-
-    def _calculate_pattern_alignment(self, tf_indicators: Dict) -> Dict:
-        """Calculate price pattern alignment across timeframes."""
-        try:
-            pattern_scores = []
-            pattern_types = []
-            
-            for tf, indicators in tf_indicators.items():
-                if not indicators:
-                    continue
-                    
-                # Get price data
-                highs = indicators.get('highs', [])
-                lows = indicators.get('lows', [])
-                if not highs or not lows or len(highs) < 20 or len(lows) < 20:
-                    continue
-                
-                # Detect patterns
-                patterns = self._detect_patterns(highs, lows, indicators['close'])
-                if not patterns:
-                    continue
-                
-                # Calculate pattern score
-                pattern_score = sum(pattern['strength'] for pattern in patterns) / len(patterns)
-                pattern_scores.append(pattern_score)
-                pattern_types.append(patterns[0]['type'])  # Use most significant pattern
-            
-            # Calculate overall pattern trend
-            trend = 'NEUTRAL'
-            if all(score > 0.6 for score in pattern_scores):
-                trend = 'BULLISH'
-            elif all(score < -0.6 for score in pattern_scores):
-                trend = 'BEARISH'
-            
-            return {
-                'score': sum(pattern_scores) / len(pattern_scores) if pattern_scores else 0,
-                'trend': trend,
-                'details': {
-                    'scores': pattern_scores,
-                    'types': pattern_types
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error calculating pattern alignment: {e}")
-            return {'score': 0.0, 'trend': 'NEUTRAL', 'details': {}}
-
-    def _detect_patterns(self, highs: List[float], lows: List[float], closes: List[float]) -> List[Dict]:
-        """Enhanced pattern detection with multiple pattern types."""
-        try:
-            patterns = []
-            if len(highs) < 20 or len(lows) < 20:
-                return patterns
-
-            # Double Top/Bottom
-            if self._is_double_top(highs):
-                patterns.append({
-                    'type': 'DOUBLE_TOP',
-                    'strength': 0.8,
-                    'description': 'Bearish reversal pattern'
-                })
-            if self._is_double_bottom(lows):
-                patterns.append({
-                    'type': 'DOUBLE_BOTTOM',
-                    'strength': 0.8,
-                    'description': 'Bullish reversal pattern'
-                })
-
-            # Higher Highs/Lows
-            if self._is_higher_highs_lows(highs, lows):
-                patterns.append({
-                    'type': 'HIGHER_HIGHS_LOWS',
-                    'strength': 0.7,
-                    'description': 'Uptrend continuation'
-                })
-            elif self._is_lower_highs_lows(highs, lows):
-                patterns.append({
-                    'type': 'LOWER_HIGHS_LOWS',
-                    'strength': 0.7,
-                    'description': 'Downtrend continuation'
-                })
-
-            # Head and Shoulders
-            if self._is_head_and_shoulders(highs, lows):
-                patterns.append({
-                    'type': 'HEAD_AND_SHOULDERS',
-                    'strength': 0.9,
-                    'description': 'Bearish reversal pattern'
-                })
-            elif self._is_inverse_head_and_shoulders(highs, lows):
-                patterns.append({
-                    'type': 'INVERSE_HEAD_AND_SHOULDERS',
-                    'strength': 0.9,
-                    'description': 'Bullish reversal pattern'
-                })
-
-            # Triangle Patterns
-            triangle_type = self._detect_triangle_pattern(highs, lows)
-            if triangle_type:
-                patterns.append({
-                    'type': triangle_type,
-                    'strength': 0.75,
-                    'description': 'Consolidation pattern'
-                })
-
-            return patterns
-
-        except Exception as e:
-            logger.error(f"Error detecting patterns: {e}")
-            return []
-
-    def _is_double_top(self, highs: List[float], threshold: float = 0.02) -> bool:
-        """Detect double top pattern."""
-        try:
-            if len(highs) < 20:
-                return False
-
-            # Find local maxima
-            peaks = []
-            for i in range(2, len(highs) - 2):
-                if highs[i] > highs[i-1] and highs[i] > highs[i-2] and \
-                   highs[i] > highs[i+1] and highs[i] > highs[i+2]:
-                    peaks.append((i, highs[i]))
-
-            if len(peaks) < 2:
-                return False
-
-            # Check last two peaks
-            last_two_peaks = peaks[-2:]
-            price_diff = abs(last_two_peaks[1][1] - last_two_peaks[0][1])
-            avg_price = (last_two_peaks[0][1] + last_two_peaks[1][1]) / 2
-
-            return price_diff / avg_price < threshold
-
-        except Exception as e:
-            logger.error(f"Error detecting double top: {e}")
-            return False
-
-    def _is_double_bottom(self, lows: List[float], threshold: float = 0.02) -> bool:
-        """Detect double bottom pattern."""
-        try:
-            if len(lows) < 20:
-                return False
-
-            # Find local minima
-            troughs = []
-            for i in range(2, len(lows) - 2):
-                if lows[i] < lows[i-1] and lows[i] < lows[i-2] and \
-                   lows[i] < lows[i+1] and lows[i] < lows[i+2]:
-                    troughs.append((i, lows[i]))
-
-            if len(troughs) < 2:
-                return False
-
-            # Check last two troughs
-            last_two_troughs = troughs[-2:]
-            price_diff = abs(last_two_troughs[1][1] - last_two_troughs[0][1])
-            avg_price = (last_two_troughs[0][1] + last_two_troughs[1][1]) / 2
-
-            return price_diff / avg_price < threshold
-
-        except Exception as e:
-            logger.error(f"Error detecting double bottom: {e}")
-            return False
-
-    def _is_higher_highs_lows(self, highs: List[float], lows: List[float], lookback: int = 5) -> bool:
-        """Detect higher highs and higher lows pattern."""
-        try:
-            if len(highs) < lookback or len(lows) < lookback:
-                return False
-
-            recent_highs = highs[-lookback:]
-            recent_lows = lows[-lookback:]
-
-            # Check if highs are making higher highs
-            higher_highs = all(recent_highs[i] > recent_highs[i-1] for i in range(1, len(recent_highs)))
-            # Check if lows are making higher lows
-            higher_lows = all(recent_lows[i] > recent_lows[i-1] for i in range(1, len(recent_lows)))
-
-            return higher_highs and higher_lows
-
-        except Exception as e:
-            logger.error(f"Error detecting higher highs and lows: {e}")
-            return False
-
-    def _is_lower_highs_lows(self, highs: List[float], lows: List[float], lookback: int = 5) -> bool:
-        """Detect lower highs and lower lows pattern."""
-        try:
-            if len(highs) < lookback or len(lows) < lookback:
-                return False
-
-            recent_highs = highs[-lookback:]
-            recent_lows = lows[-lookback:]
-
-            # Check if highs are making lower highs
-            lower_highs = all(recent_highs[i] < recent_highs[i-1] for i in range(1, len(recent_highs)))
-            # Check if lows are making lower lows
-            lower_lows = all(recent_lows[i] < recent_lows[i-1] for i in range(1, len(recent_lows)))
-
-            return lower_highs and lower_lows
-
-        except Exception as e:
-            logger.error(f"Error detecting lower highs and lows: {e}")
-            return False
-
-    def _is_head_and_shoulders(self, highs: List[float], lows: List[float]) -> bool:
-        """Detect head and shoulders pattern."""
-        try:
-            if len(highs) < 5 or len(lows) < 5:
-                return False
-
-            # Find local maxima and minima
-            peaks = []
-            troughs = []
-            for i in range(2, len(highs) - 2):
-                if highs[i] > highs[i-1] and highs[i] > highs[i-2] and \
-                   highs[i] > highs[i+1] and highs[i] > highs[i+2]:
-                    peaks.append((i, highs[i]))
-                if lows[i] < lows[i-1] and lows[i] < lows[i-2] and \
-                   lows[i] < lows[i+1] and lows[i] < lows[i+2]:
-                    troughs.append((i, lows[i]))
-
-            if len(peaks) < 3 or len(troughs) < 3:
-                return False
-
-            # Check head and shoulders pattern
-            if peaks[0][1] > peaks[1][1] and peaks[1][1] > peaks[2][1] and \
-               troughs[0][1] < troughs[1][1] and troughs[1][1] < troughs[2][1]:
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error detecting head and shoulders: {e}")
-            return False
-
-    def _is_inverse_head_and_shoulders(self, highs: List[float], lows: List[float]) -> bool:
-        """Detect inverse head and shoulders pattern."""
-        try:
-            if len(highs) < 5 or len(lows) < 5:
-                return False
-
-            # Find local maxima and minima
-            peaks = []
-            troughs = []
-            for i in range(2, len(highs) - 2):
-                if highs[i] > highs[i-1] and highs[i] > highs[i-2] and \
-                   highs[i] > highs[i+1] and highs[i] > highs[i+2]:
-                    peaks.append((i, highs[i]))
-                if lows[i] < lows[i-1] and lows[i] < lows[i-2] and \
-                   lows[i] < lows[i+1] and lows[i] < lows[i+2]:
-                    troughs.append((i, lows[i]))
-
-            if len(peaks) < 3 or len(troughs) < 3:
-                return False
-
-            # Check inverse head and shoulders pattern
-            if peaks[0][1] < peaks[1][1] and peaks[1][1] < peaks[2][1] and \
-               troughs[0][1] > troughs[1][1] and troughs[1][1] > troughs[2][1]:
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error detecting inverse head and shoulders: {e}")
-            return False
-
-    def _detect_triangle_pattern(self, highs: List[float], lows: List[float]) -> Optional[str]:
-        """Detect various triangle patterns."""
-        try:
-            if len(highs) < 20 or len(lows) < 20:
+            # Get timeframes from strategy config
+            timeframes = self.strategy_config.timeframes
+            if not timeframes or len(timeframes) < 2:
                 return None
-
-            recent_highs = highs[-20:]
-            recent_lows = lows[-20:]
-
-            # Calculate slopes of highs and lows
-            high_slope = np.polyfit(range(len(recent_highs)), recent_highs, 1)[0]
-            low_slope = np.polyfit(range(len(recent_lows)), recent_lows, 1)[0]
-
-            # Determine triangle type based on slopes
-            if abs(high_slope) < 0.001 and abs(low_slope) < 0.001:
-                return 'RECTANGLE'
-            elif high_slope < -0.001 and low_slope > 0.001:
-                return 'SYMMETRICAL_TRIANGLE'
-            elif high_slope < -0.001 and abs(low_slope) < 0.001:
-                return 'ASCENDING_TRIANGLE'
-            elif abs(high_slope) < 0.001 and low_slope > 0.001:
-                return 'DESCENDING_TRIANGLE'
-
+            
+            # Calculate alignment for each timeframe
+            alignments = {}
+            for tf in timeframes:
+                if tf not in indicators:
+                    continue
+                    
+                tf_indicators = indicators[tf]
+                
+                # Check trend alignment
+                trend_aligned = (
+                    tf_indicators.get('macd', {}).get('histogram', 0) > 0 and
+                    tf_indicators.get('rsi', 0) > 50 and
+                    tf_indicators.get('adx', 0) > 25
+                )
+                
+                # Check momentum alignment
+                momentum_aligned = (
+                    tf_indicators.get('rsi', 0) > 50 and
+                    tf_indicators.get('stoch_k', 0) > tf_indicators.get('stoch_d', 0)
+                )
+                
+                # Check volatility alignment
+                volatility_aligned = (
+                    tf_indicators.get('bb_width', 0) < 0.1 and
+                    tf_indicators.get('atr', 0) > 0
+                )
+                
+                alignments[tf] = {
+                    'trend': trend_aligned,
+                    'momentum': momentum_aligned,
+                    'volatility': volatility_aligned
+                }
+            
+            if not alignments:
+                return None
+            
+            # Calculate overall alignment strength
+            total_alignments = 0
+            aligned_count = 0
+            
+            for tf_data in alignments.values():
+                for aligned in tf_data.values():
+                    total_alignments += 1
+                    if aligned:
+                        aligned_count += 1
+            
+            strength = aligned_count / total_alignments if total_alignments > 0 else 0
+            
+            return {
+                'alignments': alignments,
+                'strength': strength,
+                'timeframes': list(alignments.keys())
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating MTF alignment for {symbol}: {str(e)}")
             return None
-
-        except Exception as e:
-            logger.error(f"Error detecting triangle pattern: {e}")
-            return None
-
-    def _calculate_ema_alignment(self, ema_20: float, ema_50: float) -> float:
-        """Calculate EMA alignment score."""
-        try:
-            if not ema_20 or not ema_50:
-                return 0.0
-            
-            # Calculate EMA slope
-            slope = (ema_20 - ema_50) / ema_50
-            
-            # Normalize slope to -1 to 1 range
-            return max(min(slope * 10, 1.0), -1.0)
-            
-        except Exception as e:
-            logger.error(f"Error calculating EMA alignment: {e}")
-            return 0.0
-
-    def _calculate_macd_alignment(self, macd1: Dict, macd2: Dict) -> float:
-        """Calculate MACD alignment between two timeframes."""
-        try:
-            # Get MACD values
-            value1 = macd1.get('value', 0)
-            signal1 = macd1.get('signal', 0)
-            value2 = macd2.get('value', 0)
-            signal2 = macd2.get('signal', 0)
-            
-            # Calculate MACD alignment
-            if value1 > signal1 and value2 > signal2:
-                return 1.0
-            elif value1 < signal1 and value2 < signal2:
-                return -1.0
-            else:
-                return 0.0
-            
-        except Exception as e:
-            logger.error(f"Error calculating MACD alignment: {e}")
-            return 0.0
-
-    def _calculate_rsi_alignment(self, rsi1: float, rsi2: float) -> float:
-        """Calculate RSI alignment between two timeframes."""
-        try:
-            # Calculate RSI alignment
-            if rsi1 > 50 and rsi2 > 50:
-                return 1.0
-            elif rsi1 < 50 and rsi2 < 50:
-                return -1.0
-            else:
-                return 0.0
-            
-        except Exception as e:
-            logger.error(f"Error calculating RSI alignment: {e}")
-            return 0.0
-
-    def _calculate_bb_alignment(self, bb1: Dict, bb2: Dict) -> float:
-        """Calculate Bollinger Bands alignment between two timeframes."""
-        try:
-            # Get Bollinger Bands values
-            upper1 = bb1.get('upper', 0)
-            middle1 = bb1.get('middle', 0)
-            lower1 = bb1.get('lower', 0)
-            upper2 = bb2.get('upper', 0)
-            middle2 = bb2.get('middle', 0)
-            lower2 = bb2.get('lower', 0)
-            
-            # Calculate Bollinger Bands alignment
-            if upper1 > middle1 and upper2 > middle2:
-                return 1.0
-            elif upper1 < middle1 and upper2 < middle2:
-                return -1.0
-            else:
-                return 0.0
-            
-        except Exception as e:
-            logger.error(f"Error calculating Bollinger Bands alignment: {e}")
-            return 0.0
-
-    def _calculate_adx_alignment(self, adx1: Dict, adx2: Dict) -> float:
-        """Calculate ADX alignment between two timeframes."""
-        try:
-            # Get ADX values
-            value1 = adx1.get('value', 0)
-            value2 = adx2.get('value', 0)
-            
-            # Calculate ADX alignment
-            if value1 > 25 and value2 > 25:
-                return 1.0
-            elif value1 < 25 and value2 < 25:
-                return -1.0
-            else:
-                return 0.0
-            
-        except Exception as e:
-            logger.error(f"Error calculating ADX alignment: {e}")
-            return 0.0
 
     def _generate_trending_signal(self, market_data: Dict, indicators: Dict) -> Optional[Dict]:
         """Generate signal for trending market regime."""
@@ -1674,4 +1085,101 @@ class SignalGenerator:
             
         except Exception as e:
             logger.error(f"Error generating volatile signal: {e}")
+            return None
+
+    def generate_signals(
+        self,
+        symbol: str,
+        indicators: Dict[str, Any],
+        confidence: float
+    ) -> Optional[Dict[str, Any]]:
+        """Generate trading signals based on indicators and market data.
+        
+        Args:
+            symbol: Trading pair symbol
+            indicators: Dictionary of calculated indicators
+            confidence: Base confidence score
+            
+        Returns:
+            Optional[Dict[str, Any]]: Signal data or None if no signal
+        """
+        try:
+            # Calculate multi-timeframe alignment
+            mtf_alignment = self._calculate_mtf_alignment(symbol, indicators)
+            if not mtf_alignment:
+                logger.debug(f"No MTF alignment data for {symbol}")
+                return None
+            
+            # Get market regime
+            regime = self._assess_market_regime(indicators)
+            
+            # Check for strong trend
+            if regime == 'trending':
+                adx = indicators.get('adx', 0)
+                if adx > self.strategy_config.trend_thresholds['strong']:
+                    # Check for pullback to EMA
+                    current_price = indicators.get('close', 0)
+                    ema = indicators.get('ema', 0)
+                    if ema and current_price:
+                        # Calculate distance from EMA as percentage
+                        ema_distance = abs(current_price - ema) / ema * 100
+                        
+                        # Only allow entry if price has pulled back to EMA
+                        if ema_distance > self.strategy_config.trend_thresholds['ema_pullback']:
+                            logger.info(
+                                f"Suppressing scalping signal for {symbol} - "
+                                f"Strong trend (ADX: {adx:.2f}) without pullback "
+                                f"(EMA distance: {ema_distance:.2f}%)"
+                            )
+                            return None
+                    
+                    # Check for overbought/oversold conditions
+                    rsi = indicators.get('rsi', 50)
+                    if (rsi > 70 or rsi < 30):  # Price is overbought/oversold
+                        logger.info(
+                            f"Suppressing scalping signal for {symbol} - "
+                            f"Strong trend (ADX: {adx:.2f}) with extreme RSI ({rsi:.2f})"
+                        )
+                        return None
+            
+            # Generate signal based on regime
+            signal = None
+            if regime == 'trending':
+                signal = self._generate_trending_signal(symbol, indicators)
+            elif regime == 'ranging':
+                signal = self._generate_ranging_signal(symbol, indicators)
+            elif regime == 'volatile':
+                signal = self._generate_volatile_signal(symbol, indicators)
+            
+            if signal:
+                # Calibrate confidence based on historical outcomes
+                calibrated_confidence = self.confidence_calibrator.calibrate_confidence(
+                    raw_confidence=confidence,
+                    regime=regime,
+                    mtf_alignment=mtf_alignment
+                )
+                
+                # Add MTF alignment data to signal
+                signal.update({
+                    'mtf_alignment': mtf_alignment,
+                    'regime': regime,
+                    'confidence': calibrated_confidence,
+                    'raw_confidence': confidence  # Keep original confidence for reference
+                })
+                
+                # Log signal generation
+                logger.info(
+                    f"Generated {signal['signal_type']} signal for {symbol} "
+                    f"(raw confidence: {confidence:.2f}, "
+                    f"calibrated: {calibrated_confidence:.2f}, "
+                    f"alignment: {mtf_alignment['strength']:.2f}, "
+                    f"regime: {regime})"
+                )
+                
+                return signal
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error generating signals for {symbol}: {str(e)}")
             return None 
