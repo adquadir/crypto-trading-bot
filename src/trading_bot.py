@@ -30,6 +30,25 @@ logger = logging.getLogger(__name__)
 
 class TradingBot:
     def __init__(self, config_path: str = "config/config.yaml", market_data=None):
+        """Initialize the trading bot."""
+        self.config = self._load_config()
+        self.exchange_client = None
+        self.ws_manager = None
+        self.symbol_discovery = None
+        self.risk_manager = None
+        self.strategy_manager = None
+        self.opportunity_manager = None
+        self.health_check_task = None
+        self.funding_rate_task = None
+        self.position_task = None
+        self.running = False
+        self.position_levels = {}
+        self.opportunities = {}
+        self.profiles = self._get_default_profiles()
+        self._balance_cache = None
+        self._last_balance_update = 0
+        self._balance_cache_ttl = 60  # Cache balance for 60 seconds
+        
         # Load environment variables
         load_dotenv()
         
@@ -80,15 +99,9 @@ class TradingBot:
         self._init_database()
         
         # Trading state
-        self.is_running = False
         self.debug_mode = True  # Set to False in production
         self.risk_per_trade = float(os.getenv('RISK_PER_TRADE', '50.0'))
         self.max_open_trades = int(os.getenv('MAX_OPEN_TRADES', '5'))
-        
-        # Balance tracking
-        self._last_balance_update = 0
-        self._balance_cache = None
-        self._balance_cache_ttl = 300  # 5 minutes cache TTL
         
         # Start opportunity scanning in background
         self.opportunity_scan_task = None
@@ -185,28 +198,17 @@ class TradingBot:
         """Start the trading bot."""
         try:
             logger.info("Starting trading bot...")
+            self.running = True
             
             # Initialize components
-            self.exchange_client = ExchangeClient(self.config)
-            self.signal_generator = SignalGenerator(self.config)
-            self.symbol_discovery = SymbolDiscovery(self.exchange_client, self.config)
+            await self._initialize_components()
             
-            # Start WebSocket manager in the background
-            self.ws_task = asyncio.create_task(self.exchange_client.ws_manager.start())
-            
-            # Start other tasks
+            # Start monitoring tasks
             self.health_check_task = asyncio.create_task(self._health_check_loop())
             self.funding_rate_task = asyncio.create_task(self._monitor_funding_rates())
             self.position_task = asyncio.create_task(self._monitor_positions())
-            self.signal_task = asyncio.create_task(self._process_signals())
             
-            # Wait for all tasks
-            await asyncio.gather(
-                self.health_check_task,
-                self.funding_rate_task,
-                self.position_task,
-                self.signal_task
-            )
+            logger.info("Trading bot started successfully")
             
         except Exception as e:
             logger.error(f"Error starting trading bot: {e}")
@@ -226,10 +228,6 @@ class TradingBot:
                 self.funding_rate_task.cancel()
             if self.position_task:
                 self.position_task.cancel()
-            if self.signal_task:
-                self.signal_task.cancel()
-            if self.ws_task:
-                self.ws_task.cancel()
                 
             # Stop WebSocket manager
             if self.exchange_client and self.exchange_client.ws_manager:
@@ -643,6 +641,48 @@ class TradingBot:
             
         except Exception as e:
             logger.error(f"Error updating position levels for {symbol}: {e}")
+
+    async def _monitor_funding_rates(self):
+        """Monitor funding rates for active positions."""
+        while self.running:
+            try:
+                for symbol in self.active_trades:
+                    funding_rate = await self.exchange_client.get_funding_rate(symbol)
+                    if funding_rate is not None:
+                        logger.info(f"Funding rate for {symbol}: {funding_rate}")
+                        # Add funding rate monitoring logic here
+                await asyncio.sleep(60)  # Check every minute
+            except Exception as e:
+                logger.error(f"Error monitoring funding rates: {e}")
+                await asyncio.sleep(5)
+
+    async def _monitor_positions(self):
+        """Monitor active positions and update their status."""
+        while self.running:
+            try:
+                for symbol in self.active_trades:
+                    await self._update_position_levels(symbol)
+                await asyncio.sleep(10)  # Update every 10 seconds
+            except Exception as e:
+                logger.error(f"Error monitoring positions: {e}")
+                await asyncio.sleep(5)
+
+    def load_strategy_profiles(self):
+        """Load strategy profiles from JSON file."""
+        try:
+            profiles_path = os.path.join('config', 'strategy_profiles.json')
+            if os.path.exists(profiles_path):
+                with open(profiles_path, 'r') as f:
+                    loaded_profiles = json.load(f)
+                    if loaded_profiles:
+                        self.profiles = loaded_profiles
+                        logger.info("Loaded strategy profiles from file")
+                        return
+            logger.warning("No strategy profiles found, using defaults")
+            self.profiles = self._get_default_profiles()
+        except Exception as e:
+            logger.error(f"Error loading strategy profiles: {e}")
+            self.profiles = self._get_default_profiles()
 
 # Create a singleton instance
 trading_bot = TradingBot()
