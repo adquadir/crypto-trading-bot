@@ -1467,7 +1467,7 @@ class SymbolDiscovery:
             recent_vol_std = np.std(volumes[-5:])
             if recent_vol_std > vol_mean * 2.0:
                 logger.warning(f"Sudden volume spike detected: {recent_vol_std/vol_mean:.2f}x average")
-            return False
+                return False
 
             # 2. Check for volume trend consistency
             vol_trend = np.polyfit(range(len(volumes[-20:])), volumes[-20:], 1)[0]
@@ -1491,22 +1491,22 @@ class SymbolDiscovery:
                 if vol_cv > 2.0:  # Allow higher coefficient of variation
                     logger.warning(f"High volume variation: {vol_cv:.2f}")
                     return False
-                else:
+            else:
                 # Standard checks for unconfirmed signals
                 if vol_ma5 < vol_ma20 * 0.2:  # Require at least 20% of average volume
                     logger.debug(f"Low recent volume: {vol_ma5/vol_ma20:.2%} of average")
-                return False
+                    return False
                 
                 # Check for volume consistency
                 if vol_cv > 1.5:  # Standard threshold for variation
                     logger.debug(f"High volume variation: {vol_cv:.2f}")
-                return False
-                
+                    return False
+            
             return True
                 
         except Exception as e:
             logger.error(f"Error checking volume trend: {e}")
-                return False
+            return False
                 
     async def initialize(self) -> None:
         """Initialize the symbol discovery process."""
