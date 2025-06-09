@@ -175,7 +175,7 @@ class ExchangeClient:
         self.cache_timestamps = {}
         self.symbols = config.get('symbols', ['BTCUSDT'])
         self.logger = logging.getLogger(__name__)
-        self.symbol_discovery = SymbolDiscovery(config)
+        self.symbol_discovery = None  # Initialize as None, will be set up when needed
         self.testnet = config.get('testnet', False)
         
         # Initialize WebSocket-related attributes
@@ -922,29 +922,30 @@ class ExchangeClient:
         # Replace this with actual logic to fetch symbols from the exchange
         return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
-    async def initialize(self, symbols: Optional[List[str]] = None):
-        """Initialize the exchange client with optional symbols."""
+    async def initialize(self):
+        """Initialize the exchange client."""
         try:
-            # Update symbols if provided, otherwise get from discovery
-            if symbols is not None:
-                self.symbols = symbols
-            else:
+            # Initialize symbol discovery if needed
+            if self.symbol_discovery is None:
+                from src.market_data.symbol_discovery import SymbolDiscovery
+                self.symbol_discovery = SymbolDiscovery(self.config)
+                await self.symbol_discovery.start()
+            
+            # Update symbols from discovery if in dynamic mode
+            if self.config.get('symbol_discovery_mode', 'static') == 'dynamic':
                 self.symbols = await self.symbol_discovery.get_symbols()
             
-            logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
+            self.running = True
+            self.logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
             
             # Start background tasks
-            self.running = True
-            self.health_check_task = asyncio.create_task(self._health_check_loop())
-            self.funding_rates_task = asyncio.create_task(self._update_funding_rates())
+            self.health_check_task = asyncio.create_task(self._monitor_health())
+            self.funding_rates_task = asyncio.create_task(self._monitor_funding_rates())
             
-            # Initialize WebSocket clients for each symbol
-            for symbol in self.symbols:
-                await self._setup_symbol_websocket(symbol)
-            
+            return True
         except Exception as e:
-            logger.error(f"Error initializing exchange client: {e}")
-            raise
+            self.logger.error(f"Error initializing exchange client: {e}")
+            return False
 
     async def shutdown(self):
         """Shutdown the exchange client."""
