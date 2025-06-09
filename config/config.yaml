@@ -78,4 +78,20 @@ risk:
 logging:
   level: INFO
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/trading_bot.log" 
+  file: "logs/trading_bot.log"
+
+exchange:
+  api_key: ${BINANCE_API_KEY}
+  api_secret: ${BINANCE_API_SECRET}
+  base_url: https://api.binance.com
+  ws_url: wss://stream.binance.com:9443/ws/stream
+  testnet: ${USE_TESTNET}
+  proxy:
+    host: ${PROXY_HOST}
+    port: ${PROXY_PORT}
+    username: ${PROXY_USER}
+    password: ${PROXY_PASS}
+  proxy_ports: ${PROXY_LIST}
+  failover_ports: ${FAILOVER_PORTS}
+  symbols: ${TRADING_SYMBOLS}
+  scalping_mode: false 

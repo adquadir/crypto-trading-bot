@@ -16,10 +16,13 @@ class MarketDataWebSocket:
         self.exchange_client = exchange_client
         self.symbols = symbols
         self.cache_ttl = cache_ttl
+        self.ws_url = "wss://stream.binance.com:9443/ws/stream"
         self.connection = None
         self.running = False
-        self.ws_url = "wss://stream.binance.com:9443/stream"  # Correct combined stream endpoint
         self.logger = logging.getLogger(__name__)
+        self.retry_count = 0
+        self.max_retries = 3
+        self.retry_delay = 2
         self.cache = {}  # Initialize cache
         self.cache_timestamps = {}  # Initialize cache timestamps
         self.connections: Dict[str, websockets.WebSocketClientProtocol] = {}
@@ -33,57 +36,32 @@ class MarketDataWebSocket:
 
     async def connect(self):
         """Connect to the WebSocket stream."""
-        max_retries = 3
-        retry_count = 0
-        while retry_count < max_retries:
-            try:
-                # Create streams for each symbol
-                streams = []
-                for symbol in self.symbols:
-                    symbol_lower = symbol.lower()
-                    streams.extend([
-                        f"{symbol_lower}@kline_1m",  # 1-minute klines
-                        f"{symbol_lower}@trade",     # Trades
-                        f"{symbol_lower}@depth20@100ms"  # Order book (20 levels)
-                    ])
-                
-                # Connect to combined stream
-                stream_url = f"{self.ws_url}?streams={'/'.join(streams)}"
-                
-                # Required headers for Binance WebSocket
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Origin': 'https://www.binance.com',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache'
-                }
-                
-                self.connection = await websockets.connect(
-                    stream_url,
-                    extra_headers=headers,
-                    ping_interval=30,
-                    ping_timeout=10,
-                    close_timeout=10,
-                    max_size=2**20,  # 1MB max message size
-                    max_queue=2**10,  # 1024 messages in queue
-                    compression=None  # Disable compression as Binance doesn't support it
-                )
-                logger.info(f"Connected to WebSocket stream: {stream_url}")
-                return
-            except websockets.exceptions.InvalidStatusCode as e:
-                if e.status_code == 451:
-                    logger.error(f"WebSocket connection rejected with status code 451. Retrying... (Attempt {retry_count + 1}/{max_retries})")
-                    retry_count += 1
-                    await asyncio.sleep(2)  # Wait before retrying
-                else:
-                    logger.error(f"Error connecting to WebSocket: {e}")
-                    raise
-            except Exception as e:
-                logger.error(f"Error connecting to WebSocket: {e}")
-                raise
-        logger.error("Failed to connect to WebSocket after maximum retries.")
-        raise ConnectionError("Failed to connect to WebSocket after maximum retries.")
+        try:
+            # Create streams for each symbol
+            streams = []
+            for symbol in self.symbols:
+                streams.extend([
+                    f"{symbol.lower()}@aggTrade",
+                    f"{symbol.lower()}@depth@100ms",
+                    f"{symbol.lower()}@kline_1m",
+                    f"{symbol.lower()}@ticker"
+                ])
+            
+            # Connect to the combined stream
+            stream_url = f"{self.ws_url}?streams={'/'.join(streams)}"
+            self.connection = await websockets.connect(
+                stream_url,
+                ping_interval=30,
+                ping_timeout=10,
+                close_timeout=10
+            )
+            self.running = True
+            self.retry_count = 0
+            self.logger.info(f"WebSocket connected successfully for symbols: {self.symbols}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error connecting to WebSocket: {e}")
+            return False
 
     async def subscribe(self):
         """Subscribe to Binance streams."""

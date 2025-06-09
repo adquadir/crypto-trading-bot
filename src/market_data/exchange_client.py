@@ -147,95 +147,72 @@ def rate_limit(limit: int = 10, period: float = 1.0):
     return decorator
 
 class ExchangeClient:
-    def __init__(
-        self,
-        api_key: str,
-        api_secret: str,
-        symbol_set: Optional[Set[str]] = None,
-        testnet: bool = False,
-        proxy_list: Optional[List[str]] = None,
-        failover_ports: Optional[List[str]] = None,
-        proxy_config: Optional[Dict[str, str]] = None,
-        scalping_mode: bool = False,
-    ):
-        self.symbols = symbol_set or {'BTCUSDT'}
-        self.testnet = testnet
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize the exchange client."""
+        self.config = config
+        self.api_key = config['api_key']
+        self.api_secret = config['api_secret']
+        self.base_url = config['base_url']
+        self.ws_url = config['ws_url']
+        
+        # Proxy configuration
+        self.proxy = None
+        if config.get('proxy'):
+            proxy_config = config['proxy']
+            self.proxy = f"http://{proxy_config['host']}:{proxy_config['port']}"
+            if 'username' in proxy_config and 'password' in proxy_config:
+                self.proxy_auth = aiohttp.BasicAuth(
+                    proxy_config['username'],
+                    proxy_config['password']
+                )
+        
+        self.session = None
+        self.ws_clients = {}
+        self.running = False
+        self.health_check_task = None
+        self.funding_rates_task = None
+        self.cache = CacheManager()
+        self.cache_timestamps = {}
+        self.symbols = config.get('symbols', ['BTCUSDT'])
+        self.logger = logging.getLogger(__name__)
+        self.symbol_discovery = SymbolDiscovery(config)
+        self.testnet = config.get('testnet', False)
+        
+        # Initialize WebSocket-related attributes
+        self.ws_subscriptions = {}
+        self.ws_last_message = {}
+        self._stale_data_alerts = {}
+        self._alert_threshold = 3
+        self.scalping_mode = config.get('scalping_mode', False)
+        
+        # Initialize proxy rotation
         self.proxy_metrics = {}
         self.rotation_threshold = 0.8
         self.health_check_interval = 60
         self._shutdown_event = asyncio.Event()
-        self.session = None
-        self.health_check_task = None
-        self.ws_clients = {}  # Store WebSocket clients per symbol
-        self.ws_last_message = {}  # Track last message time per symbol
-        self.cache = CacheManager()
-        self._stale_data_alerts = {}  # Track stale data alerts
-        self._alert_threshold = 3  # Number of consecutive stale data occurrences before alert
-        self.scalping_mode = scalping_mode
-        self.base_url = "https://testnet.binance.vision/api" if testnet else "https://api.binance.com/api"
-        self.ws_base_url = "wss://testnet.binance.vision/ws" if testnet else "wss://stream.binance.com:9443/ws"
-
-        # Initialize WebSocket-related attributes
-        self.ws_subscriptions = {}
-        self.cache_timestamps = {}
-
-        # Initialize logger
-        self.logger = logging.getLogger(__name__)
-
-        # Load proxy configuration from environment variables
-        self.proxy_list = proxy_list or os.getenv('PROXY_PORTS', '10001,10002,10003').split(',')
-        self.failover_ports = failover_ports or os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(',')
+        
+        # Load proxy configuration
+        self.proxy_list = config.get('proxy_ports', os.getenv('PROXY_LIST', '10001,10002,10003').split(','))
+        self.failover_ports = config.get('failover_ports', os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','))
         self.current_port_index = 0
-        self.proxy_config = proxy_config or {
-            "host": os.getenv('PROXY_HOST'),
-            "port": os.getenv('PROXY_PORT'),
-            "user": os.getenv('PROXY_USER'),
-            "pass": os.getenv('PROXY_PASS')
-        }
-
-        # Validate proxy configuration
-        if not all([self.proxy_config["host"], self.proxy_config["port"], 
-                   self.proxy_config["user"], self.proxy_config["pass"]]):
-            logger.warning("Incomplete proxy configuration. Some proxy settings are missing.")
-            self.proxy_config = None
-        else:
-            self._setup_proxy()
-            
-        self._init_client(api_key, api_secret)
-
-        # Initialize WebSocket client
-        self.ws_client = None
-        self.ws_symbols = set()
+        
+        # Initialize client
+        self._init_client(self.api_key, self.api_secret)
         
         # Cache TTLs (in seconds)
         self.cache_ttls = {
-            'ohlcv': 5 if scalping_mode else 300,  # 5s or 5min
-            'orderbook': 2 if scalping_mode else 60,  # 2s or 1min
-            'ticker': 2 if scalping_mode else 60,  # 2s or 1min
-            'trades': 2 if scalping_mode else 60,  # 2s or 1min
-            'open_interest': 5 if scalping_mode else 300,  # 5s or 5min
-            'funding_rate': 300 if scalping_mode else 3600,  # 5min or 1h
-            'volatility': 300 if scalping_mode else 3600  # 5min or 1h
+            'ohlcv': 5 if self.scalping_mode else 300,  # 5s or 5min
+            'orderbook': 2 if self.scalping_mode else 60,  # 2s or 1min
+            'ticker': 2 if self.scalping_mode else 60,  # 2s or 1min
+            'trades': 2 if self.scalping_mode else 60,  # 2s or 1min
+            'open_interest': 5 if self.scalping_mode else 300,  # 5s or 5min
+            'funding_rate': 300 if self.scalping_mode else 3600,  # 5min or 1h
+            'volatility': 300 if self.scalping_mode else 3600  # 5min or 1h
         }
-
-        self.exchange = ccxt.binance({
-            'enableRateLimit': True,
-            'options': {
-                'defaultType': 'future'
-            }
-        })
-        self.open_interest_history = {}  # Store open interest history per symbol
-        self.history_length = 24  # Store 24 data points (1 hour with 5-min intervals)
-
-        # Initialize data freshness tracking
-        self.data_freshness = {}
-
-        # Initialize order books and last trade price
-        self.order_books = {}
-        self.last_trade_price = {}
-
-        # Initialize running attribute
-        self.running = False
+        
+        # Initialize data structures
+        self.open_interest_history = {}
+        self.history_length = 24
 
     def _setup_proxy(self):
         """Setup proxy configuration."""
@@ -1029,15 +1006,22 @@ class ExchangeClient:
         # Placeholder for proxy selection logic
         return "http://example-proxy.com:8080"
 
-    async def _test_proxy_connection(self, proxy: str = None):
-        """Test the connection to a proxy."""
+    async def _test_proxy_connection(self) -> bool:
+        """Test proxy connection."""
+        if not self.proxy:
+            return True
+        
         try:
-            proxy_url = proxy or f"http://{self.proxy_host}:{self.proxy_port}" if self.proxy_host and self.proxy_port else None
             async with aiohttp.ClientSession() as session:
-                async with session.get('https://api.binance.com/api/v3/ping', proxy=proxy_url) as response:
+                async with session.get(
+                    'https://api.binance.com/api/v3/ping',
+                    proxy=self.proxy,
+                    proxy_auth=self.proxy_auth,
+                    timeout=10
+                ) as response:
                     return response.status == 200
         except Exception as e:
-            logger.error(f"Error testing proxy connection: {e}")
+            self.logger.error(f"Error testing proxy connection: {e}")
             return False
 
     def _get_cache_ttl(self, data_type: str, scalping_mode: bool = False) -> int:

@@ -383,7 +383,7 @@ class SymbolDiscovery:
         self.signal_generator = SignalGenerator()
         self.opportunities: Dict[str, TradingOpportunity] = {}
         self.last_update = {}
-        self.update_interval = int(os.getenv('SYMBOL_UPDATE_INTERVAL', '3600'))  # Default 1 hour
+        self.update_interval = int(os.getenv('UPDATE_INTERVAL', '1.0'))  # Use UPDATE_INTERVAL from .env
         self._update_task = None
         self._processing_lock = asyncio.Lock()  # Add lock for concurrent processing
         self._discovery_lock = asyncio.Lock()
@@ -437,7 +437,7 @@ class SymbolDiscovery:
         self.cache_dir = Path('cache/signals')
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.signal_cache: Dict[str, CachedSignal] = {}
-        self.cache_duration = int(os.getenv('SIGNAL_CACHE_DURATION', '300'))  # 5 minutes default
+        self.cache_duration = int(os.getenv('SYMBOL_CACHE_DURATION', '3600'))  # Use SYMBOL_CACHE_DURATION from .env
         
     async def start(self):
         """Start the symbol discovery process."""
