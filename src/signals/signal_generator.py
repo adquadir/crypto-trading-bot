@@ -268,7 +268,7 @@ class SignalGenerator:
                         'scores': scores,
                         'is_transitioning': True
                     }
-            
+
             return {
                 'regime': primary_regime[0],
                 'confidence': confidence,

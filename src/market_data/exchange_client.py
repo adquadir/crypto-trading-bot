@@ -720,10 +720,10 @@ class ExchangeClient:
                 for symbol in self.symbols:
                     await self._update_volatility(symbol)
                 await asyncio.sleep(60)  # Update every minute
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Error updating volatility metrics: {e}")
                 await asyncio.sleep(5)  # Wait before retrying
-
+            
     async def close(self):
         """Close all WebSocket connections."""
         for symbol, ws_client in self.ws_clients.items():
