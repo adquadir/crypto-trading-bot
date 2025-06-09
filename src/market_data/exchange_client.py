@@ -1122,26 +1122,15 @@ class ExchangeClient:
             raise
 
     def _init_ws_manager(self):
-        """Initialize the WebSocket manager for market data streaming."""
+        """Initialize the WebSocket manager."""
         try:
-            # Create WebSocket manager instance
+            # Initialize WebSocket manager with correct parameters
             self.ws_manager = MarketDataWebSocket(
                 exchange_client=self,
-                symbols=list(self.symbols),
-                ws_url=self.ws_url,
-                proxy_config=self.proxy_config if hasattr(self, 'proxy_config') else None
+                symbols=self.symbols,
+                cache_ttl=int(os.getenv('CACHE_TTL', '60'))
             )
-            
-            # Set up WebSocket event handlers
-            self.ws_manager.on_message = self._handle_ws_message
-            self.ws_manager.on_error = self._handle_ws_error
-            self.ws_manager.on_close = self._handle_ws_close
-            
-            # Initialize WebSocket clients dictionary
-            self.ws_clients = {}
-            
-            logger.info("WebSocket manager initialized successfully")
-            
+            logger.info("WebSocket manager initialized")
         except Exception as e:
             logger.error(f"Error initializing WebSocket manager: {e}")
             raise

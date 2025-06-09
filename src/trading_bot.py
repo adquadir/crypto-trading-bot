@@ -32,19 +32,29 @@ from src.opportunity.opportunity_manager import OpportunityManager
 logger = logging.getLogger(__name__)
 
 class TradingBot:
-    def __init__(self, config_path: str = "config/config.yaml", market_data=None):
+    def __init__(self):
         """Initialize the trading bot."""
+        # Load environment variables
+        load_dotenv()
+        
+        # Load configuration
         self.config = self._load_config()
+        
+        # Initialize components as None
         self.exchange_client = None
         self.ws_manager = None
         self.symbol_discovery = None
         self.risk_manager = None
         self.strategy_manager = None
         self.opportunity_manager = None
+        
+        # Initialize task tracking
         self.health_check_task = None
         self.funding_rate_task = None
         self.position_task = None
         self.running = False
+        
+        # Initialize state
         self.position_levels = {}
         self.opportunities = {}
         self.profiles = self._get_default_profiles()
@@ -52,54 +62,12 @@ class TradingBot:
         self._last_balance_update = 0
         self._balance_cache_ttl = 60  # Cache balance for 60 seconds
         
-        # Load environment variables
-        load_dotenv()
-        
-        # Load configuration from YAML
-        # Binance API keys and testnet are loaded directly from environment variables
-        # to prioritize the recommended .env configuration method.
-        self.config = load_config(config_path)
-        
         # Set trading intervals with defaults
         self.health_check_interval = self.config.get('trading', {}).get('health_check_interval', 60)
         self.funding_rate_interval = self.config.get('trading', {}).get('funding_rate_interval', 300)
         self.position_interval = self.config.get('trading', {}).get('position_interval', 30)
         self.signal_interval = self.config.get('trading', {}).get('signal_interval', 15)
         self.scan_interval = self.config.get('trading', {}).get('scan_interval', 10)
-        
-        # Initialize components
-        exchange_config = {
-            'api_key': os.getenv('BINANCE_API_KEY'),
-            'api_secret': os.getenv('BINANCE_API_SECRET'),
-            'base_url': 'https://api.binance.com',
-            'ws_url': 'wss://stream.binance.com:9443/ws/stream',
-            'testnet': os.getenv('USE_TESTNET', 'False').lower() == 'true',
-            'scalping_mode': True,
-            'proxy': {
-                'host': os.getenv('PROXY_HOST'),
-                'port': os.getenv('PROXY_PORT'),
-                'username': os.getenv('PROXY_USER'),
-                'password': os.getenv('PROXY_PASS')
-            },
-            'proxy_ports': os.getenv('PROXY_LIST', '10001,10002,10003').split(','),
-            'failover_ports': os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','),
-            'symbols': os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
-        }
-        self.exchange_client = ExchangeClient(config=exchange_config)
-        self.market_processor = MarketDataProcessor()
-        self.signal_engine = SignalEngine()
-        self.symbol_discovery = SymbolDiscovery(self.exchange_client)
-        self.exchange_client.symbol_discovery = self.symbol_discovery  # Share the same instance
-        self.signal_generator = SignalGenerator()
-        self.risk_manager = RiskManager(
-            account_balance=self.config['risk']['initial_balance'],
-        )
-        
-        # Ensure market_data is always set
-        self.market_data = market_data if market_data is not None else self.symbol_discovery
-        
-        # Initialize database
-        self._init_database()
         
         # Trading state
         self.debug_mode = True  # Set to False in production
@@ -206,7 +174,6 @@ class TradingBot:
             
             # Initialize WebSocket manager
             self.ws_manager = self.exchange_client.ws_manager
-            await self.ws_manager.initialize()
             
             # Initialize symbol discovery
             self.symbol_discovery = SymbolDiscovery(self.exchange_client, self.config)
@@ -239,13 +206,13 @@ class TradingBot:
             # Initialize components
             await self._initialize_components()
             
-            # Start WebSocket manager
-            await self.ws_manager.start()
-            
             # Start monitoring tasks
             self.health_check_task = asyncio.create_task(self._health_check_loop())
             self.funding_rate_task = asyncio.create_task(self._monitor_funding_rates())
             self.position_task = asyncio.create_task(self._monitor_positions())
+            
+            # Start WebSocket manager in background
+            asyncio.create_task(self.ws_manager.start())
             
             logger.info("Trading bot started successfully")
             
@@ -780,6 +747,71 @@ class TradingBot:
                 'funding_rate_check_interval': int(os.getenv('FUNDING_RATE_CHECK_INTERVAL', '60'))
             }
         }
+
+    async def _execute_trade(self, symbol: str, signal: Dict[str, Any]) -> bool:
+        """Execute a trade based on the signal."""
+        try:
+            # Validate signal
+            if not self._validate_signal(signal):
+                logger.error(f"Invalid signal for {symbol}")
+                return False
+                
+            # Check risk limits
+            if not self.risk_manager.check_risk_limits(symbol, signal):
+                logger.warning(f"Risk limits exceeded for {symbol}")
+                return False
+                
+            # Get current position
+            position = await self.exchange_client.get_position(symbol)
+            if position and float(position.get('positionAmt', 0)) != 0:
+                logger.warning(f"Position already exists for {symbol}")
+                return False
+                
+            # Calculate position size
+            balance = await self._get_account_balance()
+            position_size = self.risk_manager.calculate_position_size(
+                symbol=symbol,
+                balance=balance,
+                risk_per_trade=self.config['trading']['risk_per_trade']
+            )
+            
+            # Execute order
+            order = await self.exchange_client.create_order(
+                symbol=symbol,
+                order_type='MARKET',
+                side=signal['side'],
+                amount=position_size
+            )
+            
+            if order:
+                logger.info(f"Trade executed for {symbol}: {order}")
+                return True
+            else:
+                logger.error(f"Failed to execute trade for {symbol}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error executing trade for {symbol}: {e}")
+            return False
+            
+    def _validate_signal(self, signal: Dict[str, Any]) -> bool:
+        """Validate a trading signal."""
+        try:
+            required_fields = ['symbol', 'side', 'price', 'timestamp']
+            if not all(field in signal for field in required_fields):
+                return False
+                
+            if signal['side'] not in ['BUY', 'SELL']:
+                return False
+                
+            if not isinstance(signal['price'], (int, float)) or signal['price'] <= 0:
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating signal: {e}")
+            return False
 
 # Create a singleton instance
 trading_bot = TradingBot()
