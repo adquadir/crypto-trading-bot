@@ -1,12 +1,14 @@
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker, Session, scoped_session
-from sqlalchemy.ext.declarative import declarative_base
-import os
-from dotenv import load_dotenv
-from src.models import Base, Strategy # Import Base and Strategy
 import logging
+import os
 from contextlib import contextmanager
 from typing import Generator, Optional
+
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session, scoped_session
+
+from src.models import Base, Strategy
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,16 +32,18 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Create scoped session
 db_session = scoped_session(SessionLocal)
 
+
 class Database:
     """Database management class for the trading bot."""
-    
+
     def __init__(self):
         self.engine = engine
         self.SessionLocal = SessionLocal
-    
+
     def get_session(self):
+        """Get a new database session."""
         return self.SessionLocal()
-    
+
     def init_db(self) -> None:
         """Initialize the database and create tables."""
         try:
@@ -49,11 +53,11 @@ class Database:
         except Exception as e:
             logger.error(f"Error initializing database: {str(e)}")
             raise
-    
+
     @contextmanager
     def get_db(self) -> Generator[Session, None, None]:
         """Get a database session.
-        
+
         Yields:
             Session: Database session
         """
@@ -62,10 +66,10 @@ class Database:
             yield db
         finally:
             db.close()
-    
+
     async def check_connection(self) -> bool:
         """Check database connection.
-        
+
         Returns:
             bool: True if connection is successful, False otherwise
         """
@@ -82,24 +86,29 @@ class Database:
         try:
             self.engine.dispose()
             logger.info("Database connection closed")
-                        except Exception as e:
+        except Exception as e:
             logger.error(f"Error closing database connection: {e}")
             raise
 
     def get_strategy(self, strategy_id: int):
+        """Get a strategy by ID."""
         with self.get_db() as db:
             return db.query(Strategy).filter(Strategy.id == strategy_id).first()
-    
+
     def get_all_strategies(self):
+        """Get all strategies."""
         with self.get_db() as db:
             return db.query(Strategy).all()
+
 
 # Initialize database
 db = Database()
 
+
 async def init_db() -> None:
     """Initialize the database."""
     await db.init_db()
+
 
 def update_db_schema():
     """Update the database schema by creating any missing tables."""
@@ -111,21 +120,23 @@ def update_db_schema():
         logger.error(f"Error updating database schema: {e}")
         raise
 
-# Function to create database tables
-def create_db_tables():
-    update_db_schema()  # Use the new update function instead of create_all
 
-# Function to add initial strategies if none exist
+def create_db_tables():
+    """Create database tables."""
+    update_db_schema()
+
+
 def add_initial_strategies():
+    """Add initial strategies if none exist."""
     db = SessionLocal()
     try:
         # Check if strategies already exist
         if db.query(Strategy).count() == 0:
-            print("Adding initial strategies...")
+            logger.info("Adding initial strategies...")
             default_strategies = [
                 Strategy(
-                    name="MACD Crossover", 
-                    active=True, 
+                    name="MACD Crossover",
+                    active=True,
                     parameters={
                         "macd_fast_period": 12,
                         "macd_slow_period": 26,
@@ -141,8 +152,8 @@ def add_initial_strategies():
                     }
                 ),
                 Strategy(
-                    name="RSI Divergence", 
-                    active=True, 
+                    name="RSI Divergence",
+                    active=True,
                     parameters={
                         "rsi_period": 14,
                         "rsi_overbought": 70,
@@ -157,25 +168,27 @@ def add_initial_strategies():
             ]
             db.add_all(default_strategies)
             db.commit()
-            print("Initial strategies added.")
+            logger.info("Initial strategies added.")
         else:
-            print("Strategies already exist, skipping initial data population.")
+            logger.info("Strategies already exist, skipping initial data population.")
     except Exception as e:
-        print(f"Error adding initial strategies: {e}")
+        logger.error(f"Error adding initial strategies: {e}")
         db.rollback()
     finally:
         db.close()
 
-# Call these functions when the module is imported
-create_db_tables()
-add_initial_strategies()
 
-# Dependency to get DB session
 def get_db():
+    """Get a database session."""
     db = SessionLocal()
     try:
         yield db
     finally:
-        db.close() 
+        db.close()
+
+
+# Call these functions when the module is imported
+create_db_tables()
+add_initial_strategies()
 
 __all__ = ['Database', 'SessionLocal', 'init_db', 'db'] 

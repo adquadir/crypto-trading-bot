@@ -1,8 +1,12 @@
-# File: debug.py
+"""Debug script for testing exchange connection and data processing."""
+
 import asyncio
 import logging
 import os
+from typing import Dict, List, Optional
+
 from dotenv import load_dotenv
+
 from src.market_data.exchange_client import ExchangeClient
 from src.market_data.processor import MarketDataProcessor
 
@@ -13,7 +17,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 async def test_connection():
+    """Test exchange connection and data processing."""
     load_dotenv()
     
     # Initialize exchange client with config
@@ -34,7 +40,6 @@ async def test_connection():
         'symbols': os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
     }
     exchange_client = ExchangeClient(config=exchange_config)
-    
     processor = MarketDataProcessor()
     
     try:
@@ -63,6 +68,7 @@ async def test_connection():
     finally:
         await exchange_client.close()
         logger.info("=== Test Complete ===")
+
 
 if __name__ == "__main__":
     asyncio.run(test_connection())

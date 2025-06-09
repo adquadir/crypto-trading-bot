@@ -345,13 +345,13 @@ class TradingBot:
                 # Assuming signal_generator provides these now in its standard output too
                 entry_price = current_price # Or signal['entry'] if available
                 take_profit = signal.get('take_profit') # Get from signal if available
-                stop_loss = signal.get('stop_loss') # Get from signal if available
+                stop_loss = signal.get('stop_loss')  # Get from signal if available
 
                 if take_profit is None or stop_loss is None:
-                     # Fallback or calculate based on risk_manager if signal didn't provide them
-                     stop_loss = self.risk_manager.calculate_stop_loss(symbol, entry_price, direction, signal.get('indicators', {}))
-                     # Calculate take profit based on a default risk:reward or from signal
-                     take_profit = self.risk_manager.calculate_take_profit(symbol, entry_price, stop_loss, direction, signal.get('indicators', {})) # Assuming calculate_take_profit exists and uses risk:reward
+                    # Fallback or calculate based on risk_manager if signal didn't provide them
+                    stop_loss = self.risk_manager.calculate_stop_loss(symbol, entry_price, direction, signal.get('indicators', {}))
+                    # Calculate take profit based on a default risk:reward or from signal
+                    take_profit = self.risk_manager.calculate_take_profit(symbol, entry_price, stop_loss, direction, signal.get('indicators', {}))
 
                 logger.info(f"Executing Standard {signal_type} for {symbol}: Entry={entry_price:.2f}, TP={take_profit:.2f}, SL={stop_loss:.2f}, Size={size:.4f}")
 

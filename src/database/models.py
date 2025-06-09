@@ -1,11 +1,25 @@
-from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, ForeignKey, JSON, Boolean
+from datetime import datetime
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    create_engine
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from datetime import datetime
 
 Base = declarative_base()
 
+
 class MarketData(Base):
+    """Market data model for storing OHLCV and indicator data."""
+    
     __tablename__ = 'market_data'
     
     id = Column(Integer, primary_key=True)
@@ -21,7 +35,10 @@ class MarketData(Base):
     def __repr__(self):
         return f"<MarketData(symbol='{self.symbol}', timestamp='{self.timestamp}')>"
 
+
 class OrderBook(Base):
+    """Order book model for storing market depth data."""
+    
     __tablename__ = 'orderbook'
     
     id = Column(Integer, primary_key=True)
@@ -38,23 +55,32 @@ class OrderBook(Base):
     def __repr__(self):
         return f"<OrderBook(symbol='{self.symbol}', timestamp='{self.timestamp}')>"
 
+
 class TradingSignal(Base):
+    """Trading signal model for storing generated signals."""
+    
     __tablename__ = 'trading_signals'
     
     id = Column(Integer, primary_key=True)
     symbol = Column(String, index=True)
     timestamp = Column(DateTime, index=True)
     signal_type = Column(String)  # 'LONG' or 'SHORT'
-    action = Column(String) # e.g., 'OPEN_LONG', 'CLOSE_SHORT', 'HOLD'
+    action = Column(String)  # e.g., 'OPEN_LONG', 'CLOSE_SHORT', 'HOLD'
     confidence = Column(Float)
     price = Column(Float)
     indicators = Column(JSON)  # Store indicators used for signal generation
     strategy = Column(String)  # Name of the strategy that generated the signal
     
     def __repr__(self):
-        return f"<TradingSignal(symbol='{self.symbol}', type='{self.signal_type}', confidence={self.confidence})>"
+        return (
+            f"<TradingSignal(symbol='{self.symbol}', "
+            f"type='{self.signal_type}', confidence={self.confidence})>"
+        )
+
 
 class Trade(Base):
+    """Trade model for storing executed trades."""
+    
     __tablename__ = 'trades'
     
     id = Column(Integer, primary_key=True)
@@ -75,7 +101,10 @@ class Trade(Base):
     def __repr__(self):
         return f"<Trade(symbol='{self.symbol}', status='{self.status}', pnl={self.pnl})>"
 
+
 class PerformanceMetrics(Base):
+    """Performance metrics model for storing strategy performance data."""
+    
     __tablename__ = 'performance_metrics'
     
     id = Column(Integer, primary_key=True)
@@ -93,15 +122,21 @@ class PerformanceMetrics(Base):
     max_drawdown = Column(Float)
     
     def __repr__(self):
-        return f"<PerformanceMetrics(symbol='{self.symbol}', strategy='{self.strategy}', win_rate={self.win_rate})>"
+        return (
+            f"<PerformanceMetrics(symbol='{self.symbol}', "
+            f"strategy='{self.strategy}', win_rate={self.win_rate})>"
+        )
+
 
 class Strategy(Base):
+    """Strategy model for storing trading strategy configurations."""
+    
     __tablename__ = 'strategies'
 
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True, index=True)
     active = Column(Boolean, default=True)
-    parameters = Column(JSON) # Store strategy-specific parameters
+    parameters = Column(JSON)  # Store strategy-specific parameters
 
     def __repr__(self):
         return f"<Strategy(name='{self.name}', active={self.active})>" 

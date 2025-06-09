@@ -1,3 +1,5 @@
+"""Test configuration and fixtures."""
+
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator, Dict, Any

@@ -10,10 +10,12 @@ export const WebSocketProvider = ({ children }) => {
   const [lastMessage, setLastMessage] = useState(null);
 
   const connectWebSocket = useCallback(() => {
+    // Close existing connection if any
     if (ws) {
       ws.close();
     }
 
+    // Create new WebSocket instance
     const newWs = new WebSocket(config.wsUrl);
     
     newWs.onopen = () => {
@@ -48,11 +50,14 @@ export const WebSocketProvider = ({ children }) => {
       }, delay);
     };
 
+    // Update the WebSocket instance in state
     setWs(newWs);
   }, [ws, reconnectAttempt]);
 
   useEffect(() => {
     connectWebSocket();
+    
+    // Cleanup function
     return () => {
       if (ws) {
         ws.close();

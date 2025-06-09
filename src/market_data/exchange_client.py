@@ -225,7 +225,6 @@ class ExchangeClient:
     def _setup_proxy(self):
         """Set up proxy configuration."""
         try:
-            # Get proxy URL from config
             proxy_url = self.proxy_config.get('url')
             if not proxy_url:
                 logger.warning("No proxy URL configured")

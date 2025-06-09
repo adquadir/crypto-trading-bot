@@ -1,17 +1,25 @@
 from typing import Dict, List, Optional, Tuple, Any
+import json
 import logging
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from ta.trend import SMAIndicator, EMAIndicator
+import ta
 from ta.momentum import RSIIndicator
+from ta.trend import (
+    ADXIndicator,
+    CCIIndicator,
+    MACD,
+    SMAIndicator,
+    EMAIndicator
+)
 from ta.volatility import BollingerBands, AverageTrueRange
+
 from ..strategy.dynamic_config import strategy_config
 from ..strategies.candle_cluster.detector import CandleClusterDetector
-import ta
-from .signal_tracker import SignalTracker, SignalProfile
-import json
 from .confidence_calibrator import ConfidenceCalibrator
+from .signal_tracker import SignalTracker, SignalProfile
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +110,7 @@ class SignalGenerator:
             symbol = market_data.get('symbol')
             if not symbol:
                 return None
-                
+
             # Calculate freshness metrics for each data type
             freshness_metrics = {
                 'ohlcv': market_data.get('ohlcv_freshness', float('inf')),
@@ -110,10 +118,13 @@ class SignalGenerator:
                 'ticker': market_data.get('ticker_freshness', float('inf')),
                 'open_interest': market_data.get('oi_freshness', float('inf'))
             }
-            
+
             # Log freshness metrics
-            logger.info(f"Data freshness for {symbol}: {json.dumps({k: f'{v:.1f}s' for k, v in freshness_metrics.items()})}")
-            
+            logger.info(
+                f"Data freshness for {symbol}: "
+                f"{json.dumps({k: f'{v:.1f}s' for k, v in freshness_metrics.items()})}"
+            )
+
             # Check if any critical data is too stale
             max_freshness = {
                 'ohlcv': 60,  # 1 minute
@@ -121,31 +132,35 @@ class SignalGenerator:
                 'ticker': 5,  # 5 seconds
                 'open_interest': 60  # 1 minute
             }
-            
-            stale_data = {k: v for k, v in freshness_metrics.items() if v > max_freshness[k]}
+
+            stale_data = {
+                k: v for k, v in freshness_metrics.items()
+                if v > max_freshness[k]
+            }
             if stale_data:
                 self.signal_tracker.log_rejection(
                     symbol,
-                    f"Stale data detected: {json.dumps({k: f'{v:.1f}s' for k, v in stale_data.items()})}",
+                    f"Stale data detected: "
+                    f"{json.dumps({k: f'{v:.1f}s' for k, v in stale_data.items()})}",
                     market_data
                 )
                 return None
-                
+
             # Determine market regime
             regime = self._determine_market_regime(market_data)
-            
+
             # Calculate indicators
             indicators = self._calculate_indicators(market_data)
-            
+
             # Generate signal based on regime
             signal = await self._generate_regime_signal(market_data, regime, indicators)
             if not signal:
                 return None
-                
+
             # Add freshness metrics to signal
             signal['data_freshness'] = freshness_metrics
             signal['max_allowed_freshness'] = max_freshness
-                
+
             # Calculate entry, TP, and SL
             entry, tp, sl = self._calculate_levels(market_data, signal['direction'])
             if not all([entry, tp, sl]):
@@ -155,7 +170,7 @@ class SignalGenerator:
                     {**market_data, **signal}
                 )
                 return None
-                
+
             # Calculate risk/reward ratio
             rr_ratio = abs(tp - entry) / abs(sl - entry)
             if rr_ratio < 1.5:  # Minimum 1.5:1 reward-to-risk
@@ -165,7 +180,7 @@ class SignalGenerator:
                     {**market_data, **signal}
                 )
                 return None
-                
+
             # Check spread
             spread = market_data.get('spread', float('inf'))
             if spread > 0.002:  # 0.2% max spread
@@ -175,7 +190,7 @@ class SignalGenerator:
                     {**market_data, **signal}
                 )
                 return None
-                
+
             # Create signal profile
             signal_profile = SignalProfile(
                 symbol=symbol,
@@ -190,10 +205,10 @@ class SignalGenerator:
                 volume_profile=market_data.get('volume_profile', {}),
                 order_book_metrics=market_data.get('order_book_metrics', {})
             )
-            
+
             # Log the signal
             self.signal_tracker.log_signal(signal_profile)
-            
+
             return {
                 'symbol': symbol,
                 'direction': signal['direction'],
@@ -201,17 +216,13 @@ class SignalGenerator:
                 'take_profit': tp,
                 'stop_loss': sl,
                 'confidence': signal['confidence'],
-                'market_regime': regime,
-                'risk_reward_ratio': rr_ratio,
                 'indicators': indicators,
-                'volume_profile': market_data.get('volume_profile', {}),
-                'order_book_metrics': market_data.get('order_book_metrics', {}),
-                'data_freshness': freshness_metrics,
-                'max_allowed_freshness': max_freshness
+                'market_regime': regime,
+                'data_freshness': freshness_metrics
             }
-            
+
         except Exception as e:
-            logger.error(f"Error generating signals: {e}")
+            logger.error(f"Error generating signals: {str(e)}")
             return None
             
     def _determine_market_regime(self, market_data: Dict) -> Dict:

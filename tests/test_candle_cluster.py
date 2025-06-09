@@ -1,17 +1,23 @@
-import pytest
+"""Tests for candle cluster detection functionality."""
+
 import numpy as np
 import pandas as pd
+import pytest
+
 from src.strategies.candle_cluster.detector import CandleClusterDetector
+
 
 @pytest.fixture
 def detector():
+    """Create a CandleClusterDetector instance for testing."""
     return CandleClusterDetector()
+
 
 @pytest.fixture
 def sample_data():
     """Create sample OHLCV data for testing."""
     # Create a DataFrame with 20 candles
-    np.random.seed(42) # Set a seed for reproducibility
+    np.random.seed(42)  # Set a seed for reproducibility
     data = pd.DataFrame({
         'open': np.random.uniform(100, 110, 20),
         'high': np.random.uniform(110, 120, 20),
@@ -21,25 +27,43 @@ def sample_data():
     })
     return data
 
+
 @pytest.fixture
 def hovering_data():
     """Create sample data showing a hovering pattern."""
     # Create a tight range of prices
-    np.random.seed(123) # Set a seed for reproducibility
+    np.random.seed(123)  # Set a seed for reproducibility
     base_price = 100
     range_size = 0.5  # Small range for hovering
     data = pd.DataFrame({
-        'open': [base_price + np.random.uniform(-range_size, range_size) for _ in range(20)],
-        'high': [base_price + np.random.uniform(0, range_size) for _ in range(20)],
-        'low': [base_price + np.random.uniform(-range_size, 0) for _ in range(20)],
-        'close': [base_price + np.random.uniform(-range_size, range_size) for _ in range(20)],
-        'volume': [1000 + np.random.uniform(-100, 100) for _ in range(20)]  # Stable volume
+        'open': [
+            base_price + np.random.uniform(-range_size, range_size)
+            for _ in range(20)
+        ],
+        'high': [
+            base_price + np.random.uniform(0, range_size)
+            for _ in range(20)
+        ],
+        'low': [
+            base_price + np.random.uniform(-range_size, 0)
+            for _ in range(20)
+        ],
+        'close': [
+            base_price + np.random.uniform(-range_size, range_size)
+            for _ in range(20)
+        ],
+        'volume': [
+            1000 + np.random.uniform(-100, 100)
+            for _ in range(20)
+        ]  # Stable volume
     })
     return data
+
 
 def test_detector_initialization(detector):
     """Test that the detector initializes correctly."""
     assert detector is not None
+
 
 def test_detect_with_insufficient_data(detector):
     """Test detection with insufficient data."""
@@ -68,6 +92,7 @@ def test_detect_with_insufficient_data(detector):
     result = detector.detect('BTCUSDT', indicators, {})
     assert result is None
 
+
 def test_detect_hovering_buy(detector, hovering_data):
     """Test detection of a hovering BUY opportunity."""
     # Calculate ATR and other indicators
@@ -93,6 +118,7 @@ def test_detect_hovering_buy(detector, hovering_data):
     assert result['take_profit'] > result['entry']
     assert result['stop_loss'] < result['entry']
     assert 0.6 <= result['confidence_score'] <= 1.0
+
 
 def test_detect_hovering_sell(detector, hovering_data):
     """Test detection of a hovering SELL opportunity."""
@@ -120,6 +146,7 @@ def test_detect_hovering_sell(detector, hovering_data):
     assert result['stop_loss'] > result['entry']
     assert 0.6 <= result['confidence_score'] <= 1.0
 
+
 def test_no_hovering_detected(detector, sample_data):
     """Test that no hovering is detected in volatile data."""
     # Calculate ATR and other indicators
@@ -139,6 +166,7 @@ def test_no_hovering_detected(detector, sample_data):
     
     result = detector.detect('BTCUSDT', indicators, {})
     assert result is None
+
 
 def test_risk_reward_ratio(detector, hovering_data):
     """Test that detected opportunities have appropriate risk-reward ratios."""
@@ -166,6 +194,7 @@ def test_risk_reward_ratio(detector, hovering_data):
         
         # Risk-reward should be at least 2:1
         assert risk_reward_ratio >= 2.0
+
 
 def test_confidence_score_calculation(detector, hovering_data):
     """Test that confidence scores are calculated correctly."""
