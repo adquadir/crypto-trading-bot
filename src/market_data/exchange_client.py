@@ -20,6 +20,7 @@ import numpy as np
 from .websocket_client import MarketDataWebSocket
 from .config import config
 import ccxt
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -151,49 +152,53 @@ class ExchangeClient:
     """Client for interacting with cryptocurrency exchange APIs."""
     
     def __init__(self, config: Dict[str, Any]):
-        """Initialize the exchange client.
-        
-        Args:
-            config: Configuration dictionary containing:
-                - api_key: API key for authentication
-                - api_secret: API secret for authentication
-                - base_url: Base URL for REST API
-                - ws_url: Base URL for WebSocket API
-                - testnet: Whether to use testnet
-                - proxy: Optional proxy configuration dict with:
-                    - url: Proxy URL
-                    - username: Optional proxy username
-                    - password: Optional proxy password
-                - symbols: List of trading symbols to monitor
-                - discovery_mode: Whether to use symbol discovery
-                - discovery_interval: Interval for symbol discovery in seconds
-                - cache_ttl: Cache TTL in seconds
-        """
+        """Initialize the exchange client with configuration."""
         self.config = config
-        self.api_key = config['api_key']
-        self.api_secret = config['api_secret']
-        self.base_url = config['base_url']
-        self.ws_url = config['ws_url']
-        self.testnet = config.get('testnet', False)
-        self.proxy_config = config.get('proxy')
-        self.symbols = config.get('symbols', [])
-        self.discovery_mode = config.get('discovery_mode', False)
-        self.discovery_interval = config.get('discovery_interval', 3600)
-        self.cache_ttl = config.get('cache_ttl', 60)
+        self.api_key = os.getenv('BINANCE_API_KEY', '')
+        self.api_secret = os.getenv('BINANCE_API_SECRET', '')
+        self.base_url = os.getenv('BINANCE_API_URL', 'https://api.binance.com')
+        self.ws_url = os.getenv('BINANCE_WS_URL', 'wss://stream.binance.com:9443/ws/stream')
+        self.testnet = os.getenv('USE_TESTNET', 'false').lower() == 'true'
         
-        # Initialize attributes
-        self.running = False
-        self.ws_clients = {}
-        self.symbol_discovery = None
-        self.cache = CacheManager(ttl=self.cache_ttl)
+        # Initialize proxy configuration from environment variables
+        use_proxy = os.getenv('USE_PROXY', 'false').lower() == 'true'
+        if use_proxy:
+            proxy_host = os.getenv('PROXY_HOST', '')
+            proxy_port = os.getenv('PROXY_PORT', '')
+            proxy_user = os.getenv('PROXY_USER', '')
+            proxy_pass = os.getenv('PROXY_PASS', '')
+            
+            if proxy_host and proxy_port:
+                proxy_url = f"http://{proxy_host}:{proxy_port}"
+                if proxy_user and proxy_pass:
+                    proxy_url = f"http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
+                
+                self.proxy_config = {
+                    'http': proxy_url,
+                    'https': proxy_url
+                }
+                self.proxies = self.proxy_config
+                logger.info(f"Proxy configured: {proxy_host}:{proxy_port}")
+            else:
+                logger.warning("Proxy enabled but host or port not configured")
+                self.proxies = None
+        else:
+            self.proxies = None
         
-        # Setup proxy if configured
-        self.proxies = None
-        if self.proxy_config:
-            self._setup_proxy()
-        
-        # Initialize HTTP client
+        # Initialize the client with proxy configuration
         self._init_client()
+        
+        # Initialize other attributes
+        self.symbols = set()
+        self.symbol_discovery = None
+        self.ws_clients = {}
+        self.ws_manager = None
+        self.health_check_task = None
+        self.funding_rate_task = None
+        self.running = False
+        self._lock = asyncio.Lock()
+        self._ws_lock = asyncio.Lock()
+        self._discovery_lock = asyncio.Lock()
         
         # Initialize WebSocket manager
         self._init_ws_manager()
@@ -217,32 +222,65 @@ class ExchangeClient:
         self.open_interest_history = {}
         self.history_length = 24
 
-    def _setup_proxy(self):
-        """Setup proxy configuration."""
-        if not self.proxy_config:
-            logger.warning("No proxy configuration available")
-            return
+    def _setup_proxy(self) -> None:
+        """Set up proxy configuration for the client."""
+        try:
+            proxy_url = self.proxy_config['http']
+            if not proxy_url:
+                return
 
-        host = self.proxy_config["host"]
-        port = self.proxy_config["port"]
-        user = self.proxy_config["user"]
-        passwd = self.proxy_config["pass"]
-        
-        self.proxy_host = host
-        self.proxy_port = port
-        self.proxy_user = user
-        self.proxy_pass = passwd
-        self.proxy_auth = BasicAuth(user, passwd)
-        self.proxies = {
-            "http": f"http://{user}:{passwd}@{host}:{port}",
-            "https": f"http://{user}:{passwd}@{host}:{port}"
-        }
+            # Parse proxy URL
+            parsed = urlparse(proxy_url)
+            if not all([parsed.scheme, parsed.hostname, parsed.port]):
+                logger.error("Invalid proxy URL format")
+                return
 
-        for port in self.failover_ports:
-            self.proxy_metrics[port] = ProxyMetrics()
+            # Build proxy URL with authentication if provided
+            if self.proxy_config['username'] and self.proxy_config['password']:
+                auth = f"{self.proxy_config['username']}:{self.proxy_config['password']}"
+                proxy_url = f"{parsed.scheme}://{auth}@{parsed.hostname}:{parsed.port}"
+
+            # Set up proxies for both HTTP and HTTPS
+            self.proxies = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+            logger.info(f"Proxy configured: {parsed.hostname}:{parsed.port}")
+        except Exception as e:
+            logger.error(f"Error setting up proxy: {e}")
+            self.proxies = None
 
     def _init_client(self):
-        self.client = Client(self.api_key, self.api_secret, testnet=self.testnet, requests_params={"proxies": self.proxies})
+        """Initialize the HTTP client with proper configuration."""
+        try:
+            # Initialize client with proxy configuration
+            client_config = {
+                'apiKey': self.api_key,
+                'secret': self.api_secret,
+                'enableRateLimit': True,
+                'options': {
+                    'defaultType': 'future',
+                    'adjustForTimeDifference': True,
+                    'recvWindow': 60000
+                }
+            }
+            
+            # Add proxy configuration if available
+            if self.proxies:
+                client_config['proxies'] = self.proxies
+            
+            self.client = ccxt.binance(client_config)
+            
+            # Set base URL
+            self.client.urls['api'] = {
+                'public': f"{self.base_url}/fapi/v1",
+                'private': f"{self.base_url}/fapi/v1"
+            }
+            
+            logger.info("HTTP client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize HTTP client: {e}")
+            raise
 
     async def test_proxy_connection(self):
         """Test and log proxy connection details."""
@@ -720,10 +758,10 @@ class ExchangeClient:
                 for symbol in self.symbols:
                     await self._update_volatility(symbol)
                 await asyncio.sleep(60)  # Update every minute
-        except Exception as e:
+            except Exception as e:
                 logger.error(f"Error updating volatility metrics: {e}")
                 await asyncio.sleep(5)  # Wait before retrying
-            
+
     async def close(self):
         """Close all WebSocket connections."""
         for symbol, ws_client in self.ws_clients.items():
