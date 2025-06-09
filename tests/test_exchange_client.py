@@ -5,7 +5,7 @@ from datetime import datetime
 import aiohttp
 import statistics
 from src.market_data.exchange_client import ExchangeClient, ProxyMetrics
-from src.market_data.websocket import MarketDataWebSocket
+from src.market_data.websocket_client import MarketDataWebSocket
 
 @pytest.fixture
 def mock_binance_client():

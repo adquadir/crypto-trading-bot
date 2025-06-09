@@ -945,14 +945,49 @@ class ExchangeClient:
         # Replace this with actual logic to fetch symbols from the exchange
         return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
-    async def initialize(self, symbols: Optional[List[str]] = None):
-        """Initialize the exchange client with optional symbols."""
-        self.symbols = symbols or []  # Update self.symbols with the provided list
-        self.running = True  # Set running to True to start the WebSocket lifecycle
-        # Initialize WebSocket clients for each symbol
-        for symbol in self.symbols:
-            await self._setup_symbol_websocket(symbol)
-        logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
+    async def initialize(self):
+        """Initialize the exchange client."""
+        try:
+            # Update symbols from discovery
+            self.symbols = await self.symbol_discovery.get_symbols()
+            logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
+            
+            # Start background tasks
+            self.running = True
+            self.health_check_task = asyncio.create_task(self._health_check_loop())
+            self.funding_rates_task = asyncio.create_task(self._update_funding_rates())
+            
+            # Initialize WebSocket clients for each symbol
+            for symbol in self.symbols:
+                await self._setup_symbol_websocket(symbol)
+            
+        except Exception as e:
+            logger.error(f"Error initializing exchange client: {e}")
+            raise
+
+    async def shutdown(self):
+        """Shutdown the exchange client."""
+        try:
+            self.running = False
+            
+            # Cancel background tasks
+            if hasattr(self, 'health_check_task'):
+                self.health_check_task.cancel()
+            if hasattr(self, 'funding_rates_task'):
+                self.funding_rates_task.cancel()
+            
+            # Close all WebSocket connections
+            for symbol, ws_client in self.ws_clients.items():
+                try:
+                    await ws_client.close()
+                except Exception as e:
+                    logger.error(f"Error closing WebSocket for {symbol}: {e}")
+            
+            self.ws_clients.clear()
+            logger.info("Exchange client shutdown complete")
+        except Exception as e:
+            logger.error(f"Error during exchange client shutdown: {e}")
+            raise
 
     async def _handle_kline_update(self, symbol: str, kline_data: dict):
         """Handle kline update from WebSocket."""
@@ -983,7 +1018,7 @@ class ExchangeClient:
         """Handle connection errors by reconnecting."""
         logger.info("Handling connection error...")
         await self.close()
-        await self.initialize(self.symbols)
+        await self.initialize()
 
     async def _find_best_proxy(self):
         """Find the best proxy based on latency."""
@@ -1019,8 +1054,8 @@ class ExchangeClient:
             # Connect to WebSocket
             await ws_client.connect()
             
-            # Start the WebSocket client
-            await ws_client.start()
+            # Start the WebSocket client in a background task
+            asyncio.create_task(ws_client.start())
             
             # Store the client
             self.ws_clients[symbol] = ws_client

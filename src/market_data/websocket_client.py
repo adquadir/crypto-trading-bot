@@ -110,9 +110,6 @@ class MarketDataWebSocket:
         
         self.running = True
         
-        # Start heartbeat monitoring
-        asyncio.create_task(self._monitor_websocket_heartbeat())
-        
         # Start message processing loop
         while self.running:
             try:
@@ -132,16 +129,14 @@ class MarketDataWebSocket:
         """Handle incoming WebSocket messages."""
         try:
             message_dict = json.loads(message)
+            
+            # Extract stream and data from message
             stream = message_dict.get('stream', '')
             data = message_dict.get('data', {})
-
-            if not stream or not data:
-                return
-
-            # Extract symbol and data type from stream name
+            
+            # Extract symbol from stream name (e.g., "btcusdt@kline_1m" -> "BTCUSDT")
             symbol = stream.split('@')[0].upper()
-            data_type = stream.split('@')[1]
-
+            
             # Update cache with new data
             self.cache[symbol] = data
             self.cache_timestamps[symbol] = time.time()
@@ -160,47 +155,62 @@ class MarketDataWebSocket:
             else:
                 self.logger.warning(f"Received message without event type: {data}")
             
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse WebSocket message as JSON: {e}")
+            self.logger.error(f"Raw message: {message}")
         except Exception as e:
             self.logger.error(f"Error handling WebSocket message: {e}")
-            self.logger.error(f"Message data: {data}")
+            self.logger.error(f"Raw message: {message}")
 
     async def _handle_kline_message(self, symbol: str, data: Dict[str, Any]) -> None:
         """Handle kline message."""
-        self.data_cache[f"{symbol}_kline"] = {
-            'open': float(data['k']['o']),
-            'high': float(data['k']['h']),
-            'low': float(data['k']['l']),
-            'close': float(data['k']['c']),
-            'volume': float(data['k']['v']),
-            'timestamp': data['k']['t'],
-            'is_closed': data['k']['x']
-        }
-        # Notify kline callbacks
-        for callback in self.callbacks['kline']:
-            await callback(symbol, self.data_cache[f"{symbol}_kline"])
+        try:
+            kline_data = {
+                'open': float(data['k']['o']),
+                'high': float(data['k']['h']),
+                'low': float(data['k']['l']),
+                'close': float(data['k']['c']),
+                'volume': float(data['k']['v']),
+                'timestamp': data['k']['t'],
+                'is_closed': data['k']['x']
+            }
+            self.data_cache[f"{symbol}_kline"] = kline_data
+            # Notify kline callbacks
+            for callback in self.callbacks['kline']:
+                await callback(symbol, kline_data)
+        except Exception as e:
+            self.logger.error(f"Error handling kline message: {e}")
 
     async def _handle_trade_message(self, symbol: str, data: Dict[str, Any]) -> None:
         """Handle trade message."""
-        self.data_cache[f"{symbol}_trade"] = {
-            'price': float(data['p']),
-            'quantity': float(data['q']),
-            'timestamp': data['T'],
-            'is_buyer_maker': data['m']
-        }
-        # Notify trade callbacks
-        for callback in self.callbacks['trade']:
-            await callback(symbol, self.data_cache[f"{symbol}_trade"])
+        try:
+            trade_data = {
+                'price': float(data['p']),
+                'quantity': float(data['q']),
+                'timestamp': data['T'],
+                'is_buyer_maker': data['m']
+            }
+            self.data_cache[f"{symbol}_trade"] = trade_data
+            # Notify trade callbacks
+            for callback in self.callbacks['trade']:
+                await callback(symbol, trade_data)
+        except Exception as e:
+            self.logger.error(f"Error handling trade message: {e}")
 
     async def _handle_depth_message(self, symbol: str, data: Dict[str, Any]) -> None:
         """Handle depth message."""
-        self.data_cache[f"{symbol}_depth"] = {
-            'bids': [[float(price), float(qty)] for price, qty in data['bids'][:10]],
-            'asks': [[float(price), float(qty)] for price, qty in data['asks'][:10]],
-            'timestamp': data['T']
-        }
-        # Notify depth callbacks
-        for callback in self.callbacks['depth']:
-            await callback(symbol, self.data_cache[f"{symbol}_depth"])
+        try:
+            depth_data = {
+                'bids': [[float(price), float(qty)] for price, qty in data['bids'][:10]],
+                'asks': [[float(price), float(qty)] for price, qty in data['asks'][:10]],
+                'timestamp': data['T']
+            }
+            self.data_cache[f"{symbol}_depth"] = depth_data
+            # Notify depth callbacks
+            for callback in self.callbacks['depth']:
+                await callback(symbol, depth_data)
+        except Exception as e:
+            self.logger.error(f"Error handling depth message: {e}")
 
     def register_callback(self, data_type: str, callback: Callable):
         """Register a callback for a specific data type."""
@@ -240,4 +250,51 @@ class MarketDataWebSocket:
             logger.info("WebSocket connection closed")
         except Exception as e:
             logger.error(f"Error closing WebSocket connection: {e}")
+            raise 
+
+    async def _monitor_websocket_heartbeat(self):
+        """Monitor WebSocket connection health with periodic heartbeats."""
+        while self.running:
+            try:
+                if self.connection and self.connection.open:
+                    # Send ping message
+                    await self.connection.ping()
+                    logger.debug("WebSocket heartbeat ping sent")
+                else:
+                    logger.warning("WebSocket connection not open, skipping heartbeat")
+            except Exception as e:
+                logger.error(f"Error in WebSocket heartbeat: {e}")
+                # If we can't send a heartbeat, the connection might be dead
+                self.running = False
+                break
+            
+            # Wait before next heartbeat
+            await asyncio.sleep(30)  # Send heartbeat every 30 seconds 
+
+    async def initialize(self, symbols: Optional[List[str]] = None) -> None:
+        """Initialize the WebSocket client with optional symbols."""
+        try:
+            # Update symbols if provided
+            if symbols is not None:
+                self.symbols = symbols
+            
+            # Initialize cache and timestamps
+            self.cache = {}
+            self.cache_timestamps = {}
+            self.data_cache = {}
+            self.callbacks = {
+                'kline': [],
+                'trade': [],
+                'depth': []
+            }
+            
+            # Connect to WebSocket
+            await self.connect()
+            
+            # Start the WebSocket client in a background task
+            asyncio.create_task(self.start())
+            
+            self.logger.info(f"WebSocket client initialized with {len(self.symbols)} symbols")
+        except Exception as e:
+            self.logger.error(f"Error initializing WebSocket client: {e}")
             raise 
