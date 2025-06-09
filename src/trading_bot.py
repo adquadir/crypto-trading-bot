@@ -138,7 +138,9 @@ class TradingBot:
             
         try:
             # Get account info using CCXT's fetch_balance
-            account_info = await asyncio.to_thread(self.exchange_client.client.fetch_balance)
+            account_info = await asyncio.to_thread(
+                self.exchange_client.client.fetch_balance
+            )
             
             if not account_info or 'total' not in account_info:
                 raise ValueError("Invalid account info response")
@@ -516,6 +518,17 @@ class TradingBot:
                     if not position:
                         logger.error(f"Failed to get position for {symbol}")
                         return False
+                        
+                    # Check data freshness for the symbol
+                    market_data = await self.exchange_client.get_market_data(symbol)
+                    if not market_data:
+                        logger.error(f"Failed to get market data for {symbol}")
+                        return False
+                        
+                    if not self.symbol_discovery.check_data_freshness(market_data):
+                        logger.error(f"Data freshness check failed for {symbol}")
+                        return False
+                        
                 except Exception as e:
                     logger.error(f"Error checking position for {symbol}: {e}")
                     return False

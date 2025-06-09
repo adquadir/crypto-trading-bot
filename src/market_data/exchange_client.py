@@ -193,21 +193,16 @@ class ExchangeClient:
         self.ws_last_message = {}
         self.order_books = {}
         self.last_trade_price = {}
+        self.symbols = set()
+        
+        # Initialize cache manager
+        self.cache = CacheManager(
+            cache_dir=os.getenv('CACHE_DIR', 'cache'),
+            ttl=int(os.getenv('CACHE_TTL', '60'))
+        )
         
         # Initialize the client with proxy configuration
         self._init_client()
-        
-        # Initialize other attributes
-        self.symbols = set()
-        self.symbol_discovery = None  # Will be set externally by TradingBot if needed
-        self.ws_clients = {}
-        self.ws_manager = None
-        self.health_check_task = None
-        self.funding_rate_task = None
-        self.running = False
-        self._lock = asyncio.Lock()
-        self._ws_lock = asyncio.Lock()
-        self._discovery_lock = asyncio.Lock()
         
         # Initialize WebSocket manager
         self._init_ws_manager()
@@ -229,9 +224,6 @@ class ExchangeClient:
         # Initialize data structures
         self.open_interest_history = {}
         self.history_length = 24
-
-        # Initialize cache manager
-        self.cache = CacheManager()
 
     def _setup_proxy(self):
         """Set up proxy configuration."""
@@ -970,21 +962,29 @@ class ExchangeClient:
     async def initialize(self):
         """Initialize the exchange client."""
         try:
-            self.running = True
-            self.logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
-            
-            # Start background tasks
-            self.health_check_task = asyncio.create_task(self._health_check_loop())
-            self.funding_rate_task = asyncio.create_task(self._update_funding_rates())
+            # Initialize CCXT client
+            self._init_client()
             
             # Initialize WebSocket manager
             self._init_ws_manager()
             
-            return True
+            # Test connection
+            if not await self.check_connection():
+                raise Exception("Failed to connect to exchange")
+                
+            # Get available symbols
+            symbols = await self.get_all_symbols()
+            self.symbols = set(symbols)
+            
+            # Initialize WebSocket connections
+            for symbol in self.symbols:
+                await self._setup_symbol_websocket(symbol)
+                
+            logger.info(f"Exchange client initialized with {len(self.symbols)} symbols")
             
         except Exception as e:
-            self.logger.error(f"Error initializing exchange client: {e}")
-            return False
+            logger.error(f"Error initializing exchange client: {e}")
+            raise
 
     async def shutdown(self):
         """Shutdown the exchange client."""
@@ -1019,10 +1019,28 @@ class ExchangeClient:
     async def _check_proxy_health(self):
         """Check the health of the current proxy."""
         try:
-            proxy_url = f"http://{self.proxy_host}:{self.proxy_port}" if self.proxy_host and self.proxy_port else None
+            if not self.proxy_host or not self.proxy_port:
+                logger.warning("No proxy configured for health check")
+                return False
+                
+            # Test proxy connection
+            proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+            if self.proxy_auth:
+                proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+                
             async with aiohttp.ClientSession() as session:
-                async with session.get('https://api.binance.com/api/v3/ping', proxy=proxy_url) as response:
-                    return response.status == 200
+                async with session.get(
+                    f"{self.base_url}/api/v3/time",
+                    proxy=proxy_url,
+                    timeout=10
+                ) as response:
+                    if response.status == 200:
+                        logger.info("Proxy health check passed")
+                        return True
+                    else:
+                        logger.warning(f"Proxy health check failed: {response.status}")
+                        return False
+                        
         except Exception as e:
             logger.error(f"Error checking proxy health: {e}")
             return False
