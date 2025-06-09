@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Union, Any
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -13,6 +13,11 @@ from pathlib import Path
 import pandas as pd
 from typing import Tuple
 import time
+from ..strategy.dynamic_config import strategy_config
+from ..risk.risk_manager import RiskManager
+from ..database.models import TradingOpportunity
+from ..database.database import Database
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
