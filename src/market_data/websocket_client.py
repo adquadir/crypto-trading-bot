@@ -44,7 +44,15 @@ class MarketDataWebSocket:
                 
                 # Connect to combined stream
                 stream_url = f"{self.ws_url}?streams={'/'.join(streams)}"
-                self.connection = await websockets.connect(stream_url)
+                self.connection = await websockets.connect(
+                    stream_url,
+                    ping_interval=30,
+                    ping_timeout=10,
+                    close_timeout=10,
+                    max_size=2**20,  # 1MB max message size
+                    max_queue=2**10,  # 1024 messages in queue
+                    compression=None  # Disable compression as Binance doesn't support it
+                )
                 logger.info(f"Connected to WebSocket stream: {stream_url}")
                 return
             except websockets.exceptions.InvalidStatusCode as e:
