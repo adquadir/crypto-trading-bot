@@ -200,8 +200,10 @@ class ExchangeClient:
         self._ws_lock = asyncio.Lock()
         self._discovery_lock = asyncio.Lock()
         
-        # Initialize WebSocket manager
-        self._init_ws_manager()
+        # Initialize WebSocket attributes
+        self.ws_connections = {}
+        self.ws_tasks = {}
+        self.ws_heartbeats = {}
         
         self.logger = logging.getLogger(__name__)
         self.symbol_discovery = None  # Initialize as None, will be set up when needed
