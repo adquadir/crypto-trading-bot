@@ -20,7 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import numpy as np
 from functools import lru_cache
 import warnings
-from src.strategy.dynamic_config import strategy_config, DynamicStrategyConfig
+from src.strategy.dynamic_config import strategy_config
 from src.market_data.websocket_client import MarketDataWebSocket
 from src.risk.risk_manager import RiskManager
 
@@ -124,7 +124,6 @@ OPPORTUNITIES_LOCK = asyncio.Lock()  # Add lock for concurrent access
 # Global instances
 db = Database()
 ws_client = MarketDataWebSocket(exchange_client=exchange_client, symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"])
-strategy_config = DynamicStrategyConfig()
 risk_manager = RiskManager()
 
 @app.on_event("startup")
