@@ -70,11 +70,23 @@ app.add_middleware(
 )
 
 # Initialize exchange client
-exchange_client = ExchangeClient(
-    api_key=os.getenv('BINANCE_API_KEY'),
-    api_secret=os.getenv('BINANCE_API_SECRET'),
-    testnet=os.getenv('USE_TESTNET', 'False').lower() == 'true'
-)
+exchange_config = {
+    'api_key': os.getenv('BINANCE_API_KEY'),
+    'api_secret': os.getenv('BINANCE_API_SECRET'),
+    'base_url': 'https://api.binance.com',
+    'ws_url': 'wss://stream.binance.com:9443/ws/stream',
+    'testnet': os.getenv('USE_TESTNET', 'False').lower() == 'true',
+    'proxy': {
+        'host': os.getenv('PROXY_HOST'),
+        'port': os.getenv('PROXY_PORT'),
+        'username': os.getenv('PROXY_USER'),
+        'password': os.getenv('PROXY_PASS')
+    },
+    'proxy_ports': os.getenv('PROXY_LIST', '10001,10002,10003').split(','),
+    'failover_ports': os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','),
+    'symbols': os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
+}
+exchange_client = ExchangeClient(config=exchange_config)
 
 # Initialize symbol discovery
 symbol_discovery = SymbolDiscovery(exchange_client)
