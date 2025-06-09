@@ -276,3 +276,48 @@ class MarketDataWebSocket:
         except Exception as e:
             self.logger.error(f"Error initializing WebSocket client: {e}")
             raise 
+
+    def check_connection(self) -> bool:
+        """Check if the WebSocket connection is healthy."""
+        try:
+            # Check if WebSocket is initialized
+            if not self.connection:
+                logger.error("WebSocket not initialized")
+                return False
+                
+            # Check connection state
+            if not self.connection.open:
+                logger.error("WebSocket connection is closed")
+                return False
+                
+            # Check last message time
+            if hasattr(self, '_last_message_time'):
+                time_since_last = (datetime.now() - self._last_message_time).total_seconds()
+                if time_since_last > 30:  # No messages for 30 seconds
+                    logger.warning(f"No messages received for {time_since_last} seconds")
+                    return False
+                    
+            # Check heartbeat
+            if hasattr(self, '_last_heartbeat'):
+                time_since_heartbeat = (datetime.now() - self._last_heartbeat).total_seconds()
+                if time_since_heartbeat > 10:  # No heartbeat for 10 seconds
+                    logger.warning(f"No heartbeat received for {time_since_heartbeat} seconds")
+                    return False
+                    
+            # Check error count
+            if hasattr(self, '_error_count') and self._error_count > 5:
+                logger.error(f"Too many errors: {self._error_count}")
+                return False
+                
+            # Check subscription status
+            if hasattr(self, '_subscriptions'):
+                for symbol, status in self._subscriptions.items():
+                    if not status.get('active', False):
+                        logger.warning(f"Subscription inactive for {symbol}")
+                        return False
+                        
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking WebSocket connection: {e}")
+            return False 

@@ -35,21 +35,21 @@ class StrategyConfig:
         self.volatility_history = {}
         self.performance_history = []
         self.load_strategy_profiles()
-
+        
     def load_strategy_profiles(self) -> None:
         """Load strategy profiles from JSON file."""
         try:
-            if self.config_path.exists():
+        if self.config_path.exists():
                 with open(self.config_path, 'r') as f:
                     self.profiles = json.load(f)
                 logger.info(f"Loaded {len(self.profiles)} strategy profiles from {self.config_path}")
             else:
                 logger.info(f"No strategy profile config found at {self.config_path}, using defaults")
                 self.profiles = self._get_default_profiles()
-        except Exception as e:
-            logger.error(f"Error loading strategy profiles: {e}")
+            except Exception as e:
+                logger.error(f"Error loading strategy profiles: {e}")
             self.profiles = self._get_default_profiles()
-
+            
     def set_profile(self, profile_name: str) -> None:
         """Set the current strategy profile."""
         if profile_name not in self.profiles:
@@ -132,7 +132,7 @@ class StrategyConfig:
             logger.info("Strategy profiles saved successfully")
         except Exception as e:
             logger.error(f"Error saving strategy profiles: {str(e)}")
-
+            
     def update_profile(self, profile_name: str, settings: Dict[str, Any]) -> None:
         """Update a strategy profile with new settings."""
         if profile_name not in self.profiles:
@@ -153,7 +153,7 @@ class StrategyConfig:
     def get_profile_names(self) -> list:
         """Get list of available profile names."""
         return list(self.profiles.keys())
-
+            
     def adapt_to_volatility(self, symbol: str, volatility: float) -> None:
         """Adapt strategy parameters based on market volatility."""
         if not self.current_profile:
@@ -175,7 +175,7 @@ class StrategyConfig:
         profile['take_profit_pct'] *= volatility_factor
         
         logger.info(f"Adapted strategy parameters for {symbol} based on volatility")
-
+        
     def adapt_to_performance(self, trade_result: Dict) -> None:
         """Adapt strategy parameters based on trading performance."""
         if not self.current_profile:

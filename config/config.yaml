@@ -7,7 +7,11 @@ binance:
     recvWindow: 10000
 
 trading:
-  scan_interval: 300 # seconds
+  health_check_interval: 60         # seconds
+  funding_rate_interval: 300        # seconds
+  position_interval: 30             # seconds
+  signal_interval: 15               # seconds
+  scan_interval: 10                 # seconds
   max_open_trades: 5
   min_volume_usdt: 1000000
   min_liquidity_usdt: 500000

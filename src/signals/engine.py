@@ -71,7 +71,7 @@ class SignalEngine:
                             confidence=abs(result['signals']['signal'].iloc[-1]),
                             indicators=result['indicators'].to_dict()
                         )
-                        signals.append(signal)
+                    signals.append(signal)
             except Exception as e:
                 logger.error(
                     f"Error generating signals for {strategy_name}: {str(e)}"

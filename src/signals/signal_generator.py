@@ -765,4 +765,165 @@ class SignalGenerator:
             
         except Exception as e:
             logger.error(f"Error generating volatile signal: {e}")
-            return None 
+            return None
+
+    def should_close_position(self, position: Dict, market_data: Dict) -> bool:
+        """Determine if a position should be closed based on market conditions."""
+        try:
+            symbol = position.get('symbol')
+            if not symbol:
+                return False
+                
+            # Get current indicators
+            indicators = self._calculate_indicators(market_data)
+            
+            # Get position details
+            position_amt = float(position.get('positionAmt', 0))
+            entry_price = float(position.get('entryPrice', 0))
+            current_price = float(market_data.get('close', 0))
+            
+            if position_amt == 0:
+                return False
+                
+            # Check for trend reversal
+            if position_amt > 0:  # Long position
+                # Check if trend has reversed to bearish
+                if (indicators['macd']['histogram'] < 0 and 
+                    indicators['rsi'] > 70 and 
+                    current_price < indicators['bb']['middle']):
+                    logger.info(f"Closing long position for {symbol} - Trend reversal detected")
+                    return True
+            else:  # Short position
+                # Check if trend has reversed to bullish
+                if (indicators['macd']['histogram'] > 0 and 
+                    indicators['rsi'] < 30 and 
+                    current_price > indicators['bb']['middle']):
+                    logger.info(f"Closing short position for {symbol} - Trend reversal detected")
+                    return True
+                    
+            # Check for volatility expansion
+            atr = indicators.get('atr', 0)
+            if atr > self.strategy_config.get('max_atr', 0.05):
+                logger.info(f"Closing position for {symbol} - Excessive volatility")
+                return True
+                
+            # Check for momentum loss
+            if abs(indicators['macd']['histogram']) < abs(indicators['macd']['histogram'] * 0.5):
+                logger.info(f"Closing position for {symbol} - Momentum loss")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error in should_close_position: {e}")
+            return False
+
+    def should_update_levels(self, position: Dict, market_data: Dict) -> bool:
+        """Determine if position levels should be updated based on market conditions."""
+        try:
+            symbol = position.get('symbol')
+            if not symbol:
+                return False
+                
+            # Get current indicators
+            indicators = self._calculate_indicators(market_data)
+            
+            # Get position details
+            position_amt = float(position.get('positionAmt', 0))
+            entry_price = float(position.get('entryPrice', 0))
+            current_price = float(market_data.get('close', 0))
+            
+            if position_amt == 0:
+                return False
+                
+            # Check for significant price movement
+            price_change = abs(current_price - entry_price) / entry_price
+            if price_change > 0.02:  # 2% price movement
+                logger.info(f"Updating levels for {symbol} - Significant price movement")
+                return True
+                
+            # Check for volatility change
+            atr = indicators.get('atr', 0)
+            if atr > self.strategy_config.get('atr_threshold', 0.02):
+                logger.info(f"Updating levels for {symbol} - Volatility change")
+                return True
+                
+            # Check for trend strength change
+            adx = indicators.get('adx', 0)
+            if adx > 25:  # Strong trend
+                logger.info(f"Updating levels for {symbol} - Trend strength change")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error in should_update_levels: {e}")
+            return False
+
+    def calculate_new_levels(self, position: Dict, market_data: Dict) -> Dict:
+        """Calculate new stop loss and take profit levels based on market conditions."""
+        try:
+            symbol = position.get('symbol')
+            if not symbol:
+                return {}
+                
+            # Get current indicators
+            indicators = self._calculate_indicators(market_data)
+            
+            # Get position details
+            position_amt = float(position.get('positionAmt', 0))
+            entry_price = float(position.get('entryPrice', 0))
+            current_price = float(market_data.get('close', 0))
+            
+            if position_amt == 0:
+                return {}
+                
+            # Calculate ATR-based levels
+            atr = indicators.get('atr', 0)
+            atr_multiplier = self.strategy_config.get('atr_multiplier', 2.0)
+            
+            # Calculate new levels
+            if position_amt > 0:  # Long position
+                # Move stop loss to break even or higher if in profit
+                if current_price > entry_price:
+                    new_sl = max(entry_price, current_price - (atr * atr_multiplier))
+                else:
+                    new_sl = current_price - (atr * atr_multiplier)
+                    
+                # Adjust take profit based on trend strength
+                if indicators['adx'] > 25:  # Strong trend
+                    new_tp = current_price + (atr * atr_multiplier * 2)
+                else:
+                    new_tp = current_price + (atr * atr_multiplier)
+                    
+            else:  # Short position
+                # Move stop loss to break even or lower if in profit
+                if current_price < entry_price:
+                    new_sl = min(entry_price, current_price + (atr * atr_multiplier))
+                else:
+                    new_sl = current_price + (atr * atr_multiplier)
+                    
+                # Adjust take profit based on trend strength
+                if indicators['adx'] > 25:  # Strong trend
+                    new_tp = current_price - (atr * atr_multiplier * 2)
+                else:
+                    new_tp = current_price - (atr * atr_multiplier)
+                    
+            # Ensure minimum distance between current price and levels
+            min_distance = atr * 0.5
+            if position_amt > 0:  # Long position
+                new_sl = min(new_sl, current_price - min_distance)
+                new_tp = max(new_tp, current_price + min_distance)
+            else:  # Short position
+                new_sl = max(new_sl, current_price + min_distance)
+                new_tp = min(new_tp, current_price - min_distance)
+                
+            logger.info(f"New levels for {symbol}: SL={new_sl:.2f}, TP={new_tp:.2f}")
+            return {
+                'stop_loss': new_sl,
+                'take_profit': new_tp
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in calculate_new_levels: {e}")
+            return {} 

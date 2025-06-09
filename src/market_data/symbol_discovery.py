@@ -1467,8 +1467,8 @@ class SymbolDiscovery:
             recent_vol_std = np.std(volumes[-5:])
             if recent_vol_std > vol_mean * 2.0:
                 logger.warning(f"Sudden volume spike detected: {recent_vol_std/vol_mean:.2f}x average")
-            return False
-
+                return False
+                
             # 2. Check for volume trend consistency
             vol_trend = np.polyfit(range(len(volumes[-20:])), volumes[-20:], 1)[0]
             if abs(vol_trend) > vol_mean * 0.5:
@@ -1503,11 +1503,11 @@ class SymbolDiscovery:
                 return False
                 
             return True
-                
+            
         except Exception as e:
             logger.error(f"Error checking volume trend: {e}")
-                return False
-                
+            return False
+
     async def initialize(self) -> None:
         """Initialize the symbol discovery process."""
         logger.info("Initializing symbol discovery...")
@@ -1520,10 +1520,246 @@ class SymbolDiscovery:
             symbols = await self.exchange_client.get_all_symbols()
             self.symbols = symbols
             logger.info(f"Loaded {len(self.symbols)} symbols from exchange")
-        except Exception as e:
+            except Exception as e:
             logger.error(f"Error loading symbols: {e}")
             self.symbols = [] 
 
     async def get_symbols(self) -> list:
         """Return the list of discovered symbols."""
         return self.symbols 
+
+    async def get_market_conditions(self, symbol: str) -> Dict:
+        """Get comprehensive market conditions for a symbol."""
+        try:
+            # Get market data
+            market_data = await self.get_market_data(symbol)
+            if not market_data:
+                return {}
+                
+            # Get orderbook
+            orderbook = await self.exchange_client.get_orderbook(symbol)
+            if not orderbook:
+                return {}
+                
+            # Get 24h ticker
+            ticker_24h = await self.exchange_client.get_ticker_24h(symbol)
+            if not ticker_24h:
+                return {}
+                
+            # Calculate key metrics
+            spread = self._calculate_spread(orderbook)
+            liquidity = self._calculate_liquidity(orderbook)
+            volatility = self.calculate_volatility(market_data.get('ohlcv', []))
+            market_cap = self._calculate_market_cap(ticker_24h)
+            
+            # Get technical indicators
+            indicators = self.signal_generator._calculate_indicators(market_data)
+            
+            # Determine market regime
+            regime = self._determine_market_regime(indicators, volatility)
+            
+            # Calculate trend strength
+            trend_strength = self._calculate_trend_strength(indicators)
+            
+            # Check for market anomalies
+            anomalies = self._check_market_anomalies(market_data, indicators)
+            
+            return {
+                'symbol': symbol,
+                'timestamp': datetime.now().isoformat(),
+                'spread': spread,
+                'liquidity': liquidity,
+                'volatility': volatility,
+                'market_cap': market_cap,
+                'regime': regime,
+                'trend_strength': trend_strength,
+                'anomalies': anomalies,
+                'indicators': {
+                    'rsi': indicators.get('rsi', 0),
+                    'macd': indicators.get('macd', {}),
+                    'bb': indicators.get('bb', {}),
+                    'adx': indicators.get('adx', 0),
+                    'atr': indicators.get('atr', 0)
+                },
+                'volume': {
+                    'current': float(ticker_24h.get('volume', 0)),
+                    'change_24h': float(ticker_24h.get('volumeChange', 0)),
+                    'trend': self._check_volume_trend(market_data.get('ohlcv', []))
+                },
+                'price': {
+                    'current': float(ticker_24h.get('lastPrice', 0)),
+                    'change_24h': float(ticker_24h.get('priceChangePercent', 0)),
+                    'high_24h': float(ticker_24h.get('highPrice', 0)),
+                    'low_24h': float(ticker_24h.get('lowPrice', 0))
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting market conditions for {symbol}: {e}")
+            return {}
+            
+    def check_data_freshness(self, data: Dict) -> bool:
+        """Check if market data is fresh and valid."""
+        try:
+            if not data:
+                return False
+                
+            # Check timestamp
+            timestamp = data.get('timestamp')
+            if not timestamp:
+                return False
+                
+            # Convert string timestamp to datetime if needed
+            if isinstance(timestamp, str):
+                timestamp = datetime.fromisoformat(timestamp)
+                
+            # Check if data is too old (more than 5 minutes)
+            if (datetime.now() - timestamp).total_seconds() > 300:
+                logger.warning(f"Data is too old: {(datetime.now() - timestamp).total_seconds()} seconds")
+                return False
+                
+            # Check for required fields
+            required_fields = ['symbol', 'price', 'volume', 'indicators']
+            for field in required_fields:
+                if field not in data:
+                    logger.warning(f"Missing required field: {field}")
+                    return False
+                    
+            # Check for valid price
+            price = data.get('price', {}).get('current')
+            if not price or price <= 0:
+                logger.warning(f"Invalid price: {price}")
+                return False
+                
+            # Check for valid volume
+            volume = data.get('volume', {}).get('current')
+            if not volume or volume < 0:
+                logger.warning(f"Invalid volume: {volume}")
+                return False
+                
+            # Check for valid indicators
+            indicators = data.get('indicators', {})
+            if not indicators:
+                logger.warning("Missing indicators")
+                return False
+                
+            # Check for valid RSI
+            rsi = indicators.get('rsi')
+            if not rsi or not (0 <= rsi <= 100):
+                logger.warning(f"Invalid RSI: {rsi}")
+                return False
+                
+            # Check for valid MACD
+            macd = indicators.get('macd', {})
+            if not macd or not all(k in macd for k in ['histogram', 'signal', 'macd']):
+                logger.warning("Invalid MACD data")
+                return False
+                
+            # Check for valid Bollinger Bands
+            bb = indicators.get('bb', {})
+            if not bb or not all(k in bb for k in ['upper', 'middle', 'lower']):
+                logger.warning("Invalid Bollinger Bands data")
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking data freshness: {e}")
+            return False
+
+    def _determine_market_regime(self, indicators: Dict, volatility: float) -> str:
+        """Determine the current market regime."""
+        try:
+            rsi = indicators.get('rsi', 50)
+            macd_hist = indicators.get('macd', {}).get('histogram', 0)
+            adx = indicators.get('adx', 0)
+            
+            # High volatility regime
+            if volatility > 0.05:  # 5% daily volatility
+                return 'high_volatility'
+                
+            # Strong trend regime
+            if adx > 25:
+                if macd_hist > 0:
+                    return 'strong_uptrend'
+                else:
+                    return 'strong_downtrend'
+                    
+            # Range-bound regime
+            if 30 <= rsi <= 70:
+                return 'range_bound'
+                
+            # Overbought/Oversold regime
+            if rsi > 70:
+                return 'overbought'
+            elif rsi < 30:
+                return 'oversold'
+                
+            return 'neutral'
+            
+        except Exception as e:
+            logger.error(f"Error determining market regime: {e}")
+            return 'unknown'
+
+    def _calculate_trend_strength(self, indicators: Dict) -> float:
+        """Calculate the strength of the current trend."""
+        try:
+            adx = indicators.get('adx', 0)
+            macd_hist = abs(indicators.get('macd', {}).get('histogram', 0))
+            rsi = indicators.get('rsi', 50)
+            
+            # Normalize indicators
+            adx_score = min(adx / 100, 1.0)  # ADX max is typically 100
+            macd_score = min(macd_hist / 0.1, 1.0)  # Normalize MACD histogram
+            rsi_score = 1.0 - abs(50 - rsi) / 50  # Distance from neutral RSI
+            
+            # Weighted average
+            return (0.4 * adx_score + 0.4 * macd_score + 0.2 * rsi_score)
+            
+        except Exception as e:
+            logger.error(f"Error calculating trend strength: {e}")
+            return 0.0
+
+    def _check_market_anomalies(self, market_data: Dict, indicators: Dict) -> List[str]:
+        """Check for market anomalies and unusual conditions."""
+        anomalies = []
+        try:
+            # Check for extreme volatility
+            volatility = self.calculate_volatility(market_data.get('ohlcv', []))
+            if volatility > 0.1:  # 10% daily volatility
+                anomalies.append('extreme_volatility')
+                
+            # Check for volume spikes
+            volume_data = market_data.get('ohlcv', [])
+            if len(volume_data) >= 2:
+                current_volume = volume_data[-1].get('volume', 0)
+                avg_volume = sum(candle.get('volume', 0) for candle in volume_data[:-1]) / (len(volume_data) - 1)
+                if current_volume > avg_volume * 3:  # 3x average volume
+                    anomalies.append('volume_spike')
+                    
+            # Check for price gaps
+            if len(volume_data) >= 2:
+                current_open = volume_data[-1].get('open', 0)
+                prev_close = volume_data[-2].get('close', 0)
+                if prev_close > 0:
+                    gap = abs(current_open - prev_close) / prev_close
+                    if gap > 0.05:  # 5% gap
+                        anomalies.append('price_gap')
+                        
+            # Check for extreme RSI
+            rsi = indicators.get('rsi', 50)
+            if rsi > 80:
+                anomalies.append('extreme_overbought')
+            elif rsi < 20:
+                anomalies.append('extreme_oversold')
+                
+            # Check for MACD divergence
+            macd = indicators.get('macd', {})
+            if macd.get('histogram', 0) * macd.get('signal', 0) < 0:
+                anomalies.append('macd_divergence')
+                
+            return anomalies
+            
+        except Exception as e:
+            logger.error(f"Error checking market anomalies: {e}")
+            return anomalies 

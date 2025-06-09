@@ -39,6 +39,13 @@ class TradingBot:
         # to prioritize the recommended .env configuration method.
         self.config = load_config(config_path)
         
+        # Set trading intervals with defaults
+        self.health_check_interval = self.config.get('trading', {}).get('health_check_interval', 60)
+        self.funding_rate_interval = self.config.get('trading', {}).get('funding_rate_interval', 300)
+        self.position_interval = self.config.get('trading', {}).get('position_interval', 30)
+        self.signal_interval = self.config.get('trading', {}).get('signal_interval', 15)
+        self.scan_interval = self.config.get('trading', {}).get('scan_interval', 10)
+        
         # Initialize components
         exchange_config = {
             'api_key': os.getenv('BINANCE_API_KEY'),
@@ -182,23 +189,22 @@ class TradingBot:
         """Start the trading bot."""
         try:
             logger.info("Starting trading bot...")
-            
+
             # Initialize components
             await self.exchange_client.initialize()
             await self.ws_manager.initialize(self.exchange_client.symbols)
-            
-            # Start WebSocket manager
-            await self.ws_manager.start()
-            
+
+            # Start WebSocket manager as a background task
+            self.ws_task = asyncio.create_task(self.ws_manager.start())
+
             # Start background tasks
-            self.running = True
             self.health_check_task = asyncio.create_task(self._health_check_loop())
             self.funding_rates_task = asyncio.create_task(self._update_funding_rates())
-            
+
+            self.running = True
             logger.info("Trading bot started successfully")
         except Exception as e:
             logger.error(f"Error starting trading bot: {e}")
-            raise
             
     async def _execute_trade(self, symbol: str, signal: Dict) -> Optional[Dict]:
         """Execute a trade based on the signal."""
@@ -348,9 +354,9 @@ class TradingBot:
                 stop_loss = signal.get('stop_loss')  # Get from signal if available
 
                 if take_profit is None or stop_loss is None:
-                    # Fallback or calculate based on risk_manager if signal didn't provide them
-                    stop_loss = self.risk_manager.calculate_stop_loss(symbol, entry_price, direction, signal.get('indicators', {}))
-                    # Calculate take profit based on a default risk:reward or from signal
+                     # Fallback or calculate based on risk_manager if signal didn't provide them
+                     stop_loss = self.risk_manager.calculate_stop_loss(symbol, entry_price, direction, signal.get('indicators', {}))
+                     # Calculate take profit based on a default risk:reward or from signal
                     take_profit = self.risk_manager.calculate_take_profit(symbol, entry_price, stop_loss, direction, signal.get('indicators', {}))
 
                 logger.info(f"Executing Standard {signal_type} for {symbol}: Entry={entry_price:.2f}, TP={take_profit:.2f}, SL={stop_loss:.2f}, Size={size:.4f}")
@@ -366,7 +372,7 @@ class TradingBot:
                     logger.info(f"Placed market {order_side} order for {symbol}. Order ID: {order.get('orderId')}")
                 else:
                      logger.warning(f"Current price {current_price:.2f} too far from Standard {signal_type} entry {entry_price:.2f} for {symbol}. Skipping trade.")
-                     return None # Skip trade if price moved significantly
+                    return None  # Skip trade if price moved significantly
 
             else:
                 logger.info(f"Received NEUTRAL signal for {symbol}. No trade executed.")
@@ -406,7 +412,7 @@ class TradingBot:
     async def stop(self):
         """Stop the trading bot."""
         try:
-            logger.info("Stopping trading bot...")
+        logger.info("Stopping trading bot...")
             self.running = False
 
             # Cancel background tasks
@@ -423,7 +429,7 @@ class TradingBot:
             if self.exchange_client:
                 await self.exchange_client.shutdown()
 
-            logger.info("Trading bot stopped")
+        logger.info("Trading bot stopped")
         except Exception as e:
             logger.error(f"Error stopping trading bot: {e}")
             raise
@@ -616,35 +622,29 @@ class TradingBot:
                 await asyncio.sleep(5)
 
     async def _update_positions(self):
-        """Update and manage open positions."""
-        while True:
-            try:
-                # Get open positions
-                positions = await self.exchange_client.get_open_positions()
-                
-                for position in positions:
-                    symbol = position['symbol']
+        """Update all open positions."""
+        try:
+            logger.debug("Updating positions")
+            
+            # Get all open positions
+            positions = await self.exchange_client.get_open_positions()
+            
+            # Update each position
+            for position in positions:
+                symbol = position.get('symbol')
+                if symbol:
+                    await self._update_position_levels(symbol)
                     
-                    # Get current market data
-                    market_data = await self.symbol_discovery.get_market_data(symbol)
-                    if not market_data:
-                        continue
+            # Check for positions that need to be closed
+            for symbol in list(self.active_trades.keys()):
+                position = await self.exchange_client.get_position(symbol)
+                if not position or float(position.get('positionAmt', 0)) == 0:
+                    await self._close_position(symbol, "position_closed")
                     
-                    # Check if position should be closed
-                    if self.signal_generator.should_close_position(position, market_data):
-                        await self._close_position(position)
-                    
-                    # Update stop loss and take profit
-                    elif self.signal_generator.should_update_levels(position, market_data):
-                        new_levels = self.signal_generator.calculate_new_levels(position, market_data)
-                        await self._update_position_levels(position, new_levels)
-                
-                # Sleep for position update interval
-                await asyncio.sleep(self.config['trading']['position_interval'])
-                
-            except Exception as e:
-                logger.error(f"Error in position updates: {str(e)}")
-                await asyncio.sleep(5)
+            logger.debug("Positions update completed")
+            
+        except Exception as e:
+            logger.error(f"Error updating positions: {e}")
 
     async def _health_check(self):
         """Perform health checks on the trading system."""
@@ -690,3 +690,90 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"Error in funding rate update: {str(e)}")
             await asyncio.sleep(self.config['trading']['funding_rate_interval'])
+
+    async def _close_position(self, symbol: str, reason: str = "manual") -> bool:
+        """Close a position for a given symbol."""
+        try:
+            logger.info(f"Attempting to close position for {symbol} - Reason: {reason}")
+            
+            # Get current position
+            position = await self.exchange_client.get_position(symbol)
+            if not position or float(position.get('positionAmt', 0)) == 0:
+                logger.info(f"No position to close for {symbol}")
+                return True
+                
+            # Close position
+            result = await self.exchange_client.close_position(symbol)
+            
+            if result and result.get('status') != 'no_position':
+                # Update trade history
+                trade_info = {
+                    'symbol': symbol,
+                    'close_time': datetime.now(),
+                    'close_price': float(result.get('price', 0)),
+                    'close_reason': reason,
+                    'pnl': float(position.get('unRealizedProfit', 0))
+                }
+                
+                # Update active trades
+                if symbol in self.active_trades:
+                    trade = self.active_trades[symbol]
+                    trade.update(trade_info)
+                    self.trade_history.append(trade)
+                    del self.active_trades[symbol]
+                    
+                logger.info(f"Successfully closed position for {symbol}")
+                return True
+            else:
+                logger.warning(f"Failed to close position for {symbol}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error closing position for {symbol}: {e}")
+            return False
+
+    async def _update_position_levels(self, symbol: str) -> None:
+        """Update position levels and risk metrics for a given symbol."""
+        try:
+            logger.debug(f"Updating position levels for {symbol}")
+            
+            # Get current position
+            position = await self.exchange_client.get_position(symbol)
+            if not position:
+                return
+                
+            # Get position risk information
+            risk_info = await self.exchange_client.get_position_risk(symbol)
+            
+            # Update active trade with new information
+            if symbol in self.active_trades:
+                trade = self.active_trades[symbol]
+                trade.update({
+                    'current_price': float(position.get('markPrice', 0)),
+                    'unrealized_pnl': float(position.get('unRealizedProfit', 0)),
+                    'leverage': float(risk_info.get('leverage', 0)),
+                    'liquidation_price': float(risk_info.get('liquidation_price', 0)),
+                    'margin_type': risk_info.get('margin_type', ''),
+                    'last_update': datetime.now()
+                })
+                
+                # Check for stop loss or take profit
+                entry_price = float(trade.get('entry_price', 0))
+                current_price = float(position.get('markPrice', 0))
+                position_amt = float(position.get('positionAmt', 0))
+                
+                if position_amt > 0:  # Long position
+                    if current_price <= trade.get('stop_loss', 0):
+                        await self._close_position(symbol, "stop_loss")
+                    elif current_price >= trade.get('take_profit', float('inf')):
+                        await self._close_position(symbol, "take_profit")
+                else:  # Short position
+                    if current_price >= trade.get('stop_loss', float('inf')):
+                        await self._close_position(symbol, "stop_loss")
+                    elif current_price <= trade.get('take_profit', 0):
+                        await self._close_position(symbol, "take_profit")
+                        
+            logger.debug(f"Position levels updated for {symbol}")
+            
+        except Exception as e:
+            logger.error(f"Error updating position levels for {symbol}: {e}")

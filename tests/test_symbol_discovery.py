@@ -89,7 +89,7 @@ def mock_signal_generator():
                 'reasoning': 'Test buy signal'
             }
         elif symbol == 'ETHUSDT':
-            return {
+             return {
                 'signal_type': 'SELL',
                 'entry': 3000,
                 'take_profit': 2900,
@@ -98,7 +98,7 @@ def mock_signal_generator():
                 'reasoning': 'Test sell signal'
             }
         else:
-            return None
+             return None
              
     mock_gen.generate_signals.side_effect = mock_generate_signals
     return mock_gen
@@ -197,14 +197,14 @@ async def test_process_symbol_returns_none_if_no_signal(
     symbol_discovery.signal_generator.generate_signals.assert_called_once_with(
         'LTCBTC', MagicMock(), 1.0
     )
-
+    
 
 @pytest.mark.asyncio
 async def test_get_market_data_returns_expected_structure(
     symbol_discovery, mock_exchange_client
 ):
     """Test that get_market_data returns the expected data structure."""
-    # Use BTCUSDT for which candlestick data is mocked
+     # Use BTCUSDT for which candlestick data is mocked
     market_data = await symbol_discovery.get_market_data('BTCUSDT')
     
     assert isinstance(market_data, dict)
