@@ -1,5 +1,5 @@
 # File: src/trading_bot.py
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import time
 import pandas as pd
+import yaml
 
 from src.market_data.exchange_client import ExchangeClient
 from src.market_data.processor import MarketDataProcessor
@@ -25,6 +26,8 @@ from src.market_data.websocket_client import MarketDataWebSocket
 from src.models import Strategy as StrategyModel
 from src.database.database import Database
 from src.strategy.dynamic_config import strategy_config
+from src.strategy.strategy_manager import StrategyManager
+from src.opportunity.opportunity_manager import OpportunityManager
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +197,39 @@ class TradingBot:
             logger.warning(f"Using default balance: {default_balance}")
             return default_balance
 
+    async def _initialize_components(self):
+        """Initialize all trading bot components."""
+        try:
+            # Initialize exchange client
+            self.exchange_client = ExchangeClient(self.config)
+            await self.exchange_client.initialize()
+            
+            # Initialize WebSocket manager
+            self.ws_manager = self.exchange_client.ws_manager
+            await self.ws_manager.initialize()
+            
+            # Initialize symbol discovery
+            self.symbol_discovery = SymbolDiscovery(self.exchange_client, self.config)
+            
+            # Initialize risk manager
+            self.risk_manager = RiskManager(self.config)
+            
+            # Initialize strategy manager
+            self.strategy_manager = StrategyManager(self.config)
+            
+            # Initialize opportunity manager
+            self.opportunity_manager = OpportunityManager(
+                self.exchange_client,
+                self.strategy_manager,
+                self.risk_manager
+            )
+            
+            logger.info("All components initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Error initializing components: {e}")
+            raise
+
     async def start(self):
         """Start the trading bot."""
         try:
@@ -202,6 +238,9 @@ class TradingBot:
             
             # Initialize components
             await self._initialize_components()
+            
+            # Start WebSocket manager
+            await self.ws_manager.start()
             
             # Start monitoring tasks
             self.health_check_task = asyncio.create_task(self._health_check_loop())
@@ -683,6 +722,58 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Error loading strategy profiles: {e}")
             self.profiles = self._get_default_profiles()
+
+    def _load_config(self) -> Dict[str, Any]:
+        """Load configuration from YAML file."""
+        try:
+            config_path = os.path.join('config', 'config.yaml')
+            if not os.path.exists(config_path):
+                logger.warning(f"Config file not found at {config_path}, using defaults")
+                return self._get_default_config()
+                
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+                if not config:
+                    logger.warning("Empty config file, using defaults")
+                    return self._get_default_config()
+                return config
+                
+        except Exception as e:
+            logger.error(f"Error loading config: {e}")
+            return self._get_default_config()
+            
+    def _get_default_config(self) -> Dict[str, Any]:
+        """Get default configuration."""
+        return {
+            'exchange': {
+                'name': 'binance',
+                'testnet': os.getenv('USE_TESTNET', 'false').lower() == 'true',
+                'api_key': os.getenv('BINANCE_API_KEY', ''),
+                'api_secret': os.getenv('BINANCE_API_SECRET', ''),
+                'base_url': os.getenv('BINANCE_API_URL', 'https://api.binance.com'),
+                'ws_url': os.getenv('BINANCE_WS_URL', 'wss://stream.binance.com:9443/ws/stream')
+            },
+            'trading': {
+                'risk_per_trade': float(os.getenv('RISK_PER_TRADE', '50.0')),
+                'max_open_trades': int(os.getenv('MAX_OPEN_TRADES', '5')),
+                'min_volume': float(os.getenv('MIN_VOLUME', '1000000.0')),
+                'min_market_cap': float(os.getenv('MIN_MARKET_CAP', '100000000.0')),
+                'max_spread': float(os.getenv('MAX_SPREAD', '0.5')),
+                'min_volatility': float(os.getenv('MIN_VOLATILITY', '0.5')),
+                'max_volatility': float(os.getenv('MAX_VOLATILITY', '5.0'))
+            },
+            'risk': {
+                'max_drawdown': float(os.getenv('MAX_DRAWDOWN', '10.0')),
+                'max_leverage': float(os.getenv('MAX_LEVERAGE', '3.0')),
+                'position_size_limit': float(os.getenv('POSITION_SIZE_LIMIT', '10000.0')),
+                'daily_loss_limit': float(os.getenv('DAILY_LOSS_LIMIT', '1000.0'))
+            },
+            'monitoring': {
+                'health_check_interval': int(os.getenv('HEALTH_CHECK_INTERVAL', '60')),
+                'position_update_interval': int(os.getenv('POSITION_UPDATE_INTERVAL', '10')),
+                'funding_rate_check_interval': int(os.getenv('FUNDING_RATE_CHECK_INTERVAL', '60'))
+            }
+        }
 
 # Create a singleton instance
 trading_bot = TradingBot()

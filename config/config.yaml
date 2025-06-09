@@ -1,22 +1,27 @@
-binance:
+exchange:
+  name: binance
+  testnet: false
   api_key: ${BINANCE_API_KEY}
   api_secret: ${BINANCE_API_SECRET}
-  testnet: ${USE_TESTNET:-false}
-  exchange_options:
-    adjustForTimeDifference: true
-    recvWindow: 10000
+  base_url: ${BINANCE_API_URL}
+  ws_url: ${BINANCE_WS_URL}
 
 trading:
-  health_check_interval: 60         # seconds
+  health_check_interval: ${HEALTH_CHECK_INTERVAL}
   funding_rate_interval: 300        # seconds
   position_interval: 30             # seconds
   signal_interval: 15               # seconds
   monitor_interval: 10              # seconds
   scan_interval: 10                 # seconds
-  max_open_trades: 5
-  min_volume_usdt: 1000000
+  max_open_trades: ${MAX_OPEN_TRADES}
+  min_volume: ${MIN_VOLUME}
   min_liquidity_usdt: 500000
-  min_market_cap_usdt: 10000000
+  min_market_cap: ${MIN_MARKET_CAP}
+  max_spread: ${MAX_SPREAD}
+  min_volatility: ${MIN_VOLATILITY}
+  max_volatility: ${MAX_VOLATILITY}
+  scalping_mode: false
+  risk_per_trade: ${RISK_PER_TRADE}
 
 strategy:
   default_profile: "moderate"
@@ -71,32 +76,31 @@ strategy:
 
 risk:
   initial_balance: ${INITIAL_BALANCE:-1000}
-  max_daily_loss: 0.05
-  max_drawdown: 0.15
-  max_leverage: 20
+  max_daily_loss: ${DAILY_LOSS_LIMIT}
+  max_drawdown: ${MAX_DRAWDOWN}
+  max_leverage: ${MAX_LEVERAGE}
   position_sizing:
     base_risk: 0.01
     max_risk: 0.05
     confidence_multiplier: 1.5
     volatility_divider: 2.0
+  position_size_limit: ${POSITION_SIZE_LIMIT}
+  daily_loss_limit: ${DAILY_LOSS_LIMIT}
+
+monitoring:
+  funding_rate_check_interval: ${FUNDING_RATE_CHECK_INTERVAL}
+  position_update_interval: ${POSITION_UPDATE_INTERVAL}
 
 logging:
   level: INFO
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/trading_bot.log" 
+  file: "logs/trading_bot.log"
 
-exchange:
-  api_key: ${BINANCE_API_KEY}
-  api_secret: ${BINANCE_API_SECRET}
-  base_url: https://api.binance.com
-  ws_url: wss://stream.binance.com:9443/ws/stream
-  testnet: ${USE_TESTNET}
-  proxy:
-    host: ${PROXY_HOST}
-    port: ${PROXY_PORT}
-    username: ${PROXY_USER}
-    password: ${PROXY_PASS}
+proxy:
+  host: ${PROXY_HOST}
+  port: ${PROXY_PORT}
+  username: ${PROXY_USER}
+  password: ${PROXY_PASS}
   proxy_ports: ${PROXY_LIST}
   failover_ports: ${FAILOVER_PORTS}
-  symbols: ${TRADING_SYMBOLS}
-  scalping_mode: false 
+  symbols: ${TRADING_SYMBOLS} 
