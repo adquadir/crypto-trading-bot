@@ -15,9 +15,9 @@ import pandas as pd
 from typing import Tuple
 import time
 from ..strategy.dynamic_config import strategy_config
-from ..risk.risk_manager import RiskManager
 from ..database.database import Database
 from dotenv import load_dotenv
+import statistics
 
 logger = logging.getLogger(__name__)
 
@@ -1444,63 +1444,33 @@ class SymbolDiscovery:
             return False
             
     def _check_volume_trend(self, ohlcv: List[Dict], signal_direction: Optional[str] = None) -> bool:
-        """Check if volume trend is healthy, with relaxed criteria for confirmed signals."""
+        """Check if volume trend is valid for trading."""
         try:
-            volumes = [float(candle['volume']) for candle in ohlcv]
-            
-            # Need at least 20 data points for the MA and STD calculations
-            if len(volumes) < 20:
-                logger.debug("Insufficient data points for volume trend analysis")
-                return True  # Allow through if not enough data
-
-            # Calculate volume metrics
-            vol_ma5 = np.mean(volumes[-5:])
-            vol_ma20 = np.mean(volumes[-20:])
-            vol_std = np.std(volumes[-20:])
-            vol_mean = np.mean(volumes[-20:])
-            
-            # Check for volume consistency
-            vol_cv = vol_std / vol_mean if vol_mean > 0 else float('inf')
-            
-            # Additional safeguards
-            # 1. Check for sudden volume spikes
-            recent_vol_std = np.std(volumes[-5:])
-            if recent_vol_std > vol_mean * 2.0:
-                logger.warning(f"Sudden volume spike detected: {recent_vol_std/vol_mean:.2f}x average")
+            if not ohlcv or len(ohlcv) < 20:
                 return False
                 
-            # 2. Check for volume trend consistency
-            vol_trend = np.polyfit(range(len(volumes[-20:])), volumes[-20:], 1)[0]
-            if abs(vol_trend) > vol_mean * 0.5:
-                logger.warning(f"Extreme volume trend detected: {vol_trend/vol_mean:.2f}x average")
-                return False
-                
-            # 3. Check for volume gaps
-            vol_diffs = np.diff(volumes[-5:])
-            if np.max(np.abs(vol_diffs)) > vol_mean * 3.0:
-                logger.warning(f"Large volume gap detected: {np.max(np.abs(vol_diffs))/vol_mean:.2f}x average")
-                return False
+            # Calculate volume moving averages
+            volumes = [float(k['volume']) for k in ohlcv]
+            vol_ma5 = sum(volumes[-5:]) / 5
+            vol_ma20 = sum(volumes[-20:]) / 20
             
-            if signal_direction:
-                # For confirmed signals, only check for extreme volume drops
-                if vol_ma5 < vol_ma20 * 0.1:  # Allow up to 90% volume drop
-                    logger.warning(f"Extreme volume drop detected: {vol_ma5/vol_ma20:.2%} of average")
-                    return False
-                
-                # Check for volume consistency with relaxed threshold
-                if vol_cv > 2.0:  # Allow higher coefficient of variation
-                    logger.warning(f"High volume variation: {vol_cv:.2f}")
-                    return False
-                else:
+            # Calculate volume coefficient of variation
+            vol_cv = statistics.stdev(volumes[-20:]) / statistics.mean(volumes[-20:])
+            
+            # Check for volume consistency with relaxed threshold
+            if vol_cv > 2.0:  # Allow higher coefficient of variation
+                logger.warning(f"High volume variation: {vol_cv:.2f}")
+                return False
+            else:
                 # Standard checks for unconfirmed signals
                 if vol_ma5 < vol_ma20 * 0.2:  # Require at least 20% of average volume
                     logger.debug(f"Low recent volume: {vol_ma5/vol_ma20:.2%} of average")
-                return False
+                    return False
                 
                 # Check for volume consistency
                 if vol_cv > 1.5:  # Standard threshold for variation
                     logger.debug(f"High volume variation: {vol_cv:.2f}")
-                return False
+                    return False
                 
             return True
             
@@ -1520,32 +1490,66 @@ class SymbolDiscovery:
             symbols = await self.exchange_client.get_all_symbols()
             self.symbols = symbols
             logger.info(f"Loaded {len(self.symbols)} symbols from exchange")
-            except Exception as e:
+        except Exception as e:
             logger.error(f"Error loading symbols: {e}")
-            self.symbols = [] 
+            self.symbols = []
 
     async def get_symbols(self) -> list:
         """Return the list of discovered symbols."""
         return self.symbols 
 
     async def get_market_conditions(self, symbol: str) -> Dict:
-        """Get comprehensive market conditions for a symbol."""
+        """
+        Get current market conditions for a symbol.
+        
+        Args:
+            symbol: Trading symbol to analyze
+            
+        Returns:
+            Dict containing market conditions including:
+            - trend: str ('bullish', 'bearish', 'neutral')
+            - volatility: float (0-1)
+            - volume_profile: Dict (volume distribution)
+            - liquidity: float (0-1)
+            - market_depth: Dict (order book depth)
+        """
         try:
-            # Get market data
-            market_data = await self.get_market_data(symbol)
-            if not market_data:
+            if not symbol:
                 return {}
                 
-            # Get orderbook
-            orderbook = await self.exchange_client.get_orderbook(symbol)
-            if not orderbook:
+            # Get required data
+            ticker = await self.exchange_client.get_ticker(symbol)
+            klines = await self.exchange_client.get_klines(symbol, interval='1h', limit=24)
+            order_book = await self.exchange_client.get_order_book(symbol)
+            
+            if not ticker or not klines or not order_book:
                 return {}
                 
-            # Get 24h ticker
-            ticker_24h = await self.exchange_client.get_ticker_24h(symbol)
-            if not ticker_24h:
-                return {}
+            # Calculate trend
+            closes = [float(k['close']) for k in klines]
+            sma_20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else sum(closes) / len(closes)
+            current_price = float(ticker['last'])
+            
+            trend = 'neutral'
+            if current_price > sma_20 * 1.02:
+                trend = 'bullish'
+            elif current_price < sma_20 * 0.98:
+                trend = 'bearish'
                 
+            # Calculate volatility
+            returns = [abs(closes[i] - closes[i-1])/closes[i-1] for i in range(1, len(closes))]
+            volatility = sum(returns) / len(returns) if returns else 0
+            
+            # Calculate volume profile
+            volumes = [float(k['volume']) for k in klines]
+            avg_volume = sum(volumes) / len(volumes)
+            volume_profile = {
+                'current': float(ticker['volume']),
+                'average': avg_volume,
+                'trend': 'increasing' if volumes[-1] > avg_volume else 'decreasing'
+            }
+            
+            # Calculate liquidity
             # Calculate key metrics
             spread = self._calculate_spread(orderbook)
             liquidity = self._calculate_liquidity(orderbook)

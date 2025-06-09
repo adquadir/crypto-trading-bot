@@ -1,7 +1,7 @@
 from typing import List, Dict, Any
 from fastapi import HTTPException
 from src.api.routes import router
-from src.bot.trading_bot import trading_bot
+from src.trading_bot import trading_bot
 from src.utils.logger import logger
 
 @router.get("/opportunities", response_model=List[Dict[str, Any]])

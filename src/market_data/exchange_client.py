@@ -160,37 +160,46 @@ class ExchangeClient:
         self.ws_url = os.getenv('BINANCE_WS_URL', 'wss://stream.binance.com:9443/ws/stream')
         self.testnet = os.getenv('USE_TESTNET', 'false').lower() == 'true'
         
+        # Initialize proxy configuration
+        self.proxy_host = os.getenv('PROXY_HOST', '')
+        self.proxy_port = os.getenv('PROXY_PORT', '')
+        self.proxy_user = os.getenv('PROXY_USER', '')
+        self.proxy_pass = os.getenv('PROXY_PASS', '')
+        self.proxy_auth = None
+        if self.proxy_user and self.proxy_pass:
+            self.proxy_auth = BasicAuth(self.proxy_user, self.proxy_pass)
+            
         # Initialize proxy configuration from environment variables
         use_proxy = os.getenv('USE_PROXY', 'false').lower() == 'true'
         if use_proxy:
-            proxy_host = os.getenv('PROXY_HOST', '')
-            proxy_port = os.getenv('PROXY_PORT', '')
-            proxy_user = os.getenv('PROXY_USER', '')
-            proxy_pass = os.getenv('PROXY_PASS', '')
-            
-            if proxy_host and proxy_port:
-                proxy_url = f"http://{proxy_host}:{proxy_port}"
-                if proxy_user and proxy_pass:
-                    proxy_url = f"http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
+            if self.proxy_host and self.proxy_port:
+                proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+                if self.proxy_auth:
+                    proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
                 
                 self.proxy_config = {
                     'http': proxy_url,
                     'https': proxy_url
                 }
                 self.proxies = self.proxy_config
-                logger.info(f"Proxy configured: {proxy_host}:{proxy_port}")
+                logger.info(f"Proxy configured: {self.proxy_host}:{self.proxy_port}")
             else:
                 logger.warning("Proxy enabled but host or port not configured")
                 self.proxies = None
         else:
             self.proxies = None
         
+        # Initialize WebSocket tracking
+        self.ws_last_message = {}
+        self.order_books = {}
+        self.last_trade_price = {}
+        
         # Initialize the client with proxy configuration
         self._init_client()
         
         # Initialize other attributes
         self.symbols = set()
-        self.symbol_discovery = None
+        self.symbol_discovery = None  # Will be set externally by TradingBot if needed
         self.ws_clients = {}
         self.ws_manager = None
         self.health_check_task = None
@@ -204,7 +213,6 @@ class ExchangeClient:
         self._init_ws_manager()
         
         self.logger = logging.getLogger(__name__)
-        self.symbol_discovery = None  # Initialize as None, will be set up when needed
         self.scalping_mode = config.get('scalping_mode', False)
         
         # Initialize proxy rotation
@@ -222,67 +230,53 @@ class ExchangeClient:
         self.open_interest_history = {}
         self.history_length = 24
 
+        # Initialize cache manager
+        self.cache = CacheManager()
+
     def _setup_proxy(self):
         """Set up proxy configuration."""
         try:
-            proxy_url = self.proxy_config.get('url')
-            if not proxy_url:
-                logger.warning("No proxy URL configured")
+            if self.proxy_host and self.proxy_port:
+                proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+                if self.proxy_auth:
+                    proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+                
+                self.proxy_config = {
+                    'http': proxy_url,
+                    'https': proxy_url
+                }
+                self.proxies = self.proxy_config
+                logger.info(f"Proxy configured: {self.proxy_host}:{self.proxy_port}")
+            else:
+                logger.warning("Proxy enabled but host or port not configured")
                 self.proxies = None
-            return
-
-            # Parse proxy URL
-            parsed = urlparse(proxy_url)
-            if not all([parsed.scheme, parsed.hostname, parsed.port]):
-                logger.error("Invalid proxy URL format")
-                self.proxies = None
-                return
-
-            # Build proxy URL with authentication if provided
-            if self.proxy_config.get('username') and self.proxy_config.get('password'):
-                auth = f"{self.proxy_config['username']}:{self.proxy_config['password']}"
-                proxy_url = f"{parsed.scheme}://{auth}@{parsed.hostname}:{parsed.port}"
-
-            # Set up proxies for both HTTP and HTTPS
-        self.proxies = {
-                'http': proxy_url,
-                'https': proxy_url
-            }
-            logger.info(f"Proxy configured: {parsed.hostname}:{parsed.port}")
         except Exception as e:
             logger.error(f"Error setting up proxy: {e}")
             self.proxies = None
 
     def _init_client(self):
-        """Initialize the HTTP client with proper configuration."""
+        """Initialize the CCXT client with configuration."""
         try:
-            # Initialize client with proxy configuration
-            client_config = {
+            # Initialize CCXT client
+            self.client = ccxt.binance({
                 'apiKey': self.api_key,
                 'secret': self.api_secret,
                 'enableRateLimit': True,
                 'options': {
                     'defaultType': 'future',
                     'adjustForTimeDifference': True,
-                    'recvWindow': 60000
+                    'testnet': self.testnet
                 }
-            }
+            })
             
-            # Add proxy configuration if available
+            # Set proxy if configured
             if self.proxies:
-                client_config['proxies'] = self.proxies
+                self.client.proxies = self.proxies
+                
+            logger.info("CCXT client initialized successfully")
             
-            self.client = ccxt.binance(client_config)
-            
-            # Set base URL
-            self.client.urls['api'] = {
-                'public': f"{self.base_url}/fapi/v1",
-                'private': f"{self.base_url}/fapi/v1"
-            }
-            
-            logger.info("HTTP client initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize HTTP client: {e}")
+            logger.error(f"Error initializing CCXT client: {e}")
             raise
 
     async def test_proxy_connection(self):
@@ -779,29 +773,39 @@ class ExchangeClient:
         return proxy
 
     async def _handle_ws_message(self, message):
+        """Handle incoming WebSocket messages."""
         try:
-            event_type = message.get("e")
-            symbol = message.get("s")
-
-            if event_type == "kline":
-                await self._handle_kline_update(symbol, message["k"])
-            elif event_type == "depthUpdate":
-                self.order_books[symbol] = message  # or parse bids/asks here
-            elif event_type == "trade":
-                self.last_trade_price[symbol] = float(message["p"])
-
-            self.ws_last_message[symbol] = time.time()
-
+            if not message:
+                return
+                
+            # Process message based on type
+            if 'e' in message:
+                event_type = message['e']
+                if event_type == 'kline':
+                    await self._handle_kline_update(message['s'], message)
+                elif event_type == 'trade':
+                    await self._handle_trade_update(message['s'], message)
+                elif event_type == 'depth':
+                    await self._handle_depth_update(message['s'], message)
+                    
         except Exception as e:
             logger.error(f"Error handling WebSocket message: {e}")
 
     async def _handle_ws_error(self, error):
         """Handle WebSocket errors."""
-        logger.error(f"WebSocket error: {error}")
+        try:
+            logger.error(f"WebSocket error: {error}")
+            await self._handle_connection_error()
+        except Exception as e:
+            logger.error(f"Error handling WebSocket error: {e}")
 
     async def _handle_ws_close(self, close_status_code, close_msg):
-        """Handle WebSocket close events."""
-        logger.info(f"WebSocket closed with status {close_status_code}: {close_msg}")
+        """Handle WebSocket connection close."""
+        try:
+            logger.warning(f"WebSocket connection closed: {close_status_code} - {close_msg}")
+            await self._handle_connection_error()
+        except Exception as e:
+            logger.error(f"Error handling WebSocket close: {e}")
 
     async def _monitor_websocket_heartbeat(self):
         """Monitor WebSocket heartbeat."""
@@ -966,24 +970,18 @@ class ExchangeClient:
     async def initialize(self):
         """Initialize the exchange client."""
         try:
-            # Initialize symbol discovery if needed
-            if self.symbol_discovery is None:
-                from src.market_data.symbol_discovery import SymbolDiscovery
-                self.symbol_discovery = SymbolDiscovery(self.config)
-                await self.symbol_discovery.start()
-            
-            # Update symbols from discovery if in dynamic mode
-            if self.config.get('symbol_discovery_mode', 'static') == 'dynamic':
-                self.symbols = await self.symbol_discovery.get_symbols()
-            
             self.running = True
             self.logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
             
             # Start background tasks
-            self.health_check_task = asyncio.create_task(self._monitor_health())
-            self.funding_rates_task = asyncio.create_task(self._monitor_funding_rates())
+            self.health_check_task = asyncio.create_task(self._health_check_loop())
+            self.funding_rate_task = asyncio.create_task(self._update_funding_rates())
+            
+            # Initialize WebSocket manager
+            self._init_ws_manager()
             
             return True
+            
         except Exception as e:
             self.logger.error(f"Error initializing exchange client: {e}")
             return False
@@ -996,8 +994,8 @@ class ExchangeClient:
             # Cancel background tasks
             if hasattr(self, 'health_check_task'):
                 self.health_check_task.cancel()
-            if hasattr(self, 'funding_rates_task'):
-                self.funding_rates_task.cancel()
+            if hasattr(self, 'funding_rate_task'):
+                self.funding_rate_task.cancel()
             
             # Close all WebSocket connections
             for symbol, ws_client in self.ws_clients.items():
@@ -1090,17 +1088,33 @@ class ExchangeClient:
             # Store the client
             self.ws_clients[symbol] = ws_client
             logger.info(f"WebSocket client started for {symbol}")
-            except Exception as e:
+        except Exception as e:
             logger.error(f"Error setting up WebSocket for {symbol}: {e}")
             raise
 
     def _init_ws_manager(self):
-        """Initialize the WebSocket manager."""
+        """Initialize the WebSocket manager for market data streaming."""
         try:
-            self.ws_manager = None  # Will be initialized when needed
-            logger.info("WebSocket manager initialized")
+            # Create WebSocket manager instance
+            self.ws_manager = MarketDataWebSocket(
+                exchange_client=self,
+                symbols=list(self.symbols),
+                ws_url=self.ws_url,
+                proxy_config=self.proxy_config if hasattr(self, 'proxy_config') else None
+            )
+            
+            # Set up WebSocket event handlers
+            self.ws_manager.on_message = self._handle_ws_message
+            self.ws_manager.on_error = self._handle_ws_error
+            self.ws_manager.on_close = self._handle_ws_close
+            
+            # Initialize WebSocket clients dictionary
+            self.ws_clients = {}
+            
+            logger.info("WebSocket manager initialized successfully")
+            
         except Exception as e:
-            logger.error(f"Failed to initialize WebSocket manager: {e}")
+            logger.error(f"Error initializing WebSocket manager: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
@@ -1134,67 +1148,73 @@ class ExchangeClient:
             raise
         except Exception as e:
             logger.error(f"Unexpected error getting account information: {e}")
-                raise
+            raise
             
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
     async def get_position(self, symbol: str) -> Dict:
         """Get current position for a symbol."""
         try:
-            if not symbol:
-                raise ValueError("Symbol cannot be empty")
-                
-            logger.debug(f"Fetching position for {symbol}")
-            if not self.client:
-                raise ConnectionError("Exchange client not initialized")
-                
+            # Get position information from exchange
             position = await asyncio.to_thread(
-                self.client.futures_position_information,
+                self.client.fetch_position,
                 symbol=symbol
             )
             
             if not position:
-                logger.warning(f"No position found for {symbol}")
                 return {}
-            
-            if not isinstance(position, list) or len(position) == 0:
-                raise ValueError(f"Invalid position response format for {symbol}")
                 
-            position_data = position[0]
+            # Format position data
+            return {
+                'symbol': symbol,
+                'positionAmt': float(position.get('contracts', 0)),
+                'entryPrice': float(position.get('entryPrice', 0)),
+                'markPrice': float(position.get('markPrice', 0)),
+                'unRealizedProfit': float(position.get('unrealizedPnl', 0)),
+                'liquidationPrice': float(position.get('liquidationPrice', 0)),
+                'leverage': float(position.get('leverage', 0)),
+                'marginType': position.get('marginMode', 'cross'),
+                'updateTime': position.get('timestamp', 0)
+            }
             
-            # Validate position data
-            required_fields = ['symbol', 'positionAmt', 'entryPrice', 'unRealizedProfit']
-            missing_fields = [field for field in required_fields if field not in position_data]
-            if missing_fields:
-                raise ValueError(f"Missing required position fields for {symbol}: {missing_fields}")
-                
-            logger.debug(f"Position data for {symbol}: {position_data}")
-            return position_data
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching position for {symbol}: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching position for {symbol}: {e}")
-            raise
         except Exception as e:
-            logger.error(f"Unexpected error getting position for {symbol}: {e}")
-            raise
-            
+            logger.error(f"Error getting position for {symbol}: {e}")
+            return {}
+
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
     async def get_open_positions(self) -> List[Dict]:
         """Get all open positions."""
         try:
-            logger.debug("Fetching all open positions")
+            # Get all positions from exchange
             positions = await asyncio.to_thread(
-                self.client.futures_position_information
+                self.client.fetch_positions
             )
-            open_positions = [p for p in positions if float(p.get('positionAmt', 0)) != 0]
-            logger.info(f"Found {len(open_positions)} open positions")
+            
+            if not positions:
+                return []
+                
+            # Filter and format open positions
+            open_positions = []
+            for pos in positions:
+                if float(pos.get('contracts', 0)) != 0:
+                    open_positions.append({
+                        'symbol': pos.get('symbol'),
+                        'positionAmt': float(pos.get('contracts', 0)),
+                        'entryPrice': float(pos.get('entryPrice', 0)),
+                        'markPrice': float(pos.get('markPrice', 0)),
+                        'unRealizedProfit': float(pos.get('unrealizedPnl', 0)),
+                        'liquidationPrice': float(pos.get('liquidationPrice', 0)),
+                        'leverage': float(pos.get('leverage', 0)),
+                        'marginType': pos.get('marginMode', 'cross'),
+                        'updateTime': pos.get('timestamp', 0)
+                    })
+                    
             return open_positions
-            except Exception as e:
+            
+        except Exception as e:
             logger.error(f"Error getting open positions: {e}")
-            raise
+            return []
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
@@ -1204,197 +1224,102 @@ class ExchangeClient:
                          reduce_only: bool = False) -> Dict:
         """Place an order on the exchange."""
         try:
-            # Input validation
-            if not symbol:
-                raise ValueError("Symbol cannot be empty")
-            if not side or side not in ['BUY', 'SELL']:
-                raise ValueError(f"Invalid side: {side}. Must be 'BUY' or 'SELL'")
-            if not order_type or order_type not in ['MARKET', 'LIMIT', 'STOP_MARKET', 'STOP_LIMIT']:
-                raise ValueError(f"Invalid order type: {order_type}")
-            if not quantity or quantity <= 0:
-                raise ValueError(f"Invalid quantity: {quantity}. Must be positive")
-            if order_type in ['LIMIT', 'STOP_LIMIT'] and not price:
-                raise ValueError(f"Price required for {order_type} orders")
-            if order_type in ['STOP_MARKET', 'STOP_LIMIT'] and not stop_price:
-                raise ValueError(f"Stop price required for {order_type} orders")
+            # Validate inputs
+            if not symbol or not side or not order_type or not quantity:
+                raise ValueError("Missing required order parameters")
                 
-            logger.info(f"Placing {order_type} {side} order for {symbol}")
-            if not self.client:
-                raise ConnectionError("Exchange client not initialized")
-                
+            # Prepare order parameters
             params = {
                 'symbol': symbol,
-                'side': side,
                 'type': order_type,
-                'quantity': quantity,
+                'side': side,
+                'amount': quantity,
                 'reduceOnly': reduce_only
             }
             
-            if price:
+            # Add price for limit orders
+            if order_type == 'limit' and price:
                 params['price'] = price
-                logger.debug(f"Order price: {price}")
+                
+            # Add stop price for stop orders
             if stop_price:
                 params['stopPrice'] = stop_price
-                logger.debug(f"Stop price: {stop_price}")
                 
+            # Place order
             order = await asyncio.to_thread(
-                self.client.futures_create_order,
+                self.client.create_order,
                 **params
             )
             
-            if not order or 'orderId' not in order:
-                raise ValueError(f"Invalid order response for {symbol}")
-                
-            logger.info(f"Order placed successfully: {order.get('orderId')}")
+            logger.info(f"Order placed: {order}")
             return order
-        except ccxt.InsufficientFunds as e:
-            logger.error(f"Insufficient funds for order on {symbol}: {e}")
-            raise
-        except ccxt.InvalidOrder as e:
-            logger.error(f"Invalid order parameters for {symbol}: {e}")
-            raise
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while placing order for {symbol}: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while placing order for {symbol}: {e}")
-            raise
+            
         except Exception as e:
-            logger.error(f"Unexpected error placing order for {symbol}: {e}")
+            logger.error(f"Error placing order for {symbol}: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
     async def close_position(self, symbol: str, reduce_only: bool = True) -> Dict:
-        """Close an open position."""
+        """Close a position for a symbol."""
         try:
-            if not symbol:
-                raise ValueError("Symbol cannot be empty")
-                
-            logger.info(f"Attempting to close position for {symbol}")
+            # Get current position
             position = await self.get_position(symbol)
-            
-            if not position:
-                logger.info(f"No position to close for {symbol}")
+            if not position or float(position.get('positionAmt', 0)) == 0:
                 return {'status': 'no_position'}
                 
+            # Determine order side based on position
             position_amt = float(position.get('positionAmt', 0))
-            if position_amt == 0:
-                logger.info(f"Position amount is 0 for {symbol}")
-                return {'status': 'no_position'}
-                
-            side = 'SELL' if position_amt > 0 else 'BUY'
-            quantity = abs(position_amt)
+            side = 'sell' if position_amt > 0 else 'buy'
             
-            # Validate quantity
-            if quantity <= 0:
-                raise ValueError(f"Invalid position quantity for {symbol}: {quantity}")
-                
-            logger.debug(f"Closing {side} position with quantity {quantity}")
-            
-            result = await self.place_order(
+            # Place closing order
+            order = await self.place_order(
                 symbol=symbol,
                 side=side,
-                order_type='MARKET',
-                quantity=quantity,
+                order_type='market',
+                quantity=abs(position_amt),
                 reduce_only=reduce_only
             )
             
-            if not result or 'orderId' not in result:
-                raise ValueError(f"Invalid order response when closing position for {symbol}")
-                
-            logger.info(f"Position closed successfully for {symbol}")
-            return result
-        except ccxt.InsufficientFunds as e:
-            logger.error(f"Insufficient funds to close position for {symbol}: {e}")
-            raise
-        except ccxt.InvalidOrder as e:
-            logger.error(f"Invalid order parameters when closing position for {symbol}: {e}")
-            raise
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while closing position for {symbol}: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while closing position for {symbol}: {e}")
-            raise
+            logger.info(f"Position closed for {symbol}: {order}")
+            return order
+            
         except Exception as e:
-            logger.error(f"Unexpected error closing position for {symbol}: {e}")
+            logger.error(f"Error closing position for {symbol}: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
-    async def get_balance(self) -> Dict:
-        """Get account balance information."""
+    async def get_recent_trades(self, symbol: str, limit: int = 100) -> List[Dict]:
+        """Get recent trades for a symbol."""
         try:
-            logger.debug("Fetching account balance")
-            account = await self.get_account()
+            # Get recent trades from exchange
+            trades = await asyncio.to_thread(
+                self.client.fetch_trades,
+                symbol=symbol,
+                limit=limit
+            )
             
-            if not account:
-                raise ValueError("Empty account response received")
+            if not trades:
+                return []
                 
-            balances = {
-                'total': float(account.get('totalWalletBalance', 0)),
-                'available': float(account.get('availableBalance', 0)),
-                'unrealized_pnl': float(account.get('totalUnrealizedProfit', 0)),
-                'margin_balance': float(account.get('totalMarginBalance', 0))
-            }
+            # Format trade data
+            formatted_trades = []
+            for trade in trades:
+                formatted_trades.append({
+                    'id': trade.get('id'),
+                    'price': float(trade.get('price', 0)),
+                    'qty': float(trade.get('amount', 0)),
+                    'time': trade.get('timestamp', 0),
+                    'isBuyerMaker': trade.get('side') == 'sell',
+                    'isBestMatch': True
+                })
+                
+            return formatted_trades
             
-            # Validate balance values
-            if any(value < 0 for value in balances.values()):
-                raise ValueError("Negative balance values detected")
-                
-            logger.debug(f"Balance information retrieved: {balances}")
-            return balances
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching balance: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching balance: {e}")
-            raise
         except Exception as e:
-            logger.error(f"Unexpected error getting account balance: {e}")
-            raise
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
-    async def get_position_risk(self, symbol: str) -> Dict:
-        """Get position risk information."""
-        try:
-            if not symbol:
-                raise ValueError("Symbol cannot be empty")
-                
-            logger.debug(f"Fetching position risk for {symbol}")
-            position = await self.get_position(symbol)
-            
-            if not position:
-            return {}
-            
-            risk_info = {
-                'leverage': float(position.get('leverage', 0)),
-                'margin_type': position.get('marginType', ''),
-                'liquidation_price': float(position.get('liquidationPrice', 0)),
-                'entry_price': float(position.get('entryPrice', 0)),
-                'unrealized_pnl': float(position.get('unRealizedProfit', 0)),
-                'position_amt': float(position.get('positionAmt', 0))
-            }
-            
-            # Validate risk values
-            if risk_info['leverage'] < 0:
-                raise ValueError(f"Invalid leverage value for {symbol}: {risk_info['leverage']}")
-            if risk_info['entry_price'] < 0:
-                raise ValueError(f"Invalid entry price for {symbol}: {risk_info['entry_price']}")
-                
-            logger.debug(f"Position risk information for {symbol}: {risk_info}")
-            return risk_info
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching position risk for {symbol}: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching position risk for {symbol}: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error getting position risk for {symbol}: {e}")
-            raise
+            logger.error(f"Error getting recent trades for {symbol}: {e}")
+            return []
 
     async def check_connection(self) -> bool:
         """Check if the exchange connection is healthy."""
@@ -1438,4 +1363,35 @@ class ExchangeClient:
             
         except Exception as e:
             logger.error(f"Error checking exchange connection: {e}")
+            return False
+
+    async def reconnect(self) -> bool:
+        """Attempt to reconnect to the exchange."""
+        try:
+            logger.info("Attempting to reconnect to exchange...")
+            
+            # Close existing connections
+            if self.ws_manager:
+                await self.ws_manager.close()
+                
+            # Reinitialize client
+            self._init_client()
+            
+            # Test connection
+            if not await self.check_connection():
+                logger.error("Failed to reconnect to exchange")
+                return False
+                
+            # Reinitialize WebSocket manager
+            self._init_ws_manager()
+            
+            # Reconnect WebSocket
+            if self.ws_manager:
+                await self.ws_manager.initialize(self.symbols)
+                
+            logger.info("Successfully reconnected to exchange")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error reconnecting to exchange: {e}")
             return False

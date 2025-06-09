@@ -28,7 +28,7 @@ from functools import lru_cache
 import warnings
 from src.strategy.dynamic_config import strategy_config
 from src.market_data.websocket_client import MarketDataWebSocket
-from src.risk.risk_manager import RiskManager
+from src.risk.manager import RiskManager
 
 # Load environment variables
 load_dotenv()

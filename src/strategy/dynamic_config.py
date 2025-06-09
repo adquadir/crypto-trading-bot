@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import os
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +40,17 @@ class StrategyConfig:
     def load_strategy_profiles(self) -> None:
         """Load strategy profiles from JSON file."""
         try:
-        if self.config_path.exists():
+            if self.config_path.exists():
                 with open(self.config_path, 'r') as f:
                     self.profiles = json.load(f)
                 logger.info(f"Loaded {len(self.profiles)} strategy profiles from {self.config_path}")
             else:
                 logger.info(f"No strategy profile config found at {self.config_path}, using defaults")
                 self.profiles = self._get_default_profiles()
-            except Exception as e:
-                logger.error(f"Error loading strategy profiles: {e}")
-            self.profiles = self._get_default_profiles()
-            
+        except Exception as e:
+            logger.error(f"Error loading strategy profiles: {e}")
+        self.profiles = self._get_default_profiles()
+        
     def set_profile(self, profile_name: str) -> None:
         """Set the current strategy profile."""
         if profile_name not in self.profiles:
@@ -199,6 +200,16 @@ class StrategyConfig:
             profile['stop_loss_pct'] *= 1.1
         
         logger.info(f"Adapted strategy parameters based on performance (win rate: {win_rate:.2f})")
+
+def load_strategy_profiles():
+    """Load strategy profiles from configuration."""
+    try:
+        with open('config/strategy_profiles.yaml', 'r') as f:
+            profiles = yaml.safe_load(f)
+        return profiles
+    except Exception as e:
+        logger.error(f"Error loading strategy profiles: {e}")
+        return {}
 
 # Create a singleton instance
 strategy_config = StrategyConfig()

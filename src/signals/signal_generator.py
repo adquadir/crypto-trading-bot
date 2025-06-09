@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import json
 import logging
 from datetime import datetime
+import time
 
 import numpy as np
 import pandas as pd
@@ -767,163 +768,172 @@ class SignalGenerator:
             logger.error(f"Error generating volatile signal: {e}")
             return None
 
-    def should_close_position(self, position: Dict, market_data: Dict) -> bool:
-        """Determine if a position should be closed based on market conditions."""
+    def should_close_position(self, symbol: str, position_data: Dict, market_data: Dict) -> Tuple[bool, str]:
+        """
+        Determine if a position should be closed based on current market conditions.
+        
+        Args:
+            symbol: Trading symbol
+            position_data: Current position information
+            market_data: Current market data including indicators
+            
+        Returns:
+            Tuple of (should_close: bool, reason: str)
+        """
         try:
-            symbol = position.get('symbol')
-            if not symbol:
-                return False
+            if not position_data or not market_data:
+                return False, "missing_data"
                 
-            # Get current indicators
-            indicators = self._calculate_indicators(market_data)
+            # Get position metrics
+            position_amt = float(position_data.get('positionAmt', 0))
+            entry_price = float(position_data.get('entryPrice', 0))
+            current_price = float(market_data.get('price', 0))
+            unrealized_pnl = float(position_data.get('unRealizedProfit', 0))
             
-            # Get position details
-            position_amt = float(position.get('positionAmt', 0))
-            entry_price = float(position.get('entryPrice', 0))
-            current_price = float(market_data.get('close', 0))
-            
-            if position_amt == 0:
-                return False
+            if position_amt == 0 or entry_price == 0 or current_price == 0:
+                return False, "invalid_position"
                 
-            # Check for trend reversal
+            # Calculate PnL percentage
+            pnl_percentage = (unrealized_pnl / (abs(position_amt) * entry_price)) * 100
+            
+            # Get technical indicators
+            rsi = float(market_data.get('rsi', 50))
+            macd = market_data.get('macd', {})
+            macd_line = float(macd.get('macd', 0))
+            signal_line = float(macd.get('signal', 0))
+            
+            # Check stop loss conditions
             if position_amt > 0:  # Long position
-                # Check if trend has reversed to bearish
-                if (indicators['macd']['histogram'] < 0 and 
-                    indicators['rsi'] > 70 and 
-                    current_price < indicators['bb']['middle']):
-                    logger.info(f"Closing long position for {symbol} - Trend reversal detected")
-                    return True
+                if pnl_percentage <= -self.strategy_config.get('risk_management', {}).get('stop_loss_pct', 0):
+                    return True, "stop_loss"
+                if rsi > 70 and macd_line < signal_line:
+                    return True, "overbought_reversal"
             else:  # Short position
-                # Check if trend has reversed to bullish
-                if (indicators['macd']['histogram'] > 0 and 
-                    indicators['rsi'] < 30 and 
-                    current_price > indicators['bb']['middle']):
-                    logger.info(f"Closing short position for {symbol} - Trend reversal detected")
-                    return True
+                if pnl_percentage <= -self.strategy_config.get('risk_management', {}).get('stop_loss_pct', 0):
+                    return True, "stop_loss"
+                if rsi < 30 and macd_line > signal_line:
+                    return True, "oversold_reversal"
                     
-            # Check for volatility expansion
-            atr = indicators.get('atr', 0)
-            if atr > self.strategy_config.get('max_atr', 0.05):
-                logger.info(f"Closing position for {symbol} - Excessive volatility")
-                return True
+            # Check take profit conditions
+            if pnl_percentage >= self.strategy_config.get('risk_management', {}).get('take_profit_pct', 0):
+                return True, "take_profit"
                 
-            # Check for momentum loss
-            if abs(indicators['macd']['histogram']) < abs(indicators['macd']['histogram'] * 0.5):
-                logger.info(f"Closing position for {symbol} - Momentum loss")
-                return True
-                
-            return False
+            return False, "hold"
             
         except Exception as e:
-            logger.error(f"Error in should_close_position: {e}")
-            return False
+            logger.error(f"Error in should_close_position for {symbol}: {e}")
+            return False, "error"
 
-    def should_update_levels(self, position: Dict, market_data: Dict) -> bool:
-        """Determine if position levels should be updated based on market conditions."""
+    def should_update_levels(self, symbol: str, position_data: Dict, market_data: Dict) -> bool:
+        """
+        Determine if position levels should be updated based on market conditions.
+        
+        Args:
+            symbol: Trading symbol
+            position_data: Current position information
+            market_data: Current market data including indicators
+            
+        Returns:
+            bool: True if levels should be updated
+        """
         try:
-            symbol = position.get('symbol')
-            if not symbol:
+            if not position_data or not market_data:
                 return False
                 
-            # Get current indicators
-            indicators = self._calculate_indicators(market_data)
-            
-            # Get position details
-            position_amt = float(position.get('positionAmt', 0))
-            entry_price = float(position.get('entryPrice', 0))
-            current_price = float(market_data.get('close', 0))
-            
+            # Get position metrics
+            position_amt = float(position_data.get('positionAmt', 0))
             if position_amt == 0:
+                return False
+                
+            # Get market metrics
+            price = float(market_data.get('price', 0))
+            volume = float(market_data.get('volume', 0))
+            volatility = float(market_data.get('volatility', 0))
+            
+            if price == 0 or volume == 0:
+                return False
+                
+            # Check if enough time has passed since last update
+            last_update = float(position_data.get('last_update', 0))
+            if time.time() - last_update < self.strategy_config.get('trading', {}).get('position_interval', 0):
                 return False
                 
             # Check for significant price movement
-            price_change = abs(current_price - entry_price) / entry_price
-            if price_change > 0.02:  # 2% price movement
-                logger.info(f"Updating levels for {symbol} - Significant price movement")
+            price_change = abs(float(market_data.get('price_change_pct', 0)))
+            if price_change >= self.strategy_config.get('risk_management', {}).get('level_update_threshold', 0):
                 return True
                 
-            # Check for volatility change
-            atr = indicators.get('atr', 0)
-            if atr > self.strategy_config.get('atr_threshold', 0.02):
-                logger.info(f"Updating levels for {symbol} - Volatility change")
-                return True
-                
-            # Check for trend strength change
-            adx = indicators.get('adx', 0)
-            if adx > 25:  # Strong trend
-                logger.info(f"Updating levels for {symbol} - Trend strength change")
+            # Check for high volatility
+            if volatility >= self.strategy_config.get('risk_management', {}).get('volatility_threshold', 0):
                 return True
                 
             return False
             
         except Exception as e:
-            logger.error(f"Error in should_update_levels: {e}")
+            logger.error(f"Error in should_update_levels for {symbol}: {e}")
             return False
 
-    def calculate_new_levels(self, position: Dict, market_data: Dict) -> Dict:
-        """Calculate new stop loss and take profit levels based on market conditions."""
+    def calculate_new_levels(self, symbol: str, position_data: Dict, market_data: Dict) -> Dict:
+        """
+        Calculate new position levels based on current market conditions.
+        
+        Args:
+            symbol: Trading symbol
+            position_data: Current position information
+            market_data: Current market data including indicators
+            
+        Returns:
+            Dict containing new position levels
+        """
         try:
-            symbol = position.get('symbol')
-            if not symbol:
+            if not position_data or not market_data:
                 return {}
                 
-            # Get current indicators
-            indicators = self._calculate_indicators(market_data)
+            # Get current position metrics
+            position_amt = float(position_data.get('positionAmt', 0))
+            entry_price = float(position_data.get('entryPrice', 0))
+            current_price = float(market_data.get('price', 0))
             
-            # Get position details
-            position_amt = float(position.get('positionAmt', 0))
-            entry_price = float(position.get('entryPrice', 0))
-            current_price = float(market_data.get('close', 0))
-            
-            if position_amt == 0:
+            if position_amt == 0 or entry_price == 0 or current_price == 0:
                 return {}
                 
-            # Calculate ATR-based levels
-            atr = indicators.get('atr', 0)
-            atr_multiplier = self.strategy_config.get('atr_multiplier', 2.0)
+            # Get technical indicators
+            rsi = float(market_data.get('rsi', 50))
+            macd = market_data.get('macd', {})
+            macd_line = float(macd.get('macd', 0))
+            signal_line = float(macd.get('signal', 0))
             
-            # Calculate new levels
+            # Calculate base levels
+            atr = float(market_data.get('atr', 0))
+            volatility = float(market_data.get('volatility', 0))
+            
+            # Calculate dynamic stop loss and take profit levels
             if position_amt > 0:  # Long position
-                # Move stop loss to break even or higher if in profit
-                if current_price > entry_price:
-                    new_sl = max(entry_price, current_price - (atr * atr_multiplier))
-                else:
-                    new_sl = current_price - (atr * atr_multiplier)
-                    
-                # Adjust take profit based on trend strength
-                if indicators['adx'] > 25:  # Strong trend
-                    new_tp = current_price + (atr * atr_multiplier * 2)
-                else:
-                    new_tp = current_price + (atr * atr_multiplier)
-                    
+                stop_loss = current_price - (atr * self.strategy_config.get('risk_management', {}).get('stop_loss_atr_multiplier', 2.0))
+                take_profit = current_price + (atr * self.strategy_config.get('risk_management', {}).get('take_profit_atr_multiplier', 2.0))
             else:  # Short position
-                # Move stop loss to break even or lower if in profit
-                if current_price < entry_price:
-                    new_sl = min(entry_price, current_price + (atr * atr_multiplier))
-                else:
-                    new_sl = current_price + (atr * atr_multiplier)
-                    
-                # Adjust take profit based on trend strength
-                if indicators['adx'] > 25:  # Strong trend
-                    new_tp = current_price - (atr * atr_multiplier * 2)
-                else:
-                    new_tp = current_price - (atr * atr_multiplier)
-                    
-            # Ensure minimum distance between current price and levels
-            min_distance = atr * 0.5
-            if position_amt > 0:  # Long position
-                new_sl = min(new_sl, current_price - min_distance)
-                new_tp = max(new_tp, current_price + min_distance)
-            else:  # Short position
-                new_sl = max(new_sl, current_price + min_distance)
-                new_tp = min(new_tp, current_price - min_distance)
+                stop_loss = current_price + (atr * self.strategy_config.get('risk_management', {}).get('stop_loss_atr_multiplier', 2.0))
+                take_profit = current_price - (atr * self.strategy_config.get('risk_management', {}).get('take_profit_atr_multiplier', 2.0))
                 
-            logger.info(f"New levels for {symbol}: SL={new_sl:.2f}, TP={new_tp:.2f}")
+            # Adjust levels based on market conditions
+            if rsi > 70 or rsi < 30:  # Extreme RSI
+                stop_loss = current_price  # Tighten stop loss
+                
+            if macd_line > signal_line and position_amt > 0:  # Strong trend
+                take_profit *= 1.2  # Extend take profit
+                
+            # Calculate trailing stop
+            trailing_stop = current_price * (1 - self.strategy_config.get('risk_management', {}).get('trailing_stop_pct', 0.05))
+            
             return {
-                'stop_loss': new_sl,
-                'take_profit': new_tp
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'trailing_stop': trailing_stop,
+                'volatility': volatility,
+                'atr': atr,
+                'last_update': time.time()
             }
             
         except Exception as e:
-            logger.error(f"Error in calculate_new_levels: {e}")
+            logger.error(f"Error in calculate_new_levels for {symbol}: {e}")
             return {} 

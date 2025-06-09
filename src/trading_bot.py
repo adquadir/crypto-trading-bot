@@ -24,7 +24,6 @@ from src.utils.config import load_config
 from src.market_data.websocket_client import MarketDataWebSocket
 from src.models import Strategy as StrategyModel
 from src.database.database import Database
-from src.risk.risk_manager import RiskManager
 from src.strategy.dynamic_config import strategy_config
 
 logger = logging.getLogger(__name__)
@@ -68,6 +67,7 @@ class TradingBot:
         self.market_processor = MarketDataProcessor()
         self.signal_engine = SignalEngine()
         self.symbol_discovery = SymbolDiscovery(self.exchange_client)
+        self.exchange_client.symbol_discovery = self.symbol_discovery  # Share the same instance
         self.signal_generator = SignalGenerator()
         self.risk_manager = RiskManager(
             account_balance=self.config['risk']['initial_balance'],
@@ -137,29 +137,23 @@ class TradingBot:
             return self._balance_cache
             
         try:
-            # Get account info
-            account_info = await asyncio.to_thread(self.exchange_client.client.get_account)
+            # Get account info using CCXT's fetch_balance
+            account_info = await asyncio.to_thread(self.exchange_client.client.fetch_balance)
             
-            if not account_info or 'balances' not in account_info:
+            if not account_info or 'total' not in account_info:
                 raise ValueError("Invalid account info response")
                 
             # Calculate total balance
             total_balance = 0
             asset_balances = {}
             
-            for balance in account_info['balances']:
+            for asset, amount in account_info['total'].items():
                 try:
-                    free = float(balance.get('free', 0))
-                    locked = float(balance.get('locked', 0))
-                    total = free + locked
-                    
-                    if total > 0:
-                        asset = balance.get('asset', 'UNKNOWN')
-                        asset_balances[asset] = total
-                        total_balance += total
-                        
+                    if amount and amount > 0:
+                        asset_balances[asset] = amount
+                        total_balance += amount
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Error processing balance for asset {balance.get('asset', 'UNKNOWN')}: {e}")
+                    logger.warning(f"Error processing balance for asset {asset}: {e}")
                     continue
             
             # Log detailed balance information
@@ -189,247 +183,62 @@ class TradingBot:
         """Start the trading bot."""
         try:
             logger.info("Starting trading bot...")
-
+            
             # Initialize components
-            await self.exchange_client.initialize()
-            await self.ws_manager.initialize(self.exchange_client.symbols)
-
-            # Start WebSocket manager as a background task
-            self.ws_task = asyncio.create_task(self.ws_manager.start())
-
-            # Start background tasks
+            self.exchange_client = ExchangeClient(self.config)
+            self.signal_generator = SignalGenerator(self.config)
+            self.symbol_discovery = SymbolDiscovery(self.exchange_client, self.config)
+            
+            # Start WebSocket manager in the background
+            self.ws_task = asyncio.create_task(self.exchange_client.ws_manager.start())
+            
+            # Start other tasks
             self.health_check_task = asyncio.create_task(self._health_check_loop())
-            self.funding_rates_task = asyncio.create_task(self._update_funding_rates())
-
-            self.running = True
-            logger.info("Trading bot started successfully")
+            self.funding_rate_task = asyncio.create_task(self._monitor_funding_rates())
+            self.position_task = asyncio.create_task(self._monitor_positions())
+            self.signal_task = asyncio.create_task(self._process_signals())
+            
+            # Wait for all tasks
+            await asyncio.gather(
+                self.health_check_task,
+                self.funding_rate_task,
+                self.position_task,
+                self.signal_task
+            )
+            
         except Exception as e:
             logger.error(f"Error starting trading bot: {e}")
-            
-    async def _execute_trade(self, symbol: str, signal: Dict) -> Optional[Dict]:
-        """Execute a trade based on the signal."""
-        try:
-            # Get current position
-            position = await self.exchange_client.get_position(symbol)
-            
-            # Determine trade direction and size
-            signal_type = signal['signal_type']
-            current_price = signal['indicators']['current_price']
+            await self.stop()
+            raise
 
-            if signal_type == "SAFE_BUY":
-                entry_price = signal['entry']
-                take_profit = signal['take_profit']
-                stop_loss = signal['stop_loss']
-                direction = "LONG"
-                # Calculate size based on risk_per_trade and stop loss distance
-                # Assuming risk_per_trade is in percentage of account balance for simplicity here,
-                # needs to be adjusted based on how risk_per_trade is defined (e.g., fixed amount or percent)
-                # Let's use risk_per_trade from dynamic config, which is a percentage.
-                risk_percentage = self.signal_generator.get_risk_limits().get('risk_per_trade', 0.015)
-                account_balance = await self._get_account_balance()
-                risk_amount_usd = account_balance * risk_percentage
-
-                price_distance_to_stop = entry_price - stop_loss # For LONG
-                if price_distance_to_stop <= 0:
-                    logger.warning(f"Invalid stop loss distance for {symbol} SAFE_BUY signal: {price_distance_to_stop}")
-                    return None # Cannot calculate size with invalid SL
-
-                # Calculate size based on risk amount and stop loss distance
-                # size = risk_amount_usd / price_distance_to_stop # This is a simplified calculation and might need adjustment
-                # For a safer approach, let's use a fixed small size for now in debug mode
-                trade_size = 0.001 # Example small size
-
-                # Check if current price is near entry for market order (simplified)
-                price_tolerance = entry_price * 0.001 # e.g., 0.1% tolerance
-                if abs(current_price - entry_price) <= price_tolerance:
-                    order_type = 'MARKET'
-                    order_price = None # Market order doesn't need price
-                    logger.info(f"Executing {direction} MARKET order for {symbol} with size {trade_size}")
-                    # Simulate market order execution
-                    # In a real scenario, you'd call exchange_client.create_order here
-                    executed_price = current_price # Assume filled at current price for simulation
-                    order_id = f"simulated_market_{symbol}_{datetime.now().timestamp()}"
-                    executed_qty = trade_size
-                    status = "FILLED"
-
-                    # Log and record trade
-                    trade_result = {
-                        "symbol": symbol,
-                        "order_id": order_id,
-                        "direction": direction,
-                        "entry_price": executed_price,
-                        "executed_qty": executed_qty,
-                        "timestamp": datetime.now().isoformat(),
-                        "status": status,
-                        "signal_type": signal_type,
-                        "take_profit": take_profit,
-                        "stop_loss": stop_loss,
-                        "initial_risk_usd": risk_amount_usd # Store initial risk
-                    }
-                    self.trade_history.append(trade_result)
-                    logger.info(f"Trade executed: {trade_result}")
-                    return trade_result
-                else:
-                    logger.info(f"Current price {current_price:.2f} not near entry {entry_price:.2f} for {symbol} SAFE_BUY. Skipping market order.")
-                    return None
-
-            elif signal_type == "SAFE_SELL":
-                entry_price = signal['entry']
-                take_profit = signal['take_profit']
-                stop_loss = signal['stop_loss']
-                direction = "SHORT"
-                # Calculate size based on risk_per_trade and stop loss distance
-                risk_percentage = self.signal_generator.get_risk_limits().get('risk_per_trade', 0.015)
-                account_balance = await self._get_account_balance()
-                risk_amount_usd = account_balance * risk_percentage
-
-                price_distance_to_stop = stop_loss - entry_price # For SHORT
-                if price_distance_to_stop <= 0:
-                    logger.warning(f"Invalid stop loss distance for {symbol} SAFE_SELL signal: {price_distance_to_stop}")
-                    return None # Cannot calculate size with invalid SL
-
-                # Calculate size based on risk amount and stop loss distance
-                # size = risk_amount_usd / price_distance_to_stop # Simplified calculation
-                # For a safer approach, let's use a fixed small size for now in debug mode
-                trade_size = 0.001 # Example small size
-
-                # Check if current price is near entry for market order (simplified)
-                price_tolerance = entry_price * 0.001 # e.g., 0.1% tolerance
-                if abs(current_price - entry_price) <= price_tolerance:
-                    order_type = 'MARKET'
-                    order_price = None # Market order doesn't need price
-                    logger.info(f"Executing {direction} MARKET order for {symbol} with size {trade_size}")
-                    # Simulate market order execution
-                    # In a real scenario, you'd call exchange_client.create_order here
-                    executed_price = current_price # Assume filled at current price for simulation
-                    order_id = f"simulated_market_{symbol}_{datetime.now().timestamp()}"
-                    executed_qty = trade_size
-                    status = "FILLED"
-
-                    # Log and record trade
-                    trade_result = {
-                        "symbol": symbol,
-                        "order_id": order_id,
-                        "direction": direction,
-                        "entry_price": executed_price,
-                        "executed_qty": executed_qty,
-                        "timestamp": datetime.now().isoformat(),
-                        "status": status,
-                        "signal_type": signal_type,
-                        "take_profit": take_profit,
-                        "stop_loss": stop_loss,
-                        "initial_risk_usd": risk_amount_usd # Store initial risk
-                    }
-                    self.trade_history.append(trade_result)
-                    logger.info(f"Trade executed: {trade_result}")
-                    return trade_result
-                else:
-                    logger.info(f"Current price {current_price:.2f} not near entry {entry_price:.2f} for {symbol} SAFE_SELL. Skipping market order.")
-                    return None
-
-            elif signal_type in ["STRONG_BUY", "BUY", "STRONG_SELL", "SELL"]:
-                # Existing logic for standard signals
-                direction = "LONG" if signal_type in ["STRONG_BUY", "BUY"] else "SHORT"
-                # Recalculate size and levels based on standard risk management if not a SAFE signal
-                # This might be redundant if signal_generator always provides levels, 
-                # but kept for clarity on handling different signal types.
-                # For standard signals, calculate levels using risk manager or signal_generator if it provides them
-                # Assuming for now that standard signals rely on risk_manager for size/levels calculation approach
-                size = self.risk_manager.calculate_position_size(
-                     symbol,
-                     current_price, # Pass current price or entry if signal provides it
-                     direction,
-                     signal.get('indicators', {}), # Pass indicators/market state
-                     signal.get('confidence_score', 1.0)
-                )
-
-                if size == 0:
-                    logger.warning(f"Risk manager prevented opening standard trade for {symbol}.")
-                    return None
-
-                # For standard signals, TP/SL would typically be calculated here or by signal_generator
-                # Assuming signal_generator provides these now in its standard output too
-                entry_price = current_price # Or signal['entry'] if available
-                take_profit = signal.get('take_profit') # Get from signal if available
-                stop_loss = signal.get('stop_loss')  # Get from signal if available
-
-                if take_profit is None or stop_loss is None:
-                     # Fallback or calculate based on risk_manager if signal didn't provide them
-                     stop_loss = self.risk_manager.calculate_stop_loss(symbol, entry_price, direction, signal.get('indicators', {}))
-                     # Calculate take profit based on a default risk:reward or from signal
-                    take_profit = self.risk_manager.calculate_take_profit(symbol, entry_price, stop_loss, direction, signal.get('indicators', {}))
-
-                logger.info(f"Executing Standard {signal_type} for {symbol}: Entry={entry_price:.2f}, TP={take_profit:.2f}, SL={stop_loss:.2f}, Size={size:.4f}")
-
-                if position and position['side'] == "SHORT":
-                    await self.exchange_client.close_position(symbol)
-
-                # Place order (simplified - market execution assumed if price is close to entry)
-                # In a real bot, use limit orders and manage TP/SL
-                if abs(current_price - entry_price) / entry_price < 0.001: # If within 0.1% of entry
-                    order_side = 'BUY' if direction == 'LONG' else 'SELL'
-                    order = await self.exchange_client.place_order(symbol, order_side, 'MARKET', size)
-                    logger.info(f"Placed market {order_side} order for {symbol}. Order ID: {order.get('orderId')}")
-                else:
-                     logger.warning(f"Current price {current_price:.2f} too far from Standard {signal_type} entry {entry_price:.2f} for {symbol}. Skipping trade.")
-                    return None  # Skip trade if price moved significantly
-
-            else:
-                logger.info(f"Received NEUTRAL signal for {symbol}. No trade executed.")
-                return None
-
-            # Record trade - update this to use actual fill price and other order details
-            # This is a simplified recording and needs to be enhanced with real order management
-            trade = {
-                'symbol': symbol,
-                'direction': direction,
-                'size': size,
-                'entry_price': order.get('fills', [{}])[0].get('price', entry_price) if order else entry_price, # Attempt to get fill price, fallback to calculated entry
-                'timestamp': datetime.now().isoformat(),
-                'signal': signal,
-                'take_profit': take_profit, # Record calculated TP/SL
-                'stop_loss': stop_loss
-            }
-
-            # Add the trade to active_trades (needs unique ID)
-            # Using symbol as key assumes only one position per symbol at a time
-            # For multiple positions per symbol, active_trades structure needs to change
-            trade_id = f"{symbol}_{int(time.time())}" # Simple unique ID
-            self.active_trades[trade_id] = trade
-
-            # Add to history (can store less detail here)
-            self.trade_history.append({**trade, 'status': 'OPEN'}) # Record status
-
-            logger.info(f"Recorded trade for {symbol}: ID={trade_id}")
-            # In a real bot, you would now monitor the active_trade for TP/SL execution or manual closing
-
-            return trade
-
-        except Exception as e:
-            logger.error(f"Error executing trade for {symbol} with signal {signal_type}: {e}")
-            return None
-            
     async def stop(self):
-        """Stop the trading bot."""
+        """Stop the trading bot and clean up resources."""
         try:
-        logger.info("Stopping trading bot...")
+            logger.info("Stopping trading bot...")
             self.running = False
-
-            # Cancel background tasks
-            if hasattr(self, 'health_check_task'):
+            
+            # Cancel all tasks
+            if self.health_check_task:
                 self.health_check_task.cancel()
-            if hasattr(self, 'funding_rates_task'):
-                self.funding_rates_task.cancel()
-
+            if self.funding_rate_task:
+                self.funding_rate_task.cancel()
+            if self.position_task:
+                self.position_task.cancel()
+            if self.signal_task:
+                self.signal_task.cancel()
+            if self.ws_task:
+                self.ws_task.cancel()
+                
             # Stop WebSocket manager
-            if self.ws_manager:
-                await self.ws_manager.close()
-
-            # Stop exchange client
+            if self.exchange_client and self.exchange_client.ws_manager:
+                await self.exchange_client.ws_manager.stop()
+                
+            # Close exchange client
             if self.exchange_client:
-                await self.exchange_client.shutdown()
-
-        logger.info("Trading bot stopped")
+                await self.exchange_client.close()
+                
+            logger.info("Trading bot stopped successfully")
+            
         except Exception as e:
             logger.error(f"Error stopping trading bot: {e}")
             raise
@@ -488,34 +297,41 @@ class TradingBot:
                 db.close()
 
     def get_profile_performance(self):
-        """Get performance metrics for each strategy profile."""
-        performance = {}
-        for profile in self.strategy_config.get_profiles():
-            trades = [t for t in self.trade_history if t.get('profile') == profile]
-            if not trades:
-                continue
-
-            wins = len([t for t in trades if t.get('pnl', 0) > 0])
-            total_trades = len(trades)
-            win_rate = wins / total_trades if total_trades > 0 else 0
-
-            total_profit = sum(t.get('pnl', 0) for t in trades if t.get('pnl', 0) > 0)
-            total_loss = abs(sum(t.get('pnl', 0) for t in trades if t.get('pnl', 0) < 0))
-            profit_factor = total_profit / total_loss if total_loss > 0 else float('inf')
-
-            avg_duration = sum((t.get('exit_time', 0) - t.get('entry_time', 0)) 
-                             for t in trades) / total_trades if total_trades > 0 else 0
-
-            performance[profile] = {
-                'win_rate': win_rate,
-                'profit_factor': profit_factor,
-                'total_trades': total_trades,
-                'avg_duration': f"{avg_duration/3600:.1f}h",
-                'parameter_adjustments': len([h for h in self.parameter_history 
-                                           if h.get('profile') == profile and 
-                                           h.get('timestamp', 0) > time.time() - 86400])
-            }
-        return performance
+        """Get performance metrics for each trading profile."""
+        try:
+            # Get all trades from database
+            with self._get_db_session() as session:
+                trades = session.query(Trade).all()
+                
+            # Group trades by profile
+            profile_trades = {}
+            for trade in trades:
+                if trade.profile not in profile_trades:
+                    profile_trades[trade.profile] = []
+                profile_trades[trade.profile].append(trade)
+                
+            # Calculate metrics for each profile
+            profile_metrics = {}
+            for profile, trades in profile_trades.items():
+                total_trades = len(trades)
+                winning_trades = sum(1 for t in trades if t.pnl > 0)
+                total_pnl = sum(t.pnl for t in trades)
+                avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
+                win_rate = winning_trades / total_trades if total_trades > 0 else 0
+                
+                profile_metrics[profile] = {
+                    'total_trades': total_trades,
+                    'winning_trades': winning_trades,
+                    'total_pnl': total_pnl,
+                    'avg_pnl': avg_pnl,
+                    'win_rate': win_rate
+                }
+                
+            return profile_metrics
+            
+        except Exception as e:
+            logger.error(f"Error getting profile performance: {e}")
+            return {}
 
     def get_parameter_history(self):
         """Get history of parameter adjustments."""
@@ -646,40 +462,87 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Error updating positions: {e}")
 
+    async def _handle_health_check_failure(self):
+        """Handle health check failures by attempting recovery."""
+        try:
+            logger.info("Attempting to recover from health check failure...")
+            
+            # Try to reconnect to exchange
+            if not await self.exchange_client.check_connection():
+                logger.info("Attempting to reconnect to exchange...")
+                await self.exchange_client.reconnect()
+            
+            # Try to reconnect WebSocket
+            if not self.exchange_client.ws_manager.is_connected():
+                logger.info("Attempting to reconnect WebSocket...")
+                await self.exchange_client.ws_manager.reconnect()
+            
+            # Verify recovery
+            if await self._health_check():
+                logger.info("Successfully recovered from health check failure")
+            else:
+                logger.error("Failed to recover from health check failure")
+                
+        except Exception as e:
+            logger.error(f"Error during health check recovery: {e}")
+
     async def _health_check(self):
-        """Perform health checks on the trading system."""
-        while True:
+        """Perform a single health check of the trading system."""
+        try:
+            # Check exchange connection
+            if not await self.exchange_client.check_connection():
+                logger.error("Exchange connection check failed")
+                return False
+                
+            # Check WebSocket connection
+            if not self.exchange_client.ws_manager.is_connected():
+                logger.error("WebSocket connection check failed")
+                return False
+                
+            # Check account balance
             try:
-                # Check exchange connection
-                if not await self.exchange_client.check_connection():
-                    logger.error("Exchange connection lost, attempting to reconnect...")
-                    await self.exchange_client.reconnect()
-                
-                # Check WebSocket connection
-                if not await self.ws_manager.check_connection():
-                    logger.error("WebSocket connection lost, attempting to reconnect...")
-                    await self.ws_manager.reconnect()
-                
-                # Check data freshness
-                stale_data = await self.symbol_discovery.check_data_freshness()
-                if stale_data:
-                    logger.warning(f"Stale data detected for symbols: {stale_data}")
-                
-                # Sleep for health check interval
-                await asyncio.sleep(self.config['trading']['health_check_interval'])
-                
+                balance = await self._get_account_balance()
+                if balance <= 0:
+                    logger.error(f"Invalid account balance: {balance}")
+                    return False
             except Exception as e:
-                logger.error(f"Error in health check: {str(e)}")
-                await asyncio.sleep(5)
+                logger.error(f"Error checking account balance: {e}")
+                return False
+                
+            # Check active trades
+            for symbol, trade in self.active_trades.items():
+                try:
+                    position = await self.exchange_client.get_position(symbol)
+                    if not position:
+                        logger.error(f"Failed to get position for {symbol}")
+                        return False
+                except Exception as e:
+                    logger.error(f"Error checking position for {symbol}: {e}")
+                    return False
+                    
+            logger.info("Health check passed successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during health check: {e}")
+            return False
 
     async def _health_check_loop(self):
-        """Health check loop for the trading system."""
+        """Run periodic health checks."""
         while self.running:
             try:
-                await self._health_check()
+                if not await self._health_check():
+                    logger.error("Health check failed, attempting recovery...")
+                    await self._handle_health_check_failure()
+                    
+                await asyncio.sleep(self.health_check_interval)
+                
+            except asyncio.CancelledError:
+                logger.info("Health check loop cancelled")
+                break
             except Exception as e:
-                logger.error(f"Error in health check loop: {str(e)}")
-            await asyncio.sleep(self.config['trading']['health_check_interval'])
+                logger.error(f"Error in health check loop: {e}")
+                await asyncio.sleep(self.health_check_interval)
 
     async def _update_funding_rates(self):
         """Update funding rates for the trading system."""
@@ -691,10 +554,10 @@ class TradingBot:
                 logger.error(f"Error in funding rate update: {str(e)}")
             await asyncio.sleep(self.config['trading']['funding_rate_interval'])
 
-    async def _close_position(self, symbol: str, reason: str = "manual") -> bool:
-        """Close a position for a given symbol."""
+    async def _close_position(self, symbol: str, reason: str = "manual_close") -> bool:
+        """Close a position for a symbol with optional reason."""
         try:
-            logger.info(f"Attempting to close position for {symbol} - Reason: {reason}")
+            logger.info(f"Closing position for {symbol} - Reason: {reason}")
             
             # Get current position
             position = await self.exchange_client.get_position(symbol)
@@ -706,22 +569,6 @@ class TradingBot:
             result = await self.exchange_client.close_position(symbol)
             
             if result and result.get('status') != 'no_position':
-                # Update trade history
-                trade_info = {
-                    'symbol': symbol,
-                    'close_time': datetime.now(),
-                    'close_price': float(result.get('price', 0)),
-                    'close_reason': reason,
-                    'pnl': float(position.get('unRealizedProfit', 0))
-                }
-                
-                # Update active trades
-                if symbol in self.active_trades:
-                    trade = self.active_trades[symbol]
-                    trade.update(trade_info)
-                    self.trade_history.append(trade)
-                    del self.active_trades[symbol]
-                    
                 logger.info(f"Successfully closed position for {symbol}")
                 return True
             else:
@@ -733,47 +580,56 @@ class TradingBot:
             return False
 
     async def _update_position_levels(self, symbol: str) -> None:
-        """Update position levels and risk metrics for a given symbol."""
+        """Update position levels and risk metrics for a symbol."""
         try:
-            logger.debug(f"Updating position levels for {symbol}")
-            
             # Get current position
             position = await self.exchange_client.get_position(symbol)
             if not position:
                 return
                 
-            # Get position risk information
-            risk_info = await self.exchange_client.get_position_risk(symbol)
+            position_amt = float(position.get('positionAmt', 0))
+            if position_amt == 0:
+                return
+                
+            # Get current market price
+            ticker = await self.exchange_client.get_ticker(symbol)
+            if not ticker:
+                return
+                
+            current_price = float(ticker.get('last', 0))
+            if current_price == 0:
+                return
+                
+            # Calculate position metrics
+            entry_price = float(position.get('entryPrice', 0))
+            unrealized_pnl = float(position.get('unRealizedProfit', 0))
+            leverage = float(position.get('leverage', 0))
             
-            # Update active trade with new information
-            if symbol in self.active_trades:
-                trade = self.active_trades[symbol]
-                trade.update({
-                    'current_price': float(position.get('markPrice', 0)),
-                    'unrealized_pnl': float(position.get('unRealizedProfit', 0)),
-                    'leverage': float(risk_info.get('leverage', 0)),
-                    'liquidation_price': float(risk_info.get('liquidation_price', 0)),
-                    'margin_type': risk_info.get('margin_type', ''),
-                    'last_update': datetime.now()
-                })
-                
-                # Check for stop loss or take profit
-                entry_price = float(trade.get('entry_price', 0))
-                current_price = float(position.get('markPrice', 0))
-                position_amt = float(position.get('positionAmt', 0))
-                
-                if position_amt > 0:  # Long position
-                    if current_price <= trade.get('stop_loss', 0):
-                        await self._close_position(symbol, "stop_loss")
-                    elif current_price >= trade.get('take_profit', float('inf')):
-                        await self._close_position(symbol, "take_profit")
-                else:  # Short position
-                    if current_price >= trade.get('stop_loss', float('inf')):
-                        await self._close_position(symbol, "stop_loss")
-                    elif current_price <= trade.get('take_profit', 0):
-                        await self._close_position(symbol, "take_profit")
-                        
-            logger.debug(f"Position levels updated for {symbol}")
+            # Calculate price levels
+            price_change = ((current_price - entry_price) / entry_price) * 100
+            pnl_percentage = (unrealized_pnl / (abs(position_amt) * entry_price)) * 100
+            
+            # Update position levels in state
+            self.position_levels[symbol] = {
+                'entry_price': entry_price,
+                'current_price': current_price,
+                'position_amt': position_amt,
+                'unrealized_pnl': unrealized_pnl,
+                'price_change_pct': price_change,
+                'pnl_percentage': pnl_percentage,
+                'leverage': leverage,
+                'last_update': datetime.now().timestamp()
+            }
+            
+            # Log position update
+            logger.info(
+                f"Position levels updated for {symbol}: "
+                f"Entry: {entry_price:.2f}, Current: {current_price:.2f}, "
+                f"Change: {price_change:.2f}%, PnL: {pnl_percentage:.2f}%"
+            )
             
         except Exception as e:
             logger.error(f"Error updating position levels for {symbol}: {e}")
+
+# Create a singleton instance
+trading_bot = TradingBot()

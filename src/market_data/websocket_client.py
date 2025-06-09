@@ -321,3 +321,108 @@ class MarketDataWebSocket:
         except Exception as e:
             logger.error(f"Error checking WebSocket connection: {e}")
             return False 
+
+    def is_connected(self) -> bool:
+        """Check if the WebSocket connection is active."""
+        try:
+            return (
+                self.connection is not None and 
+                not self.connection.closed and 
+                self.connection._connection and 
+                self.connection._connection.is_connected()
+            )
+        except Exception as e:
+            logger.error(f"Error checking WebSocket connection: {e}")
+            return False
+
+    async def check_connection(self) -> bool:
+        """
+        Check if the WebSocket connection is healthy and responsive.
+        
+        Returns:
+            bool: True if connection is healthy
+        """
+        try:
+            if not self.is_connected():
+                logger.warning("WebSocket connection is not active")
+                return False
+                
+            # Check if we've received any messages recently
+            if self.last_message_time:
+                time_since_last = time.time() - self.last_message_time
+                if time_since_last > self.heartbeat_interval * 2:
+                    logger.warning(f"No messages received for {time_since_last:.1f} seconds")
+                    return False
+                    
+            # Check if we can send a ping
+            try:
+                await self.connection.ping()
+                return True
+            except Exception as e:
+                logger.error(f"Error sending ping: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error checking WebSocket connection: {e}")
+            return False
+
+    async def reconnect(self) -> bool:
+        """
+        Attempt to reconnect the WebSocket connection.
+        
+        Returns:
+            bool: True if reconnection was successful
+        """
+        try:
+            logger.info("Attempting to reconnect WebSocket...")
+            
+            # Close existing connection if any
+            if self.connection and not self.connection.closed:
+                await self.connection.close()
+                
+            # Clear connection state
+            self.connection = None
+            self.last_message_time = None
+            self.reconnect_attempts = 0
+            
+            # Wait before reconnecting
+            await asyncio.sleep(self.reconnect_delay)
+            
+            # Attempt to reconnect
+            try:
+                await self.initialize(self.symbols)
+                logger.info("WebSocket reconnected successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to reconnect WebSocket: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error during WebSocket reconnection: {e}")
+            return False
+
+    async def _handle_connection_error(self) -> None:
+        """Handle WebSocket connection errors and attempt reconnection."""
+        try:
+            logger.warning("Handling WebSocket connection error")
+            
+            # Increment reconnect attempts
+            self.reconnect_attempts += 1
+            
+            # Calculate backoff delay
+            delay = min(
+                self.reconnect_delay * (2 ** self.reconnect_attempts),
+                self.max_reconnect_delay
+            )
+            
+            logger.info(f"Reconnect attempt {self.reconnect_attempts}, waiting {delay:.1f} seconds")
+            await asyncio.sleep(delay)
+            
+            # Attempt reconnection
+            if await self.reconnect():
+                self.reconnect_attempts = 0
+            else:
+                logger.error("Failed to reconnect after maximum attempts")
+                
+        except Exception as e:
+            logger.error(f"Error handling connection error: {e}") 
