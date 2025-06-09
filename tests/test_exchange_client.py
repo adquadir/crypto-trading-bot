@@ -177,3 +177,47 @@ async def test_proxy_connection_failure(exchange_client, mock_binance_client):
         metrics = exchange_client.proxy_metrics[exchange_client.proxy_port]
         assert metrics.error_count > 0
         assert metrics.last_error is not None
+
+@pytest.mark.asyncio
+async def test_exchange_client_initialization():
+    """Test exchange client initialization."""
+    config = {
+        'api_key': 'test_api_key',
+        'api_secret': 'test_api_secret',
+        'base_url': 'https://testnet.binance.vision/api',
+        'ws_url': 'wss://testnet.binance.vision/ws/stream',
+        'testnet': True,
+        'symbols': ['BTCUSDT', 'ETHUSDT'],
+        'scalping_mode': False
+    }
+    client = ExchangeClient(config=config)
+    assert client.api_key == 'test_api_key'
+    assert client.api_secret == 'test_api_secret'
+    assert client.testnet is True
+    assert 'BTCUSDT' in client.symbols
+    assert 'ETHUSDT' in client.symbols
+
+@pytest.mark.asyncio
+async def test_exchange_client_with_proxy():
+    """Test exchange client with proxy configuration."""
+    config = {
+        'api_key': 'test_api_key',
+        'api_secret': 'test_api_secret',
+        'base_url': 'https://testnet.binance.vision/api',
+        'ws_url': 'wss://testnet.binance.vision/ws/stream',
+        'testnet': True,
+        'symbols': ['BTCUSDT'],
+        'proxy': {
+            'host': 'test.proxy.com',
+            'port': '10001',
+            'username': 'test_user',
+            'password': 'test_pass'
+        },
+        'proxy_ports': ['10001', '10002'],
+        'failover_ports': ['10001', '10002', '10003']
+    }
+    client = ExchangeClient(config=config)
+    assert client.proxy == 'http://test.proxy.com:10001'
+    assert isinstance(client.proxy_auth, aiohttp.BasicAuth)
+    assert client.proxy_auth.login == 'test_user'
+    assert client.proxy_auth.password == 'test_pass'

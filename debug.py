@@ -16,10 +16,24 @@ logger = logging.getLogger(__name__)
 async def test_connection():
     load_dotenv()
     
-    client = ExchangeClient(
-        api_key=os.getenv('BINANCE_API_KEY'),
-        api_secret=os.getenv('BINANCE_API_SECRET')
-    )
+    # Initialize exchange client with config
+    exchange_config = {
+        'api_key': os.getenv('BINANCE_API_KEY'),
+        'api_secret': os.getenv('BINANCE_API_SECRET'),
+        'base_url': 'https://api.binance.com',
+        'ws_url': 'wss://stream.binance.com:9443/ws/stream',
+        'testnet': os.getenv('USE_TESTNET', 'False').lower() == 'true',
+        'proxy': {
+            'host': os.getenv('PROXY_HOST'),
+            'port': os.getenv('PROXY_PORT'),
+            'username': os.getenv('PROXY_USER'),
+            'password': os.getenv('PROXY_PASS')
+        },
+        'proxy_ports': os.getenv('PROXY_LIST', '10001,10002,10003').split(','),
+        'failover_ports': os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','),
+        'symbols': os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
+    }
+    exchange_client = ExchangeClient(config=exchange_config)
     
     processor = MarketDataProcessor()
     
@@ -27,12 +41,12 @@ async def test_connection():
         logger.info("=== Starting Connection Test ===")
         
         # Test initialization
-        await client.initialize()
-        await client.test_proxy_connection()
+        await exchange_client.initialize()
+        await exchange_client.test_proxy_connection()
         
         # Test data fetching
         symbol = "BTCUSDT"
-        data = await client.get_historical_data(symbol, "1m", 200)
+        data = await exchange_client.get_historical_data(symbol, "1m", 200)
         logger.info(f"Received {len(data) if data else 0} data points")
         
         if data:
@@ -47,7 +61,7 @@ async def test_connection():
     except Exception as e:
         logger.error(f"Test failed: {str(e)}")
     finally:
-        await client.close()
+        await exchange_client.close()
         logger.info("=== Test Complete ===")
 
 if __name__ == "__main__":
