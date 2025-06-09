@@ -2,21 +2,26 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Any
 import websockets
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 class MarketDataWebSocket:
-    def __init__(self, exchange_client, symbols: List[str], cache_ttl: int = 5):
+    """WebSocket client for market data streams."""
+    
+    def __init__(self, exchange_client: 'ExchangeClient', symbols: List[str], cache_ttl: int = 5):
         """Initialize the WebSocket client."""
         self.exchange_client = exchange_client
         self.symbols = symbols
         self.cache_ttl = cache_ttl
         self.connection = None
         self.running = False
-        self.ws_url = "wss://stream.binance.com:9443/ws/stream"  # Updated WebSocket URL
+        self.ws_url = "wss://stream.binance.com:9443/stream"  # Correct combined stream endpoint
+        self.logger = logging.getLogger(__name__)
+        self.cache = {}  # Initialize cache
+        self.cache_timestamps = {}  # Initialize cache timestamps
         self.connections: Dict[str, websockets.WebSocketClientProtocol] = {}
         self.data_cache: Dict[str, Dict] = {}
         self.last_update: Dict[str, float] = {}
@@ -100,22 +105,31 @@ class MarketDataWebSocket:
 
     async def start(self):
         """Start the WebSocket client."""
-        await self.connect()
-        await self.subscribe()  # Subscribe to streams after connecting
-        self.running = True  # Set running to True before entering the loop
+        if self.running:
+            return
+        
+        self.running = True
+        
+        # Start heartbeat monitoring
+        asyncio.create_task(self._monitor_websocket_heartbeat())
+        
+        # Start message processing loop
         while self.running:
             try:
                 message = await self.connection.recv()
-                await self._handle_message(message)
+                await self._handle_ws_message(message)
             except websockets.exceptions.ConnectionClosed:
                 logger.error("WebSocket connection closed unexpectedly.")
                 break
             except Exception as e:
-                logger.error(f"Error in WebSocket message processing: {e}")
+                logger.error(f"Error in WebSocket message loop: {e}")
                 break
+        
+        self.running = False
+        logger.info("WebSocket client stopped")
 
-    async def _handle_message(self, message: str):
-        """Process incoming WebSocket message."""
+    async def _handle_ws_message(self, message: str):
+        """Handle incoming WebSocket messages."""
         try:
             message_dict = json.loads(message)
             stream = message_dict.get('stream', '')
@@ -128,51 +142,65 @@ class MarketDataWebSocket:
             symbol = stream.split('@')[0].upper()
             data_type = stream.split('@')[1]
 
-            # Update cache with timestamp
-            current_time = time.time()
-            self.last_update[symbol] = current_time
-
-            if data_type.startswith('kline'):
-                # Process kline data
-                kline = data['k']
-                self.data_cache[f"{symbol}_kline"] = {
-                    'open': float(kline['o']),
-                    'high': float(kline['h']),
-                    'low': float(kline['l']),
-                    'close': float(kline['c']),
-                    'volume': float(kline['v']),
-                    'timestamp': kline['t'],
-                    'is_closed': kline['x']
-                }
-                # Notify kline callbacks
-                for callback in self.callbacks['kline']:
-                    await callback(symbol, self.data_cache[f"{symbol}_kline"])
-
-            elif data_type == 'trade':
-                # Process trade data
-                self.data_cache[f"{symbol}_trade"] = {
-                    'price': float(data['p']),
-                    'quantity': float(data['q']),
-                    'timestamp': data['T'],
-                    'is_buyer_maker': data['m']
-                }
-                # Notify trade callbacks
-                for callback in self.callbacks['trade']:
-                    await callback(symbol, self.data_cache[f"{symbol}_trade"])
-
-            elif data_type.startswith('depth'):
-                # Process order book data
-                self.data_cache[f"{symbol}_depth"] = {
-                    'bids': [[float(price), float(qty)] for price, qty in data['bids'][:10]],
-                    'asks': [[float(price), float(qty)] for price, qty in data['asks'][:10]],
-                    'timestamp': data['T']
-                }
-                # Notify depth callbacks
-                for callback in self.callbacks['depth']:
-                    await callback(symbol, self.data_cache[f"{symbol}_depth"])
-
+            # Update cache with new data
+            self.cache[symbol] = data
+            self.cache_timestamps[symbol] = time.time()
+            
+            # Process different message types
+            if 'e' in data:  # Check if it's a Binance message
+                event_type = data['e']
+                if event_type == 'kline':
+                    await self._handle_kline_message(symbol, data)
+                elif event_type == 'trade':
+                    await self._handle_trade_message(symbol, data)
+                elif event_type == 'depthUpdate':
+                    await self._handle_depth_message(symbol, data)
+                else:
+                    self.logger.debug(f"Unhandled message type: {event_type}")
+            else:
+                self.logger.warning(f"Received message without event type: {data}")
+            
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            self.logger.error(f"Error handling WebSocket message: {e}")
+            self.logger.error(f"Message data: {data}")
+
+    async def _handle_kline_message(self, symbol: str, data: Dict[str, Any]) -> None:
+        """Handle kline message."""
+        self.data_cache[f"{symbol}_kline"] = {
+            'open': float(data['k']['o']),
+            'high': float(data['k']['h']),
+            'low': float(data['k']['l']),
+            'close': float(data['k']['c']),
+            'volume': float(data['k']['v']),
+            'timestamp': data['k']['t'],
+            'is_closed': data['k']['x']
+        }
+        # Notify kline callbacks
+        for callback in self.callbacks['kline']:
+            await callback(symbol, self.data_cache[f"{symbol}_kline"])
+
+    async def _handle_trade_message(self, symbol: str, data: Dict[str, Any]) -> None:
+        """Handle trade message."""
+        self.data_cache[f"{symbol}_trade"] = {
+            'price': float(data['p']),
+            'quantity': float(data['q']),
+            'timestamp': data['T'],
+            'is_buyer_maker': data['m']
+        }
+        # Notify trade callbacks
+        for callback in self.callbacks['trade']:
+            await callback(symbol, self.data_cache[f"{symbol}_trade"])
+
+    async def _handle_depth_message(self, symbol: str, data: Dict[str, Any]) -> None:
+        """Handle depth message."""
+        self.data_cache[f"{symbol}_depth"] = {
+            'bids': [[float(price), float(qty)] for price, qty in data['bids'][:10]],
+            'asks': [[float(price), float(qty)] for price, qty in data['asks'][:10]],
+            'timestamp': data['T']
+        }
+        # Notify depth callbacks
+        for callback in self.callbacks['depth']:
+            await callback(symbol, self.data_cache[f"{symbol}_depth"])
 
     def register_callback(self, data_type: str, callback: Callable):
         """Register a callback for a specific data type."""
@@ -200,4 +228,16 @@ class MarketDataWebSocket:
         self.running = False
         if hasattr(self, 'connection'):
             await self.connection.close()
-        logger.info("WebSocket client stopped") 
+        logger.info("WebSocket client stopped")
+
+    async def close(self):
+        """Close the WebSocket connection."""
+        try:
+            self.running = False  # Stop all background tasks
+            if self.connection:
+                await self.connection.close()
+                self.connection = None
+            logger.info("WebSocket connection closed")
+        except Exception as e:
+            logger.error(f"Error closing WebSocket connection: {e}")
+            raise 

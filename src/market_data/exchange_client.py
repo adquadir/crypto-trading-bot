@@ -1006,13 +1006,25 @@ class ExchangeClient:
         # Placeholder for cache TTL logic
         return 60  # Default TTL in seconds
 
-    async def _setup_symbol_websocket(self, symbol: str):
-        """Set up a WebSocket connection for a specific symbol."""
+    async def _setup_symbol_websocket(self, symbol: str) -> None:
+        """Set up WebSocket connection for a symbol."""
         try:
-            ws_client = MarketDataWebSocket(exchange_client=self, symbols=[symbol])
+            # Create WebSocket client for the symbol
+            ws_client = MarketDataWebSocket(
+                exchange_client=self,
+                symbols=[symbol],
+                cache_ttl=5
+            )
+            
+            # Connect to WebSocket
             await ws_client.connect()
+            
+            # Start the WebSocket client
+            await ws_client.start()
+            
+            # Store the client
             self.ws_clients[symbol] = ws_client
-            logger.info(f"WebSocket set up for {symbol}")
+            logger.info(f"WebSocket client started for {symbol}")
         except Exception as e:
             logger.error(f"Error setting up WebSocket for {symbol}: {e}")
             raise

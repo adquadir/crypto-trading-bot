@@ -5,6 +5,7 @@ from datetime import datetime
 import aiohttp
 import statistics
 from src.market_data.exchange_client import ExchangeClient, ProxyMetrics
+from src.market_data.websocket import MarketDataWebSocket
 
 @pytest.fixture
 def mock_binance_client():
@@ -25,7 +26,7 @@ async def test_proxy_initialization(exchange_client, mock_binance_client):
     assert exchange_client.proxy_pass == 'test_pass'
     assert isinstance(exchange_client.proxy_auth, aiohttp.BasicAuth)
     assert isinstance(exchange_client.proxy_metrics, dict)
-    assert isinstance(exchange_client.ws_connections, dict)
+    assert isinstance(exchange_client.ws_clients, dict)
 
 @pytest.mark.asyncio
 async def test_proxy_connection_test(exchange_client, mock_binance_client):
@@ -100,13 +101,45 @@ async def test_proxy_metrics(exchange_client, mock_binance_client):
     assert statistics.mean(metrics.response_times) == 0.2
 
 @pytest.mark.asyncio
-async def test_websocket_reinitialization(exchange_client, mock_binance_client):
-    mock_ws = AsyncMock()
-    exchange_client.ws_connections['BTCUSDT'] = mock_ws
-    with patch.object(exchange_client, '_setup_symbol_websocket') as mock_setup:
-        await exchange_client._reinitialize_websockets()
-        mock_ws.close.assert_awaited_once()
-        mock_setup.assert_awaited_once_with('BTCUSDT')
+async def test_initialize_websocket():
+    """Test WebSocket initialization."""
+    client = ExchangeClient()
+    await client.initialize()
+    
+    # Check that WebSocket clients were created
+    assert len(client.ws_clients) > 0
+    for symbol in client.symbols:
+        assert symbol in client.ws_clients
+        assert isinstance(client.ws_clients[symbol], MarketDataWebSocket)
+
+@pytest.mark.asyncio
+async def test_reinitialize_websockets():
+    """Test WebSocket reinitialization."""
+    client = ExchangeClient()
+    await client.initialize()
+    
+    # Store original clients
+    original_clients = client.ws_clients.copy()
+    
+    # Reinitialize WebSockets
+    await client._reinitialize_websockets()
+    
+    # Check that new clients were created
+    assert len(client.ws_clients) == len(original_clients)
+    for symbol in client.symbols:
+        assert symbol in client.ws_clients
+        assert client.ws_clients[symbol] is not original_clients[symbol]
+
+@pytest.mark.asyncio
+async def test_websocket_connection():
+    """Test WebSocket connection and message handling."""
+    client = ExchangeClient()
+    await client.initialize()
+    
+    # Check that WebSocket clients are connected
+    for symbol, ws_client in client.ws_clients.items():
+        assert ws_client.connection is not None
+        assert ws_client.running is True
 
 @pytest.mark.asyncio
 async def test_proxy_failover(exchange_client, mock_binance_client):
