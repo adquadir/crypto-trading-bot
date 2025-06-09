@@ -82,7 +82,7 @@ class Database:
         try:
             self.engine.dispose()
             logger.info("Database connection closed")
-        except Exception as e:
+                        except Exception as e:
             logger.error(f"Error closing database connection: {e}")
             raise
 
@@ -176,6 +176,6 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        db.close() 
 
 __all__ = ['Database', 'SessionLocal', 'init_db', 'db'] 

@@ -292,7 +292,46 @@ const Opportunities = () => {
       setTimeout(() => {
         if (!wsConnected) {
           console.log('Attempting to reconnect WebSocket...');
-          ws.connect();
+          const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+          ws = newWs;  // Replace the old WebSocket instance
+          
+          // Reattach event handlers
+          newWs.onopen = () => {
+            console.log('WebSocket reconnected');
+            setWsConnected(true);
+            setError(null);
+          };
+          
+          newWs.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data.type === 'opportunity_update') {
+                setOpportunities(prev => {
+                  const updated = [...prev];
+                  const index = updated.findIndex(opp => opp.symbol === data.opportunity.symbol);
+                  if (index >= 0) {
+                    updated[index] = data.opportunity;
+                  } else {
+                    updated.push(data.opportunity);
+                  }
+                  return updated;
+                });
+              }
+            } catch (err) {
+              console.error('Error processing WebSocket message:', err);
+            }
+          };
+          
+          newWs.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            setError('WebSocket connection error');
+            setWsConnected(false);
+          };
+          
+          newWs.onclose = () => {
+            console.log('WebSocket disconnected');
+            setWsConnected(false);
+          };
         }
       }, 5000);
     };

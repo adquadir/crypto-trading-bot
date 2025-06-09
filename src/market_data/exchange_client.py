@@ -200,10 +200,8 @@ class ExchangeClient:
         self._ws_lock = asyncio.Lock()
         self._discovery_lock = asyncio.Lock()
         
-        # Initialize WebSocket attributes
-        self.ws_connections = {}
-        self.ws_tasks = {}
-        self.ws_heartbeats = {}
+        # Initialize WebSocket manager
+        self._init_ws_manager()
         
         self.logger = logging.getLogger(__name__)
         self.symbol_discovery = None  # Initialize as None, will be set up when needed
@@ -232,7 +230,7 @@ class ExchangeClient:
             if not proxy_url:
                 logger.warning("No proxy URL configured")
                 self.proxies = None
-                return
+            return
 
             # Parse proxy URL
             parsed = urlparse(proxy_url)
@@ -247,7 +245,7 @@ class ExchangeClient:
                 proxy_url = f"{parsed.scheme}://{auth}@{parsed.hostname}:{parsed.port}"
 
             # Set up proxies for both HTTP and HTTPS
-            self.proxies = {
+        self.proxies = {
                 'http': proxy_url,
                 'https': proxy_url
             }
@@ -764,10 +762,10 @@ class ExchangeClient:
                 for symbol in self.symbols:
                     await self._update_volatility(symbol)
                 await asyncio.sleep(60)  # Update every minute
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Error updating volatility metrics: {e}")
                 await asyncio.sleep(5)  # Wait before retrying
-
+            
     async def close(self):
         """Close all WebSocket connections."""
         for symbol, ws_client in self.ws_clients.items():

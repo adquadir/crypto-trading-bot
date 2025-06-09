@@ -21,7 +21,7 @@ const getWsBaseUrl = () => {
     if (isDevelopment || hostname === 'localhost' || hostname === '127.0.0.1') {
         return `ws://${hostname}:8000`; // Default to port 8000 for local dev
     }
-    return `ws://${hostname}:8000`; // Or ws:// followed by window.location.host
+    return `ws://${hostname}:8000`; // Use ws:// protocol for production
 };
 
 const config = {
@@ -39,8 +39,8 @@ const config = {
         SYMBOL_OPPORTUNITY: (symbol) => `/api/trading/opportunities/${symbol}`
     },
     // API endpoints
-    apiUrl: process.env.REACT_APP_API_URL || 'http://localhost:5000',
-    wsUrl: process.env.REACT_APP_WS_URL || 'ws://localhost:5000/ws',
+    apiUrl: process.env.REACT_APP_API_URL || 'http://localhost:8000',
+    wsUrl: process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws',
     
     // WebSocket settings
     wsReconnectDelay: 1000,

@@ -100,7 +100,6 @@ class Strategy(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True, index=True)
-    description = Column(String, nullable=True)
     active = Column(Boolean, default=True)
     parameters = Column(JSON) # Store strategy-specific parameters
 
