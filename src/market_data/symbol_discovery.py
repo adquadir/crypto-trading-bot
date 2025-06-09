@@ -383,7 +383,7 @@ class SymbolDiscovery:
         self.signal_generator = SignalGenerator()
         self.opportunities: Dict[str, TradingOpportunity] = {}
         self.last_update = {}
-        self.update_interval = int(os.getenv('UPDATE_INTERVAL', '1.0'))  # Use UPDATE_INTERVAL from .env
+        self.update_interval = float(os.getenv('UPDATE_INTERVAL', '1.0'))  # Use UPDATE_INTERVAL from .env
         self._update_task = None
         self._processing_lock = asyncio.Lock()  # Add lock for concurrent processing
         self._discovery_lock = asyncio.Lock()
@@ -1442,7 +1442,7 @@ class SymbolDiscovery:
             recent_vol_std = np.std(volumes[-5:])
             if recent_vol_std > vol_mean * 2.0:
                 logger.warning(f"Sudden volume spike detected: {recent_vol_std/vol_mean:.2f}x average")
-                return False
+            return False
 
             # 2. Check for volume trend consistency
             vol_trend = np.polyfit(range(len(volumes[-20:])), volumes[-20:], 1)[0]
@@ -1468,22 +1468,22 @@ class SymbolDiscovery:
                     return False
                 
                 return True
-            else:
+                else:
                 # Standard checks for unconfirmed signals
                 if vol_ma5 < vol_ma20 * 0.2:  # Require at least 20% of average volume
                     logger.debug(f"Low recent volume: {vol_ma5/vol_ma20:.2%} of average")
-                    return False
+                return False
                 
                 # Check for volume consistency
                 if vol_cv > 1.5:  # Standard threshold for variation
                     logger.debug(f"High volume variation: {vol_cv:.2f}")
-                    return False
+                return False
                 
                 return True
-        
+                
         except Exception as e:
             logger.error(f"Error checking volume trend: {e}")
-            return False
+                return False
                 
     async def initialize(self) -> None:
         """Initialize the symbol discovery process."""

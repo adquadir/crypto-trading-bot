@@ -150,8 +150,8 @@ class ExchangeClient:
     def __init__(self, config: Dict[str, Any]):
         """Initialize the exchange client."""
         self.config = config
-        self.api_key = config['api_key']
-        self.api_secret = config['api_secret']
+        self.api_key = config.get('api_key')
+        self.api_secret = config.get('api_secret')
         self.base_url = config['base_url']
         self.ws_url = config['ws_url']
         
@@ -197,6 +197,7 @@ class ExchangeClient:
         self.current_port_index = 0
         
         # Initialize client
+        self.proxies = None  # Ensure this is set before _init_client
         self._init_client(self.api_key, self.api_secret)
         
         # Cache TTLs (in seconds)
@@ -720,10 +721,10 @@ class ExchangeClient:
                 for symbol in self.symbols:
                     await self._update_volatility(symbol)
                 await asyncio.sleep(60)  # Update every minute
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Error updating volatility metrics: {e}")
                 await asyncio.sleep(5)  # Wait before retrying
-
+            
     async def close(self):
         """Close all WebSocket connections."""
         for symbol, ws_client in self.ws_clients.items():
