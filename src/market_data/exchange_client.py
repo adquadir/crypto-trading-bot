@@ -240,7 +240,7 @@ class ExchangeClient:
                 return
 
             # Build proxy URL with authentication if provided
-            if self.proxy_config['username'] and self.proxy_config['password']:
+            if self.proxy_config.get('username') and self.proxy_config.get('password'):
                 auth = f"{self.proxy_config['username']}:{self.proxy_config['password']}"
                 proxy_url = f"{parsed.scheme}://{auth}@{parsed.hostname}:{parsed.port}"
 
@@ -762,10 +762,10 @@ class ExchangeClient:
                 for symbol in self.symbols:
                     await self._update_volatility(symbol)
                 await asyncio.sleep(60)  # Update every minute
-        except Exception as e:
+            except Exception as e:
                 logger.error(f"Error updating volatility metrics: {e}")
                 await asyncio.sleep(5)  # Wait before retrying
-            
+
     async def close(self):
         """Close all WebSocket connections."""
         for symbol, ws_client in self.ws_clients.items():
