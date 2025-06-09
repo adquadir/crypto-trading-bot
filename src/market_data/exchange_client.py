@@ -945,11 +945,15 @@ class ExchangeClient:
         # Replace this with actual logic to fetch symbols from the exchange
         return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
-    async def initialize(self):
-        """Initialize the exchange client."""
+    async def initialize(self, symbols: Optional[List[str]] = None):
+        """Initialize the exchange client with optional symbols."""
         try:
-            # Update symbols from discovery
-            self.symbols = await self.symbol_discovery.get_symbols()
+            # Update symbols if provided, otherwise get from discovery
+            if symbols is not None:
+                self.symbols = symbols
+            else:
+                self.symbols = await self.symbol_discovery.get_symbols()
+            
             logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
             
             # Start background tasks

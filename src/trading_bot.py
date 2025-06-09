@@ -78,6 +78,12 @@ class TradingBot:
         self.strategy_config = self.signal_generator.strategy_config
         self.parameter_history = []
         
+        # Initialize WebSocket manager
+        self.ws_manager = MarketDataWebSocket(
+            exchange_client=self.exchange_client,
+            symbols=[]
+        )
+        
     def _init_database(self):
         """Initialize database connection and create tables."""
         try:
@@ -160,41 +166,21 @@ class TradingBot:
         try:
             logger.info("Starting trading bot...")
             
-            # Initialize strategy profiles
-            self.strategy_config.load_strategy_profiles()
-            self.strategy_config.switch_profile('moderate')  # Default to moderate profile
+            # Initialize components
+            await self.exchange_client.initialize([])
+            await self.ws_manager.initialize(self.exchange_client.symbols)
             
-            # Initialize exchange client first
-            await self.exchange_client.initialize([])  # Initialize with empty symbols list first
-            
-            # Initialize symbol discovery with exchange client and scalping mode
-            self.symbol_discovery = SymbolDiscovery(self.exchange_client, scalping_mode=True)
-            await self.symbol_discovery.initialize()
-            
-            # Get symbols and update exchange client
-            symbols = await self.symbol_discovery.get_symbols()
-            await self.exchange_client.initialize(symbols)
-            
-            # Initialize WebSocket manager
-            self.ws_manager = MarketDataWebSocket(
-                exchange_client=self.exchange_client,
-                symbols=symbols
-            )
+            # Start WebSocket manager
             await self.ws_manager.start()
             
             # Start background tasks
-            self.tasks = [
-                asyncio.create_task(self._monitor_market_conditions()),
-                asyncio.create_task(self._process_signals()),
-                asyncio.create_task(self._update_positions()),
-                asyncio.create_task(self._health_check())
-            ]
+            self.running = True
+            self.health_check_task = asyncio.create_task(self._health_check_loop())
+            self.funding_rates_task = asyncio.create_task(self._update_funding_rates())
             
             logger.info("Trading bot started successfully")
-                    
         except Exception as e:
-            logger.error(f"Error starting trading bot: {str(e)}")
-            await self.stop()
+            logger.error(f"Error starting trading bot: {e}")
             raise
             
     async def _execute_trade(self, symbol: str, signal: Dict) -> Optional[Dict]:
@@ -402,26 +388,28 @@ class TradingBot:
             
     async def stop(self):
         """Stop the trading bot."""
-        logger.info("Stopping trading bot...")
-
-        # Cancel all background tasks
-        if hasattr(self, 'tasks'):
-            for task in self.tasks:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        # Close exchange client
-        if hasattr(self, 'exchange_client'):
-            await self.exchange_client.close()
-
-        # Stop the WebSocket manager
-        if hasattr(self, 'ws_manager'):
-            await self.ws_manager.stop()
-
-        logger.info("Trading bot stopped")
+        try:
+            logger.info("Stopping trading bot...")
+            self.running = False
+            
+            # Cancel background tasks
+            if hasattr(self, 'health_check_task'):
+                self.health_check_task.cancel()
+            if hasattr(self, 'funding_rates_task'):
+                self.funding_rates_task.cancel()
+            
+            # Stop WebSocket manager
+            if self.ws_manager:
+                await self.ws_manager.close()
+            
+            # Stop exchange client
+            if self.exchange_client:
+                await self.exchange_client.shutdown()
+            
+            logger.info("Trading bot stopped")
+        except Exception as e:
+            logger.error(f"Error stopping trading bot: {e}")
+            raise
         
     def get_trade_history(self) -> List[Dict]:
         """Get the trade history."""
@@ -666,3 +654,22 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"Error in health check: {str(e)}")
                 await asyncio.sleep(5)
+
+    async def _health_check_loop(self):
+        """Health check loop for the trading system."""
+        while self.running:
+            try:
+                await self._health_check()
+            except Exception as e:
+                logger.error(f"Error in health check loop: {str(e)}")
+            await asyncio.sleep(self.config['trading']['health_check_interval'])
+
+    async def _update_funding_rates(self):
+        """Update funding rates for the trading system."""
+        while self.running:
+            try:
+                # Implementation of funding rate update logic
+                await asyncio.sleep(self.config['trading']['funding_rate_interval'])
+            except Exception as e:
+                logger.error(f"Error in funding rate update: {str(e)}")
+            await asyncio.sleep(self.config['trading']['funding_rate_interval'])
