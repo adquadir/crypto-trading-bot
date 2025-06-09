@@ -212,7 +212,7 @@ class ExchangeClient:
         self.rotation_threshold = 0.8
         self.health_check_interval = 60
         self._shutdown_event = asyncio.Event()
-        
+
         # Load proxy configuration
         self.proxy_list = config.get('proxy_ports', os.getenv('PROXY_LIST', '10001,10002,10003').split(','))
         self.failover_ports = config.get('failover_ports', os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','))
@@ -233,7 +233,7 @@ class ExchangeClient:
             parsed = urlparse(proxy_url)
             if not all([parsed.scheme, parsed.hostname, parsed.port]):
                 logger.error("Invalid proxy URL format")
-                return
+            return
 
             # Build proxy URL with authentication if provided
             if self.proxy_config['username'] and self.proxy_config['password']:
@@ -241,7 +241,7 @@ class ExchangeClient:
                 proxy_url = f"{parsed.scheme}://{auth}@{parsed.hostname}:{parsed.port}"
 
             # Set up proxies for both HTTP and HTTPS
-            self.proxies = {
+        self.proxies = {
                 'http': proxy_url,
                 'https': proxy_url
             }
@@ -758,10 +758,10 @@ class ExchangeClient:
                 for symbol in self.symbols:
                     await self._update_volatility(symbol)
                 await asyncio.sleep(60)  # Update every minute
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Error updating volatility metrics: {e}")
                 await asyncio.sleep(5)  # Wait before retrying
-
+            
     async def close(self):
         """Close all WebSocket connections."""
         for symbol, ws_client in self.ws_clients.items():

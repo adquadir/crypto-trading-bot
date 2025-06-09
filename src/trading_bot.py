@@ -401,7 +401,7 @@ class TradingBot:
     async def stop(self):
         """Stop the trading bot."""
         try:
-            logger.info("Stopping trading bot...")
+        logger.info("Stopping trading bot...")
             self.running = False
             
             # Cancel background tasks
@@ -418,7 +418,7 @@ class TradingBot:
             if self.exchange_client:
                 await self.exchange_client.shutdown()
             
-            logger.info("Trading bot stopped")
+        logger.info("Trading bot stopped")
         except Exception as e:
             logger.error(f"Error stopping trading bot: {e}")
             raise

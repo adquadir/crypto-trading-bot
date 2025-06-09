@@ -18,11 +18,11 @@ async def exchange_client() -> AsyncGenerator[ExchangeClient, None]:
         'discovery_interval': 3600,
         'cache_ttl': 60
     }
-    
+
     client = ExchangeClient(config=config)
-    await client.initialize()
+            await client.initialize()
     
     try:
-        yield client
+            yield client
     finally:
         await client.shutdown()

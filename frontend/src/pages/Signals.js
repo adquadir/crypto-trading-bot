@@ -307,33 +307,33 @@ const Signals = () => {
   const connectWebSocket = () => {
     if (wsRef.current) {
       wsRef.current.close();
-    }
+      }
 
     const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
-    wsRef.current = ws;
+      wsRef.current = ws;
 
-    ws.onopen = () => {
+      ws.onopen = () => {
       console.log('WebSocket connected');
-      setConnectionDetails(prev => ({
-        ...prev,
+        setConnectionDetails(prev => ({
+          ...prev,
         status: 'connected',
-        lastConnected: new Date(),
+          lastConnected: new Date(),
         reconnectAttempts: 0,
         lastError: null
-      }));
+        }));
       setError(null);
       missedHeartbeatsRef.current = 0;
-    };
+      };
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
         if (data.type === 'heartbeat') {
-          missedHeartbeatsRef.current = 0;
-          setConnectionDetails(prev => ({
-            ...prev,
+            missedHeartbeatsRef.current = 0;
+              setConnectionDetails(prev => ({
+                ...prev,
             latency: Date.now() - data.timestamp
-          }));
+              }));
         } else if (data.type === 'signal_update') {
           setSignals(prev => {
             const updated = [...prev];
@@ -347,10 +347,10 @@ const Signals = () => {
           });
           setLastUpdated(new Date());
         }
-      } catch (err) {
+        } catch (err) {
         console.error('Error processing WebSocket message:', err);
-      }
-    };
+        }
+      };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
@@ -360,7 +360,7 @@ const Signals = () => {
         lastError: error
       }));
       setError('WebSocket connection error');
-    };
+      };
 
     ws.onclose = () => {
       console.log('WebSocket disconnected');
@@ -388,7 +388,7 @@ const Signals = () => {
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
-      }
+        }
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
       }
@@ -713,7 +713,7 @@ const Signals = () => {
       )}
 
       <Grid container spacing={3}>
-        <Grid item xs={12}>
+          <Grid item xs={12}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
               Latest Signals
@@ -732,8 +732,8 @@ const Signals = () => {
                     <SignalCard signal={signal} />
                   </Grid>
                 ))}
-              </Grid>
-            )}
+            </Grid>
+        )}
           </Paper>
         </Grid>
       </Grid>

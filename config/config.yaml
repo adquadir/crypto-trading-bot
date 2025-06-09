@@ -78,7 +78,7 @@ risk:
 logging:
   level: INFO
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/trading_bot.log"
+  file: "logs/trading_bot.log" 
 
 exchange:
   api_key: ${BINANCE_API_KEY}

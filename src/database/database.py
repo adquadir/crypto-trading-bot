@@ -98,59 +98,11 @@ async def init_db() -> None:
     await db.init_db()
 
 def update_db_schema():
-    """Update database schema to match models while preserving data."""
+    """Update the database schema by creating any missing tables."""
     try:
-        inspector = inspect(engine)
-        
-        # Get existing tables
-        existing_tables = inspector.get_table_names()
-        logger.info(f"Existing tables: {existing_tables}")
-        
-        # Create any missing tables
-        self.metadata.create_all(bind=engine)
-        
-        # Check for missing columns in trading_signals
-        if 'trading_signals' in existing_tables:
-            existing_columns = [col['name'] for col in inspector.get_columns('trading_signals')]
-            logger.info(f"Existing columns in trading_signals: {existing_columns}")
-            
-            missing_columns = []
-            
-            # Check for missing columns
-            if 'action' not in existing_columns:
-                missing_columns.append('action')
-            
-            # Add missing columns if any
-            if missing_columns:
-                with engine.connect() as conn:
-                    for column in missing_columns:
-                        try:
-                            # PostgreSQL specific ALTER TABLE
-                            conn.execute(text(f"ALTER TABLE trading_signals ADD COLUMN IF NOT EXISTS {column} VARCHAR"))
-                            logger.info(f"Added missing column: {column}")
-                        except Exception as e:
-                            logger.error(f"Error adding column {column}: {e}")
-                            # Try alternative approach for PostgreSQL
-                            try:
-                                conn.execute(text(f"""
-                                    DO $$ 
-                                    BEGIN
-                                        IF NOT EXISTS (
-                                            SELECT 1 
-                                            FROM information_schema.columns 
-                                            WHERE table_name = 'trading_signals' 
-                                            AND column_name = '{column}'
-                                        ) THEN
-                                            ALTER TABLE trading_signals ADD COLUMN {column} VARCHAR;
-                                        END IF;
-                                    END $$;
-                                """))
-                                logger.info(f"Added missing column using alternative approach: {column}")
-                            except Exception as e2:
-                                logger.error(f"Alternative approach also failed for column {column}: {e2}")
-                    conn.commit()
-        
-        logger.info("Database schema update completed successfully")
+        # Create any missing tables using the imported Base
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database schema updated successfully")
     except Exception as e:
         logger.error(f"Error updating database schema: {e}")
         raise
