@@ -301,7 +301,7 @@ class SignalGenerator:
             sma20 = np.mean(closes[-20:])
             sma50 = np.mean(closes[-50:])
             rsi = self._calculate_rsi(closes)
-            
+
             return {
                 'sma20': float(sma20),
                 'sma50': float(sma50),

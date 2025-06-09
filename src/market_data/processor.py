@@ -198,7 +198,7 @@ class MarketDataProcessor:
         except Exception as e:
             logger.error(f"Error calculating indicators: {e}")
             return {}
-
+            
     def _resample_dataframe(self, df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
         """Resample dataframe to a different timeframe with caching."""
         try:

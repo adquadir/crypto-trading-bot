@@ -37,14 +37,14 @@ class StrategyConfig:
     def load_strategy_profiles(self) -> None:
         """Load strategy profiles from JSON file."""
         try:
-            if self.config_path.exists():
+        if self.config_path.exists():
                 with open(self.config_path, 'r') as f:
                     self.profiles = json.load(f)
-                    logger.info(f"Loaded {len(self.profiles)} strategy profiles")
+                logger.info(f"Loaded {len(self.profiles)} strategy profiles")
             else:
                 logger.warning(f"Strategy profiles file not found: {self.config_path}")
-        except Exception as e:
-            logger.error(f"Error loading strategy profiles: {e}")
+            except Exception as e:
+                logger.error(f"Error loading strategy profiles: {e}")
             self.profiles = {}
 
     def _save_profiles(self) -> None:

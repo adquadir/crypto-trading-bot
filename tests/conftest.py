@@ -1,4 +1,4 @@
-import os
+import pytest
 import pytest_asyncio
 from unittest.mock import patch, AsyncMock, MagicMock
 from src.market_data.exchange_client import ExchangeClient

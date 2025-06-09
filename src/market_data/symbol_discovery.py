@@ -1469,7 +1469,7 @@ class SymbolDiscovery:
                 return False
                 
                 return True
-            else:
+                else:
                 # Standard checks for unconfirmed signals
                 if vol_ma5 < vol_ma20 * 0.2:  # Require at least 20% of average volume
                     logger.debug(f"Low recent volume: {vol_ma5/vol_ma20:.2%} of average")
@@ -1481,11 +1481,11 @@ class SymbolDiscovery:
                 return False
                 
                 return True
-            
+                
         except Exception as e:
             logger.error(f"Error checking volume trend: {e}")
-            return False 
-
+                return False
+                
     async def initialize(self) -> None:
         """Initialize the symbol discovery process."""
         logger.info("Initializing symbol discovery...")
