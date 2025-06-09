@@ -736,6 +736,12 @@ class TradingBot:
                 if not config:
                     logger.warning("Empty config file, using defaults")
                     return self._get_default_config()
+                    
+                # Validate configuration
+                if not validate_config(config):
+                    logger.error("Configuration validation failed, using defaults")
+                    return self._get_default_config()
+                    
                 return config
                 
         except Exception as e:

@@ -1065,21 +1065,32 @@ class ExchangeClient:
         return "http://example-proxy.com:8080"
 
     async def _test_proxy_connection(self) -> bool:
-        """Test proxy connection."""
-        if not self.proxy:
-            return True
-        
+        """Test the proxy connection."""
         try:
+            if not self.proxy_host or not self.proxy_port:
+                logger.warning("No proxy configured for connection test")
+                return False
+                
+            # Test proxy connection
+            proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+            if self.proxy_auth:
+                proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+                
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    'https://api.binance.com/api/v3/ping',
-                    proxy=self.proxy,
-                    proxy_auth=self.proxy_auth,
+                    f"{self.base_url}/api/v3/time",
+                    proxy=proxy_url,
                     timeout=10
                 ) as response:
-                    return response.status == 200
+                    if response.status == 200:
+                        logger.info("Proxy connection test successful")
+                        return True
+                    else:
+                        logger.warning(f"Proxy connection test failed: {response.status}")
+                        return False
+                        
         except Exception as e:
-            self.logger.error(f"Error testing proxy connection: {e}")
+            logger.error(f"Error testing proxy connection: {e}")
             return False
 
     def _get_cache_ttl(self, data_type: str, scalping_mode: bool = False) -> int:
