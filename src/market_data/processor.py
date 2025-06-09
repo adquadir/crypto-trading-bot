@@ -86,7 +86,7 @@ class MarketDataProcessor:
                 timeframes['15m'] = self._resample_dataframe(df, '15T')
             except Exception as e:
                 logger.error(f"Error creating timeframes: {e}")
-            return {}
+                return {}  # Return empty dict if timeframes creation fails
             
             # Calculate indicators for each timeframe
             tf_indicators = {}

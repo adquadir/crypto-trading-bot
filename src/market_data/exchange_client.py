@@ -166,7 +166,8 @@ class ExchangeClient:
         self._shutdown_event = asyncio.Event()
         self.session = None
         self.health_check_task = None
-        self.ws_connections = {}
+        self.ws_clients = {}  # Store WebSocket clients per symbol
+        self.ws_last_message = {}  # Track last message time per symbol
         self.cache = CacheManager()
         self._stale_data_alerts = {}  # Track stale data alerts
         self._alert_threshold = 3  # Number of consecutive stale data occurrences before alert
@@ -175,9 +176,7 @@ class ExchangeClient:
         self.ws_base_url = "wss://testnet.binance.vision/ws" if testnet else "wss://stream.binance.com:9443/ws"
 
         # Initialize WebSocket-related attributes
-        self.ws_clients = {}
         self.ws_subscriptions = {}
-        self.ws_last_message = {}
         self.cache_timestamps = {}
 
         # Initialize logger
@@ -906,84 +905,40 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error updating data freshness for {symbol} {data_type}: {str(e)}")
             
-    def _get_cached_data(self, key: str, max_age: int) -> Optional[Dict]:
-        """Get cached data if not expired.
-        
-        Args:
-            key: Cache key
-            max_age: Maximum age in seconds
-            
-        Returns:
-            Optional[Dict]: Cached data or None if expired
-        """
+    def _get_cached_data(self, key: str) -> Optional[Dict]:
+        """Get data from cache."""
+        return self.cache.get(key)
+
+    def _cache_data(self, key: str, data: Dict, ttl: int = 60):
+        """Cache data with TTL."""
+        self.cache.set(key, data, ttl)
+
+    async def get_market_data(self, symbol: str) -> Dict[str, Any]:
+        """Get market data for a symbol."""
         try:
-            if key not in self.cache:
-                return None
-                
-            data = self.cache[key]
-            if not data or 'timestamp' not in data:
-                return None
-                
-            age = time.time() - data['timestamp']
-            if age > max_age:
-                return None
-                
-            return data
+            # Get orderbook
+            orderbook = await self.get_orderbook(symbol)
             
-        except Exception as e:
-            logger.error(f"Error getting cached data: {str(e)}")
-            return None
+            # Get 24h ticker
+            ticker = await self.get_ticker_24h(symbol)
             
-    def _cache_data(self, key: str, data: Dict) -> None:
-        """Cache data with timestamp.
-        
-        Args:
-            key: Cache key
-            data: Data to cache
-        """
-        try:
-            data['timestamp'] = time.time()
-            self.cache[key] = data
+            # Get recent trades
+            trades = await self.get_recent_trades(symbol)
             
-            # Update data freshness
-            symbol = key.split('_')[0]
-            data_type = key.split('_')[1]
-            self._update_data_freshness(symbol, data_type)
+            # Get klines
+            klines = await self.get_klines(symbol)
             
-        except Exception as e:
-            logger.error(f"Error caching data: {str(e)}")
-            
-    def get_market_data(self, symbol: str) -> Dict[str, Any]:
-        """Get all market data for a symbol.
-        
-        Args:
-            symbol: Trading pair symbol
-            
-        Returns:
-            Dict[str, Any]: Market data including OHLCV, orderbook, ticker, etc.
-        """
-        try:
-            data = {
-                'symbol': symbol,
-                'timestamp': int(time.time() * 1000),
-                'ohlcv': self.get_ohlcv(symbol),
-                'orderbook': self.get_orderbook(symbol),
-                'ticker': self.get_ticker_24h(symbol),
-                'trades': self.get_recent_trades(symbol),
-                'open_interest': self.get_open_interest(symbol),
-                'funding_rate': self.get_funding_rate(symbol),
-                'volatility': self.get_volatility_metrics(symbol),
-                'data_freshness': self.get_data_freshness(symbol)
+            # Combine all data
+            market_data = {
+                'orderbook': orderbook,
+                'ticker': ticker,
+                'trades': trades,
+                'klines': klines
             }
             
-            # Add open interest history if available
-            if symbol in self.open_interest_history:
-                data['open_interest_history'] = list(self.open_interest_history[symbol])
-            
-            return data
-            
+            return market_data
         except Exception as e:
-            logger.error(f"Error getting market data for {symbol}: {str(e)}")
+            logger.error(f"Error getting market data for {symbol}: {e}")
             return {}
 
     async def get_all_symbols(self):
@@ -993,9 +948,10 @@ class ExchangeClient:
     async def initialize(self, symbols: Optional[List[str]] = None):
         """Initialize the exchange client with optional symbols."""
         self.symbols = symbols or []  # Update self.symbols with the provided list
+        self.running = True  # Set running to True to start the WebSocket lifecycle
         # Initialize WebSocket clients for each symbol
         for symbol in self.symbols:
-            await self._initialize_websocket(symbol)
+            await self._setup_symbol_websocket(symbol)
         logger.info(f"Initialized exchange client with {len(self.symbols)} symbols.")
 
     async def _handle_kline_update(self, symbol: str, kline_data: dict):
@@ -1007,8 +963,9 @@ class ExchangeClient:
     async def _check_proxy_health(self):
         """Check the health of the current proxy."""
         try:
+            proxy_url = f"http://{self.proxy_host}:{self.proxy_port}" if self.proxy_host and self.proxy_port else None
             async with aiohttp.ClientSession() as session:
-                async with session.get('https://api.binance.com/api/v3/ping', proxy=self.proxy) as response:
+                async with session.get('https://api.binance.com/api/v3/ping', proxy=proxy_url) as response:
                     return response.status == 200
         except Exception as e:
             logger.error(f"Error checking proxy health: {e}")
@@ -1033,17 +990,29 @@ class ExchangeClient:
         # Placeholder for proxy selection logic
         return "http://example-proxy.com:8080"
 
-    async def _test_proxy_connection(self, proxy: str):
+    async def _test_proxy_connection(self, proxy: str = None):
         """Test the connection to a proxy."""
         try:
+            proxy_url = proxy or f"http://{self.proxy_host}:{self.proxy_port}" if self.proxy_host and self.proxy_port else None
             async with aiohttp.ClientSession() as session:
-                async with session.get('https://api.binance.com/api/v3/ping', proxy=proxy) as response:
+                async with session.get('https://api.binance.com/api/v3/ping', proxy=proxy_url) as response:
                     return response.status == 200
         except Exception as e:
             logger.error(f"Error testing proxy connection: {e}")
             return False
 
-    def _get_cache_ttl(self, data_type: str) -> int:
+    def _get_cache_ttl(self, data_type: str, scalping_mode: bool = False) -> int:
         """Get the cache TTL for a specific data type."""
         # Placeholder for cache TTL logic
         return 60  # Default TTL in seconds
+
+    async def _setup_symbol_websocket(self, symbol: str):
+        """Set up a WebSocket connection for a specific symbol."""
+        try:
+            ws_client = MarketDataWebSocket(exchange_client=self, symbols=[symbol])
+            await ws_client.connect()
+            self.ws_clients[symbol] = ws_client
+            logger.info(f"WebSocket set up for {symbol}")
+        except Exception as e:
+            logger.error(f"Error setting up WebSocket for {symbol}: {e}")
+            raise
