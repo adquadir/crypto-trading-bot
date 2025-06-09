@@ -180,44 +180,54 @@ async def test_proxy_connection_failure(exchange_client, mock_binance_client):
 
 @pytest.mark.asyncio
 async def test_exchange_client_initialization():
-    """Test exchange client initialization."""
+    """Test ExchangeClient initialization with configuration."""
     config = {
         'api_key': 'test_api_key',
         'api_secret': 'test_api_secret',
-        'base_url': 'https://testnet.binance.vision/api',
-        'ws_url': 'wss://testnet.binance.vision/ws/stream',
+        'base_url': 'https://api.binance.com',
+        'ws_url': 'wss://stream.binance.com:9443',
         'testnet': True,
         'symbols': ['BTCUSDT', 'ETHUSDT'],
-        'scalping_mode': False
+        'discovery_mode': False,
+        'discovery_interval': 3600,
+        'cache_ttl': 60
     }
+    
     client = ExchangeClient(config=config)
+    
     assert client.api_key == 'test_api_key'
     assert client.api_secret == 'test_api_secret'
+    assert client.base_url == 'https://api.binance.com'
+    assert client.ws_url == 'wss://stream.binance.com:9443'
     assert client.testnet is True
-    assert 'BTCUSDT' in client.symbols
-    assert 'ETHUSDT' in client.symbols
+    assert client.symbols == ['BTCUSDT', 'ETHUSDT']
+    assert client.discovery_mode is False
+    assert client.discovery_interval == 3600
+    assert client.cache_ttl == 60
+    assert client.proxies is None
 
 @pytest.mark.asyncio
 async def test_exchange_client_with_proxy():
-    """Test exchange client with proxy configuration."""
+    """Test ExchangeClient initialization with proxy configuration."""
     config = {
         'api_key': 'test_api_key',
         'api_secret': 'test_api_secret',
-        'base_url': 'https://testnet.binance.vision/api',
-        'ws_url': 'wss://testnet.binance.vision/ws/stream',
+        'base_url': 'https://api.binance.com',
+        'ws_url': 'wss://stream.binance.com:9443',
         'testnet': True,
         'symbols': ['BTCUSDT'],
         'proxy': {
-            'host': 'test.proxy.com',
-            'port': '10001',
-            'username': 'test_user',
-            'password': 'test_pass'
-        },
-        'proxy_ports': ['10001', '10002'],
-        'failover_ports': ['10001', '10002', '10003']
+            'url': 'http://proxy.example.com:8080',
+            'username': 'proxy_user',
+            'password': 'proxy_pass'
+        }
     }
+    
     client = ExchangeClient(config=config)
-    assert client.proxy == 'http://test.proxy.com:10001'
-    assert isinstance(client.proxy_auth, aiohttp.BasicAuth)
-    assert client.proxy_auth.login == 'test_user'
-    assert client.proxy_auth.password == 'test_pass'
+    
+    assert client.proxy_config == config['proxy']
+    assert client.proxies is not None
+    assert 'http' in client.proxies
+    assert 'https' in client.proxies
+    assert client.proxies['http'] == 'http://proxy_user:proxy_pass@proxy.example.com:8080'
+    assert client.proxies['https'] == 'http://proxy_user:proxy_pass@proxy.example.com:8080'

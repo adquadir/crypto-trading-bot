@@ -39,10 +39,11 @@ class ProxyMetrics:
     successful_requests: int = 0
 
 class CacheManager:
-    def __init__(self, cache_dir: str = "cache"):
+    def __init__(self, cache_dir: str = "cache", ttl: int = 60):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
         self.memory_cache: Dict[str, CacheEntry] = {}
+        self.ttl = ttl
         
     def get(self, key: str, max_age: int = 300) -> Optional[any]:
         """Get data from cache if not expired."""
@@ -147,42 +148,58 @@ def rate_limit(limit: int = 10, period: float = 1.0):
     return decorator
 
 class ExchangeClient:
+    """Client for interacting with cryptocurrency exchange APIs."""
+    
     def __init__(self, config: Dict[str, Any]):
-        """Initialize the exchange client."""
+        """Initialize the exchange client.
+        
+        Args:
+            config: Configuration dictionary containing:
+                - api_key: API key for authentication
+                - api_secret: API secret for authentication
+                - base_url: Base URL for REST API
+                - ws_url: Base URL for WebSocket API
+                - testnet: Whether to use testnet
+                - proxy: Optional proxy configuration dict with:
+                    - url: Proxy URL
+                    - username: Optional proxy username
+                    - password: Optional proxy password
+                - symbols: List of trading symbols to monitor
+                - discovery_mode: Whether to use symbol discovery
+                - discovery_interval: Interval for symbol discovery in seconds
+                - cache_ttl: Cache TTL in seconds
+        """
         self.config = config
-        self.api_key = config.get('api_key')
-        self.api_secret = config.get('api_secret')
+        self.api_key = config['api_key']
+        self.api_secret = config['api_secret']
         self.base_url = config['base_url']
         self.ws_url = config['ws_url']
+        self.testnet = config.get('testnet', False)
+        self.proxy_config = config.get('proxy')
+        self.symbols = config.get('symbols', [])
+        self.discovery_mode = config.get('discovery_mode', False)
+        self.discovery_interval = config.get('discovery_interval', 3600)
+        self.cache_ttl = config.get('cache_ttl', 60)
         
-        # Proxy configuration
-        self.proxy = None
-        if config.get('proxy'):
-            proxy_config = config['proxy']
-            self.proxy = f"http://{proxy_config['host']}:{proxy_config['port']}"
-            if 'username' in proxy_config and 'password' in proxy_config:
-                self.proxy_auth = aiohttp.BasicAuth(
-                    proxy_config['username'],
-                    proxy_config['password']
-                )
-        
-        self.session = None
-        self.ws_clients = {}
+        # Initialize attributes
         self.running = False
-        self.health_check_task = None
-        self.funding_rates_task = None
-        self.cache = CacheManager()
-        self.cache_timestamps = {}
-        self.symbols = config.get('symbols', ['BTCUSDT'])
+        self.ws_clients = {}
+        self.symbol_discovery = None
+        self.cache = CacheManager(ttl=self.cache_ttl)
+        
+        # Setup proxy if configured
+        self.proxies = None
+        if self.proxy_config:
+            self._setup_proxy()
+        
+        # Initialize HTTP client
+        self._init_client()
+        
+        # Initialize WebSocket manager
+        self._init_ws_manager()
+        
         self.logger = logging.getLogger(__name__)
         self.symbol_discovery = None  # Initialize as None, will be set up when needed
-        self.testnet = config.get('testnet', False)
-        
-        # Initialize WebSocket-related attributes
-        self.ws_subscriptions = {}
-        self.ws_last_message = {}
-        self._stale_data_alerts = {}
-        self._alert_threshold = 3
         self.scalping_mode = config.get('scalping_mode', False)
         
         # Initialize proxy rotation
@@ -195,21 +212,6 @@ class ExchangeClient:
         self.proxy_list = config.get('proxy_ports', os.getenv('PROXY_LIST', '10001,10002,10003').split(','))
         self.failover_ports = config.get('failover_ports', os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','))
         self.current_port_index = 0
-        
-        # Initialize client
-        self.proxies = None  # Ensure this is set before _init_client
-        self._init_client(self.api_key, self.api_secret)
-        
-        # Cache TTLs (in seconds)
-        self.cache_ttls = {
-            'ohlcv': 5 if self.scalping_mode else 300,  # 5s or 5min
-            'orderbook': 2 if self.scalping_mode else 60,  # 2s or 1min
-            'ticker': 2 if self.scalping_mode else 60,  # 2s or 1min
-            'trades': 2 if self.scalping_mode else 60,  # 2s or 1min
-            'open_interest': 5 if self.scalping_mode else 300,  # 5s or 5min
-            'funding_rate': 300 if self.scalping_mode else 3600,  # 5min or 1h
-            'volatility': 300 if self.scalping_mode else 3600  # 5min or 1h
-        }
         
         # Initialize data structures
         self.open_interest_history = {}
@@ -239,8 +241,8 @@ class ExchangeClient:
         for port in self.failover_ports:
             self.proxy_metrics[port] = ProxyMetrics()
 
-    def _init_client(self, api_key: str, api_secret: str):
-        self.client = Client(api_key, api_secret, testnet=self.testnet, requests_params={"proxies": self.proxies})
+    def _init_client(self):
+        self.client = Client(self.api_key, self.api_secret, testnet=self.testnet, requests_params={"proxies": self.proxies})
 
     async def test_proxy_connection(self):
         """Test and log proxy connection details."""
@@ -654,10 +656,7 @@ class ExchangeClient:
             self.proxy_port = best_port
             self.proxy_config["port"] = best_port
             self._setup_proxy()
-            self._init_client(
-                os.getenv("BINANCE_API_KEY"),
-                os.getenv("BINANCE_API_SECRET")
-            )
+            self._init_client()
             await self._reinitialize_websockets()
 
     async def _reinitialize_websockets(self):

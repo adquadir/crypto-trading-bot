@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -378,17 +378,60 @@ class SignalTracker:
         }
 
 class SymbolDiscovery:
-    def __init__(self, exchange_client: ExchangeClient, scalping_mode: bool = False):
-        self.exchange_client = exchange_client
+    """Discovers and manages trading symbols from the exchange."""
+    
+    def __init__(self, exchange_client_or_config: Union[ExchangeClient, Dict[str, Any]]):
+        """Initialize symbol discovery.
+        
+        Args:
+            exchange_client_or_config: Either an ExchangeClient instance or a configuration dictionary.
+                If ExchangeClient: Used directly for API calls
+                If Dict: Configuration dictionary containing:
+                    - update_interval: Interval between symbol updates in hours (default: 1.0)
+                    - min_volume: Minimum 24h volume in USD (default: 1000000)
+                    - min_price: Minimum price in USD (default: 0.1)
+                    - max_price: Maximum price in USD (default: 100000)
+                    - min_market_cap: Minimum market cap in USD (default: 10000000)
+                    - excluded_symbols: List of symbols to exclude
+                    - included_symbols: List of symbols to include (overrides other filters)
+        """
+        if isinstance(exchange_client_or_config, ExchangeClient):
+            self.exchange_client = exchange_client_or_config
+            self.config = exchange_client_or_config.config
+        else:
+            self.config = exchange_client_or_config
+            self.exchange_client = None  # Will be set during initialize()
+        
+        self.logger = logging.getLogger(__name__)
+        
+        # Parse update interval from config or environment
+        update_interval = self.config.get('update_interval')
+        if update_interval is None:
+            update_interval = float(os.getenv('UPDATE_INTERVAL', '1.0'))
+        self.update_interval = float(update_interval)  # Convert to float to handle both int and float strings
+        
+        # Initialize filters
+        self.min_volume = self.config.get('min_volume', float(os.getenv('MIN_VOLUME', '1000000')))
+        self.min_price = self.config.get('min_price', float(os.getenv('MIN_PRICE', '0.1')))
+        self.max_price = self.config.get('max_price', float(os.getenv('MAX_PRICE', '100000')))
+        self.min_market_cap = self.config.get('min_market_cap', float(os.getenv('MIN_MARKET_CAP', '10000000')))
+        
+        # Initialize symbol lists
+        self.excluded_symbols = set(self.config.get('excluded_symbols', []))
+        self.included_symbols = set(self.config.get('included_symbols', []))
+        
+        # Initialize state
+        self.running = False
+        self.last_update_time = datetime.now()
+        self.symbols = set()
+        
         self.signal_generator = SignalGenerator()
         self.opportunities: Dict[str, TradingOpportunity] = {}
-        self.last_update = {}
-        self.update_interval = float(os.getenv('UPDATE_INTERVAL', '1.0'))  # Use UPDATE_INTERVAL from .env
         self._update_task = None
         self._processing_lock = asyncio.Lock()  # Add lock for concurrent processing
         self._discovery_lock = asyncio.Lock()
         self.cache = {}  # Simple dictionary for caching
-        self.cache_ttl = 5 if scalping_mode else 300  # 5 seconds for scalping, 5 minutes for normal mode
+        self.cache_ttl = 5 if self.config.get('scalping_mode', False) else 300  # 5 seconds for scalping, 5 minutes for normal mode
         logger.info("SymbolDiscovery initialized with caching")
         
         # Load configuration from environment
@@ -403,7 +446,6 @@ class SymbolDiscovery:
         self.max_leverage = float(os.getenv('MAX_LEVERAGE', '20.0'))
         
         # Advanced filtering parameters
-        self.min_market_cap = float(os.getenv('MIN_MARKET_CAP', '10000000'))
         self.max_spread = float(os.getenv('MAX_SPREAD', '0.002'))
         self.min_liquidity = float(os.getenv('MIN_LIQUIDITY', '500000'))
         self.max_correlation = float(os.getenv('MAX_CORRELATION', '0.7'))
@@ -431,14 +473,14 @@ class SymbolDiscovery:
         logger.info(f"min_open_interest: {self.min_open_interest}")
         logger.info(f"max_symbols: {self.max_symbols}")
         logger.info(f"cache_ttl: {self.cache_ttl} seconds")
-        logger.info(f"scalping_mode: {scalping_mode}")
+        logger.info(f"scalping_mode: {self.config.get('scalping_mode', False)}")
         
         # Cache configuration
         self.cache_dir = Path('cache/signals')
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.signal_cache: Dict[str, CachedSignal] = {}
         self.cache_duration = int(os.getenv('SYMBOL_CACHE_DURATION', '3600'))  # Use SYMBOL_CACHE_DURATION from .env
-        
+
     async def start(self):
         """Start the symbol discovery process."""
         self._update_task = asyncio.create_task(self._update_loop())
@@ -459,8 +501,8 @@ class SymbolDiscovery:
         while True:
             try:
                 await self.discover_symbols()
-                self.last_update = datetime.now()
-                logger.info(f"Symbol list updated at {self.last_update}")
+                self.last_update_time = datetime.now()
+                logger.info(f"Symbol list updated at {self.last_update_time}")
                 await asyncio.sleep(self.update_interval)
             except Exception as e:
                 logger.error(f"Error in symbol update loop: {e}")
@@ -1442,7 +1484,7 @@ class SymbolDiscovery:
             recent_vol_std = np.std(volumes[-5:])
             if recent_vol_std > vol_mean * 2.0:
                 logger.warning(f"Sudden volume spike detected: {recent_vol_std/vol_mean:.2f}x average")
-            return False
+                return False
 
             # 2. Check for volume trend consistency
             vol_trend = np.polyfit(range(len(volumes[-20:])), volumes[-20:], 1)[0]
@@ -1466,24 +1508,22 @@ class SymbolDiscovery:
                 if vol_cv > 2.0:  # Allow higher coefficient of variation
                     logger.warning(f"High volume variation: {vol_cv:.2f}")
                     return False
-                
-                return True
-                else:
+            else:
                 # Standard checks for unconfirmed signals
                 if vol_ma5 < vol_ma20 * 0.2:  # Require at least 20% of average volume
                     logger.debug(f"Low recent volume: {vol_ma5/vol_ma20:.2%} of average")
-                return False
+                    return False
                 
                 # Check for volume consistency
                 if vol_cv > 1.5:  # Standard threshold for variation
                     logger.debug(f"High volume variation: {vol_cv:.2f}")
-                return False
-                
-                return True
+                    return False
+            
+            return True
                 
         except Exception as e:
             logger.error(f"Error checking volume trend: {e}")
-                return False
+            return False
                 
     async def initialize(self) -> None:
         """Initialize the symbol discovery process."""
