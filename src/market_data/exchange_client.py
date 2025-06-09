@@ -222,18 +222,22 @@ class ExchangeClient:
         self.open_interest_history = {}
         self.history_length = 24
 
-    def _setup_proxy(self) -> None:
-        """Set up proxy configuration for the client."""
+    def _setup_proxy(self):
+        """Set up proxy configuration."""
         try:
-            proxy_url = self.proxy_config['http']
+            # Get proxy URL from config
+            proxy_url = self.proxy_config.get('url')
             if not proxy_url:
+                logger.warning("No proxy URL configured")
+                self.proxies = None
                 return
 
             # Parse proxy URL
             parsed = urlparse(proxy_url)
             if not all([parsed.scheme, parsed.hostname, parsed.port]):
                 logger.error("Invalid proxy URL format")
-            return
+                self.proxies = None
+                return
 
             # Build proxy URL with authentication if provided
             if self.proxy_config['username'] and self.proxy_config['password']:
@@ -241,7 +245,7 @@ class ExchangeClient:
                 proxy_url = f"{parsed.scheme}://{auth}@{parsed.hostname}:{parsed.port}"
 
             # Set up proxies for both HTTP and HTTPS
-        self.proxies = {
+            self.proxies = {
                 'http': proxy_url,
                 'https': proxy_url
             }
