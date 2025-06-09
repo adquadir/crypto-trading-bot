@@ -15,7 +15,6 @@ from typing import Tuple
 import time
 from ..strategy.dynamic_config import strategy_config
 from ..risk.risk_manager import RiskManager
-from ..database.models import TradingOpportunity
 from ..database.database import Database
 from dotenv import load_dotenv
 

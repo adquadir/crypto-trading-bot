@@ -135,7 +135,7 @@ async def startup_event():
         
         # Initialize strategy profiles
         strategy_config.load_strategy_profiles()
-        strategy_config.switch_profile('moderate')
+        strategy_config.set_profile('moderate')
         
         # Initialize symbol discovery
         await symbol_discovery.initialize()

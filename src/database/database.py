@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, inspect, text, MetaData
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, scoped_session
 import os
 from dotenv import load_dotenv
 from .models import Base, Strategy # Import Base and Strategy
@@ -27,8 +27,10 @@ engine = create_engine(DATABASE_URL)
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create Base and MetaData
-Base = declarative_base()
+# Create scoped session
+db_session = scoped_session(SessionLocal)
+
+# Create metadata
 metadata = MetaData()
 
 class Database:
@@ -37,14 +39,16 @@ class Database:
     def __init__(self):
         self.engine = engine
         self.SessionLocal = SessionLocal
-        self.Base = Base
         self.metadata = metadata
     
-    async def init_db(self) -> None:
+    def get_session(self):
+        return self.SessionLocal()
+    
+    def init_db(self) -> None:
         """Initialize the database and create tables."""
         try:
             # Create tables
-            self.Base.metadata.create_all(bind=self.engine)
+            Base.metadata.create_all(bind=self.engine)
             logger.info("Database initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing database: {str(e)}")
@@ -77,6 +81,15 @@ class Database:
             logger.error(f"Database connection error: {str(e)}")
             return False
 
+    def close(self):
+        """Close the database connection."""
+        try:
+            self.engine.dispose()
+            logger.info("Database connection closed")
+        except Exception as e:
+            logger.error(f"Error closing database connection: {e}")
+            raise
+
 # Initialize database
 db = Database()
 
@@ -94,7 +107,7 @@ def update_db_schema():
         logger.info(f"Existing tables: {existing_tables}")
         
         # Create any missing tables
-        Base.metadata.create_all(bind=engine)
+        self.metadata.create_all(bind=engine)
         
         # Check for missing columns in trading_signals
         if 'trading_signals' in existing_tables:
