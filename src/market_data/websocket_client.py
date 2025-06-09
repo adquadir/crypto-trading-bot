@@ -10,10 +10,13 @@ logger = logging.getLogger(__name__)
 
 class MarketDataWebSocket:
     def __init__(self, exchange_client, symbols: List[str], cache_ttl: int = 5):
+        """Initialize the WebSocket client."""
         self.exchange_client = exchange_client
         self.symbols = symbols
-        self.cache_ttl = cache_ttl  # TTL in seconds
-        self.ws_url = "wss://stream.binance.com:9443/ws"
+        self.cache_ttl = cache_ttl
+        self.connection = None
+        self.running = False
+        self.ws_url = "wss://stream.binance.com:9443/ws/stream"  # Updated WebSocket URL
         self.connections: Dict[str, websockets.WebSocketClientProtocol] = {}
         self.data_cache: Dict[str, Dict] = {}
         self.last_update: Dict[str, float] = {}
@@ -22,7 +25,6 @@ class MarketDataWebSocket:
             'trade': [],
             'depth': []
         }
-        self.running = False
 
     async def connect(self):
         """Connect to the WebSocket stream."""
@@ -30,8 +32,20 @@ class MarketDataWebSocket:
         retry_count = 0
         while retry_count < max_retries:
             try:
-                self.connection = await websockets.connect(self.ws_url)
-                logger.info(f"Connected to WebSocket stream: {self.ws_url}")
+                # Create streams for each symbol
+                streams = []
+                for symbol in self.symbols:
+                    symbol_lower = symbol.lower()
+                    streams.extend([
+                        f"{symbol_lower}@kline_1m",  # 1-minute klines
+                        f"{symbol_lower}@trade",     # Trades
+                        f"{symbol_lower}@depth20@100ms"  # Order book (20 levels)
+                    ])
+                
+                # Connect to combined stream
+                stream_url = f"{self.ws_url}?streams={'/'.join(streams)}"
+                self.connection = await websockets.connect(stream_url)
+                logger.info(f"Connected to WebSocket stream: {stream_url}")
                 return
             except websockets.exceptions.InvalidStatusCode as e:
                 if e.status_code == 451:
