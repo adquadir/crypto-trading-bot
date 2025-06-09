@@ -2,13 +2,14 @@
 from typing import Dict, List, Optional
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 import numpy as np
 import json
 from pathlib import Path
 import time
+import pandas as pd
 
 from src.market_data.exchange_client import ExchangeClient
 from src.market_data.processor import MarketDataProcessor
@@ -21,6 +22,10 @@ from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
 from src.signals.signal_generator import SignalGenerator
 from src.utils.config import load_config
 from src.market_data.websocket_client import MarketDataWebSocket
+from src.models import Strategy as StrategyModel
+from src.database.database import Database
+from src.risk.risk_manager import RiskManager
+from src.strategy.dynamic_config import strategy_config
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +184,7 @@ class TradingBot:
             logger.info("Starting trading bot...")
             
             # Initialize components
-            await self.exchange_client.initialize([])
+            await self.exchange_client.initialize()
             await self.ws_manager.initialize(self.exchange_client.symbols)
             
             # Start WebSocket manager
@@ -401,24 +406,24 @@ class TradingBot:
     async def stop(self):
         """Stop the trading bot."""
         try:
-        logger.info("Stopping trading bot...")
+            logger.info("Stopping trading bot...")
             self.running = False
-            
+
             # Cancel background tasks
             if hasattr(self, 'health_check_task'):
                 self.health_check_task.cancel()
             if hasattr(self, 'funding_rates_task'):
                 self.funding_rates_task.cancel()
-            
+
             # Stop WebSocket manager
             if self.ws_manager:
                 await self.ws_manager.close()
-            
+
             # Stop exchange client
             if self.exchange_client:
                 await self.exchange_client.shutdown()
-            
-        logger.info("Trading bot stopped")
+
+            logger.info("Trading bot stopped")
         except Exception as e:
             logger.error(f"Error stopping trading bot: {e}")
             raise

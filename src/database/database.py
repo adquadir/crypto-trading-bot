@@ -1,9 +1,9 @@
-from sqlalchemy import create_engine, inspect, text, MetaData
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
+from sqlalchemy.ext.declarative import declarative_base
 import os
 from dotenv import load_dotenv
-from .models import Base, Strategy # Import Base and Strategy
+from src.models import Base, Strategy # Import Base and Strategy
 import logging
 from contextlib import contextmanager
 from typing import Generator, Optional
@@ -30,16 +30,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Create scoped session
 db_session = scoped_session(SessionLocal)
 
-# Create metadata
-metadata = MetaData()
-
 class Database:
     """Database management class for the trading bot."""
     
     def __init__(self):
         self.engine = engine
         self.SessionLocal = SessionLocal
-        self.metadata = metadata
     
     def get_session(self):
         return self.SessionLocal()
@@ -47,7 +43,7 @@ class Database:
     def init_db(self) -> None:
         """Initialize the database and create tables."""
         try:
-            # Create tables
+            # Create tables using the imported Base
             Base.metadata.create_all(bind=self.engine)
             logger.info("Database initialized successfully")
         except Exception as e:
@@ -89,6 +85,14 @@ class Database:
         except Exception as e:
             logger.error(f"Error closing database connection: {e}")
             raise
+
+    def get_strategy(self, strategy_id: int):
+        with self.get_db() as db:
+            return db.query(Strategy).filter(Strategy.id == strategy_id).first()
+    
+    def get_all_strategies(self):
+        with self.get_db() as db:
+            return db.query(Strategy).all()
 
 # Initialize database
 db = Database()

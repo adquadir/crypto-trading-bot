@@ -1,6 +1,8 @@
+import logging
 from typing import Optional, Dict
 import pandas as pd
-from log import logger
+
+logger = logging.getLogger(__name__)
 
 class CandleClusterDetector:
     def detect(self, df: pd.DataFrame) -> Optional[Dict]:

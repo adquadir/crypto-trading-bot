@@ -10,10 +10,16 @@ import traceback
 import os
 from dotenv import load_dotenv
 from src.market_data.exchange_client import ExchangeClient
-from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
+from src.market_data.symbol_discovery import SymbolDiscovery
+from src.models.trading import TradingOpportunity
 from src.signals.signal_generator import SignalGenerator
 from src.config import EXCHANGE_CONFIG
-from src.database.models import Trade, TradingSignal, Strategy, PerformanceMetrics
+from src.models import (
+    Trade,
+    TradingSignal,
+    Strategy,
+    PerformanceMetrics
+)
 from src.database.database import SessionLocal, Database, init_db
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -141,8 +147,8 @@ async def startup_event():
         await symbol_discovery.initialize()
         symbols = await symbol_discovery.get_symbols()
         
-        # Initialize exchange client with symbols
-        await exchange_client.initialize(symbols)
+        # Initialize exchange client
+        await exchange_client.initialize()
         
         # Initialize WebSocket manager
         await ws_client.initialize(symbols)
