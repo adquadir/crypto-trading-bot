@@ -821,7 +821,7 @@ class ExchangeClient:
                 returns = np.diff(closes) / closes[:-1]
                 vol = np.std(returns) * np.sqrt(24 * 60)  # Annualized
                 self.cache.set(f"{symbol}_volatility", vol, max_age=300)
-            except Exception as e:
+        except Exception as e:
             logger.error(f"Error updating volatility for {symbol}: {e}")
 
     async def _fetch_ohlcv_rest(self, symbol, timeframe):
@@ -990,22 +990,22 @@ class ExchangeClient:
         """Shutdown the exchange client."""
         try:
             self.running = False
-            
+
             # Cancel background tasks
             if hasattr(self, 'health_check_task'):
-            self.health_check_task.cancel()
+                self.health_check_task.cancel()
             if hasattr(self, 'funding_rate_task'):
                 self.funding_rate_task.cancel()
-            
+
             # Close all WebSocket connections
             for symbol, ws_client in self.ws_clients.items():
                 try:
                     await ws_client.close()
-            except Exception as e:
+                except Exception as e:
                     logger.error(f"Error closing WebSocket for {symbol}: {e}")
-            
+
             self.ws_clients.clear()
-        logger.info("Exchange client shutdown complete")
+            logger.info("Exchange client shutdown complete")
         except Exception as e:
             logger.error(f"Error during exchange client shutdown: {e}")
             raise
