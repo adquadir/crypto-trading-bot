@@ -7,8 +7,10 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
+from sqlalchemy.exc import SQLAlchemyError
 
-from src.models import Base, Strategy
+from .base import Base
+from src.models.strategy import Strategy
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,18 +36,23 @@ db_session = scoped_session(SessionLocal)
 
 
 class Database:
-    """Database management class for the trading bot."""
+    _instance = None
+    _initialized = False
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(Database, cls).__new__(cls)
+        return cls._instance
 
     def __init__(self):
-        self.engine = engine
-        self.SessionLocal = SessionLocal
+        if not self._initialized:
+            self.engine = engine
+            self.SessionLocal = SessionLocal
+            self._setup_database()
+            self._initialized = True
 
-    def get_session(self):
-        """Get a new database session."""
-        return self.SessionLocal()
-
-    def init_db(self) -> None:
-        """Initialize the database and create tables."""
+    def _setup_database(self):
+        """Set up database connection and create tables."""
         try:
             # Create tables using the imported Base
             Base.metadata.create_all(bind=self.engine)
@@ -54,32 +61,9 @@ class Database:
             logger.error(f"Error initializing database: {str(e)}")
             raise
 
-    @contextmanager
-    def get_db(self) -> Generator[Session, None, None]:
-        """Get a database session.
-
-        Yields:
-            Session: Database session
-        """
-        db = self.SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    async def check_connection(self) -> bool:
-        """Check database connection.
-
-        Returns:
-            bool: True if connection is successful, False otherwise
-        """
-        try:
-            with self.get_db() as db:
-                db.execute("SELECT 1")
-            return True
-        except Exception as e:
-            logger.error(f"Database connection error: {str(e)}")
-            return False
+    def get_session(self):
+        """Get a new database session."""
+        return self.SessionLocal()
 
     def close(self):
         """Close the database connection."""
@@ -92,13 +76,67 @@ class Database:
 
     def get_strategy(self, strategy_id: int):
         """Get a strategy by ID."""
-        with self.get_db() as db:
+        with self.get_session() as db:
             return db.query(Strategy).filter(Strategy.id == strategy_id).first()
 
     def get_all_strategies(self):
         """Get all strategies."""
-        with self.get_db() as db:
+        with self.get_session() as db:
             return db.query(Strategy).all()
+
+    def add_initial_strategies(self):
+        """Add initial strategies to the database if they don't exist."""
+        try:
+            session = self.get_session()
+            
+            # Check if strategies already exist
+            if session.query(Strategy).count() > 0:
+                logger.info("Strategies already exist in database")
+                return
+            
+            # Add default strategies
+            strategies = [
+                Strategy(
+                    name="MACD",
+                    description="Moving Average Convergence Divergence Strategy",
+                    type="technical",
+                    parameters={
+                        "fast_period": 12,
+                        "slow_period": 26,
+                        "signal_period": 9
+                    }
+                ),
+                Strategy(
+                    name="RSI",
+                    description="Relative Strength Index Strategy",
+                    type="technical",
+                    parameters={
+                        "period": 14,
+                        "overbought": 70,
+                        "oversold": 30
+                    }
+                ),
+                Strategy(
+                    name="Bollinger Bands",
+                    description="Bollinger Bands Strategy",
+                    type="technical",
+                    parameters={
+                        "period": 20,
+                        "std_dev": 2
+                    }
+                )
+            ]
+            
+            session.add_all(strategies)
+            session.commit()
+            logger.info("Added initial strategies to database")
+            
+        except SQLAlchemyError as e:
+            logger.error(f"Error adding initial strategies: {e}")
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
 
 # Initialize database

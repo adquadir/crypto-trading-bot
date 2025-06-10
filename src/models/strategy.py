@@ -6,7 +6,7 @@ import numpy as np
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, JSON
 from sqlalchemy.sql import func
-from src.database.database import Base
+from src.database.base import Base
 
 @dataclass
 class StrategyParameters:
@@ -48,98 +48,46 @@ class Strategy(Base):
         }
 
 class MACDStrategy(Strategy):
-    """Moving Average Convergence Divergence Strategy"""
+    """MACD Strategy implementation."""
     
-    def __init__(self, parameters: StrategyParameters):
-        super().__init__(parameters)
-        self.fast_period = parameters.parameters.get('fast_period', 12)
-        self.slow_period = parameters.parameters.get('slow_period', 26)
-        self.signal_period = parameters.parameters.get('signal_period', 9)
-    
-    def calculate_indicators(self, data: pd.DataFrame) -> Dict:
-        # Calculate MACD
-        exp1 = data['close'].ewm(span=self.fast_period, adjust=False).mean()
-        exp2 = data['close'].ewm(span=self.slow_period, adjust=False).mean()
-        macd = exp1 - exp2
-        signal = macd.ewm(span=self.signal_period, adjust=False).mean()
-        hist = macd - signal
-        
-        return {
-            'macd': macd,
-            'signal': signal,
-            'histogram': hist
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.name = "MACD"
+        self.type = "technical"
+        self.description = "Moving Average Convergence Divergence Strategy"
+        self.parameters = {
+            "fast_period": 12,
+            "slow_period": 26,
+            "signal_period": 9
         }
-    
-    def generate_signals(self, data: pd.DataFrame) -> Dict:
-        indicators = self.calculate_indicators(data)
-        
-        # Generate signals based on MACD crossover
-        signals = pd.DataFrame(index=data.index)
-        signals['signal'] = 0
-        signals.loc[indicators['macd'] > indicators['signal'], 'signal'] = 1
-        signals.loc[indicators['macd'] < indicators['signal'], 'signal'] = -1
-        
-        return {
-            'signals': signals,
-            'indicators': indicators
-        }
-    
-    def validate_parameters(self) -> bool:
-        return (
-            self.fast_period > 0 and
-            self.slow_period > self.fast_period and
-            self.signal_period > 0
-        )
 
 class RSIStrategy(Strategy):
-    """Relative Strength Index Strategy"""
+    """RSI Strategy implementation."""
     
-    def __init__(self, parameters: StrategyParameters):
-        super().__init__(parameters)
-        self.period = parameters.parameters.get('period', 14)
-        self.overbought = parameters.parameters.get('overbought', 70)
-        self.oversold = parameters.parameters.get('oversold', 30)
-    
-    def calculate_indicators(self, data: pd.DataFrame) -> Dict:
-        # Calculate RSI
-        delta = data['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=self.period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=self.period).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        
-        return {'rsi': rsi}
-    
-    def generate_signals(self, data: pd.DataFrame) -> Dict:
-        indicators = self.calculate_indicators(data)
-        
-        # Generate signals based on RSI levels
-        signals = pd.DataFrame(index=data.index)
-        signals['signal'] = 0
-        signals.loc[indicators['rsi'] < self.oversold, 'signal'] = 1
-        signals.loc[indicators['rsi'] > self.overbought, 'signal'] = -1
-        
-        return {
-            'signals': signals,
-            'indicators': indicators
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.name = "RSI"
+        self.type = "technical"
+        self.description = "Relative Strength Index Strategy"
+        self.parameters = {
+            "period": 14,
+            "overbought": 70,
+            "oversold": 30
         }
-    
-    def validate_parameters(self) -> bool:
-        return (
-            self.period > 0 and
-            self.overbought > 50 and
-            self.oversold < 50 and
-            self.overbought > self.oversold
-        )
 
 class BollingerBandsStrategy(Strategy):
-    """Bollinger Bands Strategy"""
+    """Bollinger Bands Strategy implementation."""
     
-    def __init__(self, parameters: StrategyParameters):
-        super().__init__(parameters)
-        self.period = parameters.parameters.get('period', 20)
-        self.std_dev = parameters.parameters.get('std_dev', 2)
-    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.name = "Bollinger Bands"
+        self.type = "technical"
+        self.description = "Bollinger Bands Strategy"
+        self.parameters = {
+            "period": 20,
+            "std_dev": 2
+        }
+
     def calculate_indicators(self, data: pd.DataFrame) -> Dict:
         # Calculate Bollinger Bands
         sma = data['close'].rolling(window=self.period).mean()
