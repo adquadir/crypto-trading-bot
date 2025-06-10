@@ -174,31 +174,41 @@ class TradingBot:
     async def _initialize_components(self):
         """Initialize all trading bot components."""
         try:
-            # Initialize exchange client
-            self.exchange_client = ExchangeClient(self.config)
+            # Initialize exchange client first
+            self.exchange_client = ExchangeClient()
             await self.exchange_client.initialize()
             
             # Initialize WebSocket manager
-            self.ws_manager = self.exchange_client.ws_manager
+            self.ws_manager = WebSocketManager(self.exchange_client)
+            await self.ws_manager.initialize()
             
             # Initialize symbol discovery
-            self.symbol_discovery = SymbolDiscovery(self.exchange_client, self.config)
+            self.symbol_discovery = SymbolDiscovery(self.exchange_client)
+            await self.symbol_discovery.initialize()
             
             # Initialize risk manager
             self.risk_manager = RiskManager(self.config)
+            await self.risk_manager.initialize()
             
             # Initialize strategy manager
             self.strategy_manager = StrategyManager(self.config)
+            await self.strategy_manager.initialize()
             
             # Initialize opportunity manager
             self.opportunity_manager = OpportunityManager(
                 self.exchange_client,
-                self.strategy_manager,
-                self.risk_manager
+                self.risk_manager,
+                self.strategy_manager
             )
+            await self.opportunity_manager.initialize()
             
             # Initialize signal generator
-            self.signal_generator = SignalGenerator(self.config)
+            self.signal_generator = SignalGenerator(
+                self.exchange_client,
+                self.strategy_manager,
+                self.opportunity_manager
+            )
+            await self.signal_generator.initialize()
             
             logger.info("All components initialized successfully")
             

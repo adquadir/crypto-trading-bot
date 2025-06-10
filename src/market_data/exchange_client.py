@@ -247,9 +247,9 @@ class ExchangeClient:
             self.proxies = None
 
     def _init_client(self):
-        """Initialize the CCXT client with configuration."""
+        """Initialize CCXT client with proper configuration."""
         try:
-            # Initialize CCXT client
+            # Configure CCXT client
             self.client = ccxt.binance({
                 'apiKey': self.api_key,
                 'secret': self.api_secret,
@@ -257,16 +257,19 @@ class ExchangeClient:
                 'options': {
                     'defaultType': 'future',
                     'adjustForTimeDifference': True,
-                    'testnet': self.testnet
+                    'recvWindow': 60000
                 }
             })
-            
-            # Set proxy if configured
+
+            # Set testnet if enabled
+            if self.testnet:
+                self.client.set_sandbox_mode(True)
+
+            # Configure proxy if available
             if self.proxies:
                 self.client.proxies = self.proxies
-                
+
             logger.info("CCXT client initialized successfully")
-            
         except Exception as e:
             logger.error(f"Error initializing CCXT client: {e}")
             raise
@@ -965,13 +968,16 @@ class ExchangeClient:
             # Initialize CCXT client
             self._init_client()
             
+            # Test connection
+            if not await self.check_connection():
+                # Try reconnecting with different proxy
+                await self._rotate_proxy()
+                if not await self.check_connection():
+                    raise Exception("Failed to connect to exchange after proxy rotation")
+            
             # Initialize WebSocket manager
             self._init_ws_manager()
             
-            # Test connection
-            if not await self.check_connection():
-                raise Exception("Failed to connect to exchange")
-                
             # Get available symbols
             symbols = await self.get_all_symbols()
             self.symbols = set(symbols)
@@ -1341,47 +1347,13 @@ class ExchangeClient:
             return []
 
     async def check_connection(self) -> bool:
-        """Check if the exchange connection is healthy."""
+        """Check connection to exchange."""
         try:
-            # Check REST API connection
-            try:
-                # Try to get server time as a lightweight check
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{self.base_url}/api/v3/time", proxy=self._get_next_proxy()) as response:
-                        if response.status != 200:
-                            logger.error(f"Exchange API health check failed: {response.status}")
-                            return False
-            except Exception as e:
-                logger.error(f"Exchange API connection check failed: {e}")
-                return False
-                
-            # Check WebSocket connection if initialized
-            if self.ws_manager:
-                if not self.ws_manager.is_connected():
-                    logger.error("WebSocket connection is not active")
-                    return False
-                    
-            # Check proxy health if using proxies
-            if self.proxies:
-                if not await self._test_proxy_connection():
-                    logger.error("Proxy connection check failed")
-                    return False
-                    
-            # Check rate limits
-            if hasattr(self, '_rate_limit_remaining') and self._rate_limit_remaining <= 0:
-                logger.warning("Rate limit exhausted")
-                return False
-                
-            # Check for recent errors
-            if hasattr(self, '_last_error_time'):
-                if (datetime.now() - self._last_error_time).total_seconds() < 60:
-                    logger.warning("Recent errors detected")
-                    return False
-                    
+            # Test connection with a simple API call
+            await asyncio.to_thread(self.client.ping)
             return True
-            
         except Exception as e:
-            logger.error(f"Error checking exchange connection: {e}")
+            logger.error(f"Exchange API connection check failed: {e}")
             return False
 
     async def reconnect(self) -> bool:
