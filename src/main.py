@@ -1,6 +1,8 @@
+#!/usr/bin/env python3
 import asyncio
 import logging
 from fastapi import FastAPI
+import uvicorn
 from src.api.routes import router
 from src.trading_bot import trading_bot
 
@@ -11,34 +13,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Create FastAPI app
 app = FastAPI(title="Crypto Trading Bot API")
+
+# Include API routes
 app.include_router(router, prefix="/api/v1")
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize the trading bot on startup."""
     try:
-        await trading_bot.start()
+        await trading_bot.initialize()
     except Exception as e:
-        logger.error(f"Error starting trading bot: {e}")
+        logger.error(f"Error initializing trading bot: {e}")
         raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Clean up resources on shutdown."""
+    """Shutdown the trading bot on shutdown."""
     try:
-        await trading_bot.stop()
+        await trading_bot.shutdown()
     except Exception as e:
-        logger.error(f"Error stopping trading bot: {e}")
+        logger.error(f"Error shutting down trading bot: {e}")
+        raise
 
-async def main():
-    """Main entry point for the application."""
+def main():
+    """Run the FastAPI application."""
     try:
-        import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        # Run the FastAPI application
+        uvicorn.run(
+            "src.main:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=False,
+            log_level="info"
+        )
     except Exception as e:
         logger.error(f"Error running application: {e}")
         raise
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    main() 

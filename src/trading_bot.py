@@ -63,14 +63,11 @@ class TradingBot:
         self._last_balance_update = 0
         self._balance_cache_ttl = 60  # Cache balance for 60 seconds
         
+        # Set strategy config
+        self.strategy_config = {}
+        
         # Initialize components
         self._initialize_components()
-        
-        # Set strategy config after signal generator is initialized
-        if self.signal_generator:
-            self.strategy_config = self.signal_generator.strategy_config
-        else:
-            self.strategy_config = {}
         
         # Set trading intervals with defaults
         self.health_check_interval = self.config.get('trading', {}).get('health_check_interval', 60)
@@ -207,6 +204,21 @@ class TradingBot:
             
         except Exception as e:
             logger.error(f"Error initializing components: {e}")
+            raise
+
+    async def initialize(self):
+        """Initialize the trading bot components."""
+        try:
+            # Initialize components
+            await self._initialize_components()
+            
+            # Set strategy config after signal generator is initialized
+            if self.signal_generator:
+                self.strategy_config = self.signal_generator.strategy_config
+            
+            logger.info("Trading bot initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing trading bot: {e}")
             raise
 
     async def start(self):
