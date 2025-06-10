@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from src.market_data.symbol_discovery import SymbolDiscovery, TradingOpportunity
 from src.signals.signal_generator import SignalGenerator
-from src.utils.config import load_config
+from src.utils.config import load_config, validate_config
 from src.market_data.websocket_client import MarketDataWebSocket
 from src.models import Strategy as StrategyModel
 from src.database.database import Database
@@ -812,6 +812,62 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Error validating signal: {e}")
             return False
+
+    def _get_default_profiles(self) -> Dict[str, Any]:
+        """Get default strategy profiles."""
+        return {
+            'default': {
+                'name': 'default',
+                'description': 'Default trading strategy',
+                'parameters': {
+                    'entry_threshold': 0.02,
+                    'exit_threshold': 0.01,
+                    'stop_loss': 0.03,
+                    'take_profit': 0.05,
+                    'max_position_size': 0.1,
+                    'leverage': 1.0,
+                    'min_volume': 1000000.0,
+                    'min_market_cap': 100000000.0,
+                    'max_spread': 0.5,
+                    'min_volatility': 0.5,
+                    'max_volatility': 5.0
+                }
+            },
+            'scalping': {
+                'name': 'scalping',
+                'description': 'Scalping strategy for high-frequency trading',
+                'parameters': {
+                    'entry_threshold': 0.005,
+                    'exit_threshold': 0.003,
+                    'stop_loss': 0.01,
+                    'take_profit': 0.015,
+                    'max_position_size': 0.05,
+                    'leverage': 2.0,
+                    'min_volume': 5000000.0,
+                    'min_market_cap': 500000000.0,
+                    'max_spread': 0.2,
+                    'min_volatility': 0.3,
+                    'max_volatility': 2.0
+                }
+            },
+            'swing': {
+                'name': 'swing',
+                'description': 'Swing trading strategy for medium-term positions',
+                'parameters': {
+                    'entry_threshold': 0.05,
+                    'exit_threshold': 0.03,
+                    'stop_loss': 0.08,
+                    'take_profit': 0.15,
+                    'max_position_size': 0.2,
+                    'leverage': 1.0,
+                    'min_volume': 2000000.0,
+                    'min_market_cap': 200000000.0,
+                    'max_spread': 1.0,
+                    'min_volatility': 1.0,
+                    'max_volatility': 10.0
+                }
+            }
+        }
 
 # Create a singleton instance
 trading_bot = TradingBot()

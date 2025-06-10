@@ -4,6 +4,9 @@ from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, JSON
+from sqlalchemy.sql import func
+from src.database.database import Base
 
 @dataclass
 class StrategyParameters:
@@ -14,30 +17,35 @@ class StrategyParameters:
     symbols: List[str]
     parameters: Dict
 
-class Strategy(ABC):
-    """Base class for all trading strategies"""
+class Strategy(Base):
+    """Strategy model for storing trading strategies."""
     
-    def __init__(self, parameters: StrategyParameters):
-        self.parameters = parameters
-        self.name = parameters.name
-        self.description = parameters.description
-        self.timeframe = parameters.timeframe
-        self.symbols = parameters.symbols
+    __tablename__ = 'strategies'
     
-    @abstractmethod
-    def generate_signals(self, data: pd.DataFrame) -> Dict:
-        """Generate trading signals from market data"""
-        pass
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), nullable=False, unique=True)
+    description = Column(String(255), nullable=True)
+    type = Column(String(50), nullable=False)
+    parameters = Column(JSON, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    @abstractmethod
-    def calculate_indicators(self, data: pd.DataFrame) -> Dict:
-        """Calculate technical indicators for the strategy"""
-        pass
-    
-    @abstractmethod
-    def validate_parameters(self) -> bool:
-        """Validate strategy parameters"""
-        pass
+    def __repr__(self):
+        return f"<Strategy(name='{self.name}', type='{self.type}')>"
+        
+    def to_dict(self):
+        """Convert model to dictionary."""
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'type': self.type,
+            'parameters': self.parameters,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
 
 class MACDStrategy(Strategy):
     """Moving Average Convergence Divergence Strategy"""
