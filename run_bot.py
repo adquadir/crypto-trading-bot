@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Main script to run the trading bot."""
 
 import asyncio
@@ -9,17 +10,13 @@ from typing import Dict, List, Optional
 from dotenv import load_dotenv
 
 from src.trading_bot import TradingBot
+from src.main import main
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('trading_bot.log'),
-        logging.StreamHandler()
-    ]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-
 logger = logging.getLogger(__name__)
 
 # Suppress numpy warnings
@@ -51,9 +48,10 @@ async def main():
         # Start the bot
         await bot.start()
     except KeyboardInterrupt:
-        logger.info("Received shutdown signal...")
+        logger.info("Received keyboard interrupt. Shutting down...")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        logger.error(f"Error running bot: {e}")
+        raise
     finally:
         # Stop the bot
         await bot.stop()
@@ -68,4 +66,10 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt. Shutting down...")
+    except Exception as e:
+        logger.error(f"Error running bot: {e}")
+        raise 
