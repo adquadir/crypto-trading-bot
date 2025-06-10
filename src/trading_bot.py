@@ -47,6 +47,7 @@ class TradingBot:
         self.risk_manager = None
         self.strategy_manager = None
         self.opportunity_manager = None
+        self.signal_generator = None
         
         # Initialize task tracking
         self.health_check_task = None
@@ -61,6 +62,15 @@ class TradingBot:
         self._balance_cache = None
         self._last_balance_update = 0
         self._balance_cache_ttl = 60  # Cache balance for 60 seconds
+        
+        # Initialize components
+        self._initialize_components()
+        
+        # Set strategy config after signal generator is initialized
+        if self.signal_generator:
+            self.strategy_config = self.signal_generator.strategy_config
+        else:
+            self.strategy_config = {}
         
         # Set trading intervals with defaults
         self.health_check_interval = self.config.get('trading', {}).get('health_check_interval', 60)
@@ -83,7 +93,6 @@ class TradingBot:
         self._shutdown_event = asyncio.Event()
         
         # New attributes for profile performance tracking
-        self.strategy_config = self.signal_generator.strategy_config
         self.parameter_history = []
         
         # Initialize WebSocket manager
@@ -190,6 +199,9 @@ class TradingBot:
                 self.strategy_manager,
                 self.risk_manager
             )
+            
+            # Initialize signal generator
+            self.signal_generator = SignalGenerator(self.config)
             
             logger.info("All components initialized successfully")
             

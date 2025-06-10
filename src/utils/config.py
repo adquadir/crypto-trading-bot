@@ -73,3 +73,59 @@ def validate_config(config: Dict[str, Any]) -> bool:
     except Exception as e:
         logger.error(f"Error validating configuration: {e}")
         return False 
+
+def get_default_config() -> Dict[str, Any]:
+    """Get default configuration."""
+    return {
+        'exchange': {
+            'name': 'binance',
+            'api_key': '',
+            'api_secret': '',
+            'testnet': True
+        },
+        'trading': {
+            'base_currency': 'USDT',
+            'max_open_trades': 3,
+            'stake_amount': 100,
+            'stake_currency': 'USDT',
+            'dry_run': True,
+            'health_check_interval': 60,  # Health check every 60 seconds
+            'position_check_interval': 300,  # Check positions every 5 minutes
+            'funding_rate_check_interval': 3600  # Check funding rates every hour
+        },
+        'risk_management': {
+            'max_daily_loss': 5.0,  # 5% max daily loss
+            'max_drawdown': 10.0,  # 10% max drawdown
+            'max_leverage': 3.0,  # Maximum leverage
+            'position_size_limit': 0.1  # 10% of portfolio per position
+        },
+        'monitoring': {
+            'health_check_interval': 60,  # Health check every 60 seconds
+            'log_level': 'INFO',
+            'enable_telegram': False,
+            'telegram_token': '',
+            'telegram_chat_id': ''
+        },
+        'strategy': {
+            'default_profile': 'default',
+            'profiles': {
+                'default': {
+                    'name': 'default',
+                    'description': 'Default trading strategy',
+                    'parameters': {
+                        'entry_threshold': 0.02,
+                        'exit_threshold': 0.01,
+                        'stop_loss': 0.03,
+                        'take_profit': 0.05,
+                        'max_position_size': 0.1,
+                        'leverage': 1.0,
+                        'min_volume': 1000000.0,
+                        'min_market_cap': 100000000.0,
+                        'max_spread': 0.5,
+                        'min_volatility': 0.5,
+                        'max_volatility': 5.0
+                    }
+                }
+            }
+        }
+    } 
