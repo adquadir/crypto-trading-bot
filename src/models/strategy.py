@@ -6,6 +6,7 @@ import numpy as np
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, JSON
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from src.database.base import Base
 
 @dataclass
@@ -30,6 +31,9 @@ class Strategy(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    signals = relationship("TradingSignal", back_populates="strategy")
     
     def __repr__(self):
         return f"<Strategy(name='{self.name}', type='{self.type}')>"
