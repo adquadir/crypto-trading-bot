@@ -3,6 +3,7 @@ from typing import Dict, List, Any, Optional
 import os
 import json
 
+# from src.strategy.dynamic_config import StrategyConfig
 from src.strategy.dynamic_config import StrategyConfig
 from src.utils.config import validate_config
 
@@ -17,6 +18,10 @@ class StrategyManager:
         self.strategy_config = StrategyConfig()
         self.active_strategies: Dict[str, Any] = {}
         self.strategy_profiles = self.strategy_config.load_strategy_profiles()
+        
+    async def initialize(self):
+        """Async initialization hook for compatibility with bot startup."""
+        pass
         
     def get_strategy_profile(self, strategy_name: str) -> Optional[Dict[str, Any]]:
         """Get a strategy profile by name."""

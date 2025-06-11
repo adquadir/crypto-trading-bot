@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Optional, Dict, Any
 from sqlalchemy import Column, Integer, String, Float, DateTime, JSON, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship

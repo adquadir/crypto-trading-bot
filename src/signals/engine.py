@@ -1,19 +1,13 @@
-from datetime import datetime
 import logging
-from typing import Dict, List, Optional
-
-import numpy as np
+from typing import List, Dict, Optional
+from datetime import datetime, timedelta
 import pandas as pd
-
+import numpy as np
 from src.database.database import Database
+from src.utils.config import load_config
+from src.market_data.exchange_client import ExchangeClient
 from src.models import TradingSignal
-from src.models.strategy import (
-    Strategy,
-    StrategyParameters,
-    MACDStrategy,
-    RSIStrategy,
-    BollingerBandsStrategy
-)
+from src.models.strategy import Strategy, StrategyParameters, MACDStrategy, RSIStrategy, BollingerBandsStrategy
 
 logger = logging.getLogger(__name__)
 

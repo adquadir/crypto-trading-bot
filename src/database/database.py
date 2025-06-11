@@ -1,16 +1,19 @@
 import logging
 import os
 from contextlib import contextmanager
-from typing import Generator, Optional
-
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, inspect, text
+from typing import Generator, Optional, Dict, List, Any
+from datetime import datetime, timedelta
+import pandas as pd
+from sqlalchemy import create_engine, inspect, text, Column, Integer, String, Float, DateTime, Boolean, ForeignKey, JSON, Text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, scoped_session
+from sqlalchemy.orm import sessionmaker, Session, scoped_session, relationship
+from sqlalchemy.pool import QueuePool
 from sqlalchemy.exc import SQLAlchemyError
 
-from .base import Base
+from dotenv import load_dotenv
+from src.database.base import Base
 from src.models.strategy import Strategy
+from src.utils.config import load_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +36,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Create scoped session
 db_session = scoped_session(SessionLocal)
-
 
 class Database:
     _instance = None
@@ -145,7 +147,8 @@ db = Database()
 
 async def init_db() -> None:
     """Initialize the database."""
-    await db.init_db()
+    update_db_schema()
+    add_initial_strategies()
 
 
 def update_db_schema():
@@ -174,7 +177,8 @@ def add_initial_strategies():
             default_strategies = [
                 Strategy(
                     name="MACD Crossover",
-                    active=True,
+                    is_active=True,
+                    type="technical",
                     parameters={
                         "macd_fast_period": 12,
                         "macd_slow_period": 26,
@@ -191,7 +195,8 @@ def add_initial_strategies():
                 ),
                 Strategy(
                     name="RSI Divergence",
-                    active=True,
+                    is_active=True,
+                    type="technical",
                     parameters={
                         "rsi_period": 14,
                         "rsi_overbought": 70,

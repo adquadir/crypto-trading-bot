@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-binance
+pandas
+numpy
+sqlalchemy
+python-dotenv
+websockets
+aiohttp
+ccxt

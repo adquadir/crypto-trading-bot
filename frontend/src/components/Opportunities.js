@@ -30,7 +30,8 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Slider,
-  InputAdornment
+  InputAdornment,
+  Alert
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
@@ -263,17 +264,8 @@ const Opportunities = () => {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'opportunity_update') {
-          setOpportunities(prev => {
-            const updated = [...prev];
-            const index = updated.findIndex(opp => opp.symbol === data.opportunity.symbol);
-            if (index >= 0) {
-              updated[index] = data.opportunity;
-            } else {
-              updated.push(data.opportunity);
-            }
-            return updated;
-          });
+        if (data.type === 'opportunities') {
+          setOpportunities(data.data);
         }
       } catch (err) {
         console.error('Error processing WebSocket message:', err);
@@ -305,17 +297,8 @@ const Opportunities = () => {
           newWs.onmessage = (event) => {
             try {
               const data = JSON.parse(event.data);
-              if (data.type === 'opportunity_update') {
-                setOpportunities(prev => {
-                  const updated = [...prev];
-                  const index = updated.findIndex(opp => opp.symbol === data.opportunity.symbol);
-                  if (index >= 0) {
-                    updated[index] = data.opportunity;
-                  } else {
-                    updated.push(data.opportunity);
-                  }
-                  return updated;
-                });
+              if (data.type === 'opportunities') {
+                setOpportunities(data.data);
               }
             } catch (err) {
               console.error('Error processing WebSocket message:', err);
@@ -342,6 +325,12 @@ const Opportunities = () => {
       ws.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (wsConnected) {
+      console.log('WebSocket connected, ready to receive data');
+    }
+  }, [wsConnected]);
 
   const fetchOpportunities = async () => {
     try {

@@ -17,10 +17,12 @@ import json
 from pathlib import Path
 import random
 import numpy as np
-from .websocket_client import MarketDataWebSocket
-from .config import config
+from src.market_data.websocket_client import MarketDataWebSocket
+from src.market_data.config import config
 import ccxt
 from urllib.parse import urlparse
+import pandas as pd
+from src.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -151,18 +153,20 @@ def rate_limit(limit: int = 10, period: float = 1.0):
 class ExchangeClient:
     """Client for interacting with cryptocurrency exchange APIs."""
     
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize the exchange client with configuration."""
-        self.config = config
-        self.api_key = os.getenv('BINANCE_API_KEY', '')
-        self.api_secret = os.getenv('BINANCE_API_SECRET', '')
+    def __init__(self, config: Optional[Dict] = None):
+        self.config = config if config is not None else load_config()
+        self.client = None
+        self.futures_client = None
+        self.initialized = False
+        self.retry_delay = 1.0
+        self.max_retries = 3
         self.base_url = os.getenv('BINANCE_API_URL', 'https://api.binance.com')
-        self.ws_url = os.getenv('BINANCE_WS_URL', 'wss://stream.binance.com:9443/ws/stream')
+        self.ws_url = os.getenv('BINANCE_WS_URL', 'wss://fstream.binance.com/ws/stream')
         self.testnet = os.getenv('USE_TESTNET', 'false').lower() == 'true'
         
         # Initialize proxy configuration
         self.proxy_host = os.getenv('PROXY_HOST', '')
-        self.proxy_port = os.getenv('PROXY_PORT', '')
+        self.proxy_port = str(os.getenv('PROXY_PORT', ''))  # Always a string, never a coroutine
         self.proxy_user = os.getenv('PROXY_USER', '')
         self.proxy_pass = os.getenv('PROXY_PASS', '')
         self.proxy_auth = None
@@ -194,6 +198,7 @@ class ExchangeClient:
         self.order_books = {}
         self.last_trade_price = {}
         self.symbols = set()
+        self.ws_clients = {}  # Initialize ws_clients as an empty dict
         
         # Initialize cache manager
         self.cache = CacheManager(
@@ -208,7 +213,7 @@ class ExchangeClient:
         self._init_ws_manager()
         
         self.logger = logging.getLogger(__name__)
-        self.scalping_mode = config.get('scalping_mode', False)
+        self.scalping_mode = self.config.get('scalping_mode', False)
         
         # Initialize proxy rotation
         self.proxy_metrics = {}
@@ -217,8 +222,8 @@ class ExchangeClient:
         self._shutdown_event = asyncio.Event()
 
         # Load proxy configuration
-        self.proxy_list = config.get('proxy_ports', os.getenv('PROXY_LIST', '10001,10002,10003').split(','))
-        self.failover_ports = config.get('failover_ports', os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','))
+        self.proxy_list = self.config.get('proxy_ports', os.getenv('PROXY_LIST', '10001,10002,10003').split(','))
+        self.failover_ports = self.config.get('failover_ports', os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','))
         self.current_port_index = 0
         
         # Initialize data structures
@@ -247,31 +252,17 @@ class ExchangeClient:
             self.proxies = None
 
     def _init_client(self):
-        """Initialize CCXT client with proper configuration."""
+        """Initialize the Binance client with proxy configuration."""
         try:
-            # Configure CCXT client
-            self.client = ccxt.binance({
-                'apiKey': self.api_key,
-                'secret': self.api_secret,
-                'enableRateLimit': True,
-                'options': {
-                    'defaultType': 'future',
-                    'adjustForTimeDifference': True,
-                    'recvWindow': 60000
-                }
-            })
-
-            # Set testnet if enabled
-            if self.testnet:
-                self.client.set_sandbox_mode(True)
-
-            # Configure proxy if available
-            if self.proxies:
-                self.client.proxies = self.proxies
-
-            logger.info("CCXT client initialized successfully")
+            self.client = Client(
+                api_key=os.getenv('BINANCE_API_KEY'),
+                api_secret=os.getenv('BINANCE_API_SECRET'),
+                testnet=self.testnet,
+                requests_params={'proxies': self.proxies} if self.proxies else None
+            )
+            logger.info("Binance client initialized successfully")
         except Exception as e:
-            logger.error(f"Error initializing CCXT client: {e}")
+            logger.error(f"Error initializing Binance client: {e}")
             raise
 
     async def test_proxy_connection(self):
@@ -303,373 +294,94 @@ class ExchangeClient:
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
     async def get_exchange_info(self) -> Dict:
-        """Fetch exchange information including all available trading pairs."""
+        """Get exchange information."""
         try:
-            # --- Temporarily disable cache check to force fresh fetch ---
-            # cache_key = 'exchange_info'
-            # cached_data = self.cache.get(cache_key, max_age=3600)  # Cache for 1 hour
-            # if cached_data:
-            #     logger.debug("Using cached exchange info from memory/disk.")
-            #     if 'symbols' in cached_data:
-            #         cached_perpetual_symbols = [s for s in cached_data['symbols'] if s.get('contractType') == 'PERPETUAL' and s.get('status') == 'TRADING']
-            #         logger.debug(f"Cached data contains {len(cached_perpetual_symbols)} TRADING perpetual symbols.")
-            #     return cached_data
-
-            logger.debug("Cache check skipped. Fetching exchange info from exchange...")
-            # Fetch from exchange
-            # Use the Binance Client instance which is configured with the proxy
-            exchange_info = await asyncio.to_thread(self.client.futures_exchange_info) # Ensure futures endpoint is used
-
-            logger.debug("Successfully fetched exchange info from exchange.")
-            # Log the number of perpetual symbols found in the fetched data
-            if 'symbols' in exchange_info:
-                fetched_perpetual_symbols = [s for s in exchange_info['symbols'] if s.get('contractType') == 'PERPETUAL' and s.get('status') == 'TRADING']
-                logger.debug(f"Fetched data contains {len(fetched_perpetual_symbols)} TRADING perpetual symbols.")
-
-            # Cache the fetched data (still cache, but don't read from it for this call)
-            # self.cache.set(cache_key, exchange_info, max_age=3600)
-
+            if not self.client:
+                self._init_client()
+            logger.debug("Fetching exchange info from Binance Futures API")
+            exchange_info = await asyncio.to_thread(self.client.futures_exchange_info)
+            logger.debug(f"Exchange info response type: {type(exchange_info)}")
+            logger.debug(f"Exchange info response: {exchange_info}")
             return exchange_info
         except Exception as e:
             logger.error(f"Error fetching exchange info: {e}")
-            raise # Re-raise the exception to be caught by retry decorator or calling function
+            raise
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
     async def get_ticker_24h(self, symbol: str) -> Dict:
-        """Fetch 24-hour ticker statistics for a symbol."""
+        """Get 24hr ticker price change statistics."""
         try:
-            cache_key = f"ticker_24h_{symbol}"
-            max_age = self._get_cache_ttl('ticker', self.scalping_mode)
-            
-            # Check cache first
-            cached_data = self.cache.get(cache_key, max_age=max_age)
-            if cached_data:
-                logger.debug(f"Using cached 24h ticker for {symbol}")
-                return cached_data
-
-            logger.debug(f"Fetching 24h ticker for {symbol}")
-            
-            # Get 24h ticker from Binance
-            ticker = await asyncio.to_thread(self.client.futures_ticker, symbol=symbol)
-            
-            if not ticker:
-                logger.warning(f"No ticker data for {symbol}")
-                return {}
-                
-            result = {
-                'symbol': ticker['symbol'],
-                'priceChange': float(ticker['priceChange']),
-                'priceChangePercent': float(ticker['priceChangePercent']),
-                'weightedAvgPrice': float(ticker['weightedAvgPrice']),
-                'lastPrice': float(ticker['lastPrice']),
-                'lastQty': float(ticker['lastQty']),
-                'openPrice': float(ticker['openPrice']),
-                'highPrice': float(ticker['highPrice']),
-                'lowPrice': float(ticker['lowPrice']),
-                'volume': float(ticker['volume']),
-                'quoteVolume': float(ticker['quoteVolume']),
-                'openTime': int(ticker['openTime']),
-                'closeTime': int(ticker['closeTime']),
-                'firstId': int(ticker['firstId']),
-                'lastId': int(ticker['lastId']),
-                'count': int(ticker['count'])
-            }
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=60)
-            
-            return result
-            
-        except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e}")
-            # Try with different proxy
-            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
-            ticker = await asyncio.to_thread(self.client.futures_ticker, symbol=symbol)
-            
-            if not ticker:
-                logger.warning(f"No ticker data for {symbol}")
-                return {}
-                
-            result = {
-                'symbol': ticker['symbol'],
-                'priceChange': float(ticker['priceChange']),
-                'priceChangePercent': float(ticker['priceChangePercent']),
-                'weightedAvgPrice': float(ticker['weightedAvgPrice']),
-                'lastPrice': float(ticker['lastPrice']),
-                'lastQty': float(ticker['lastQty']),
-                'openPrice': float(ticker['openPrice']),
-                'highPrice': float(ticker['highPrice']),
-                'lowPrice': float(ticker['lowPrice']),
-                'volume': float(ticker['volume']),
-                'quoteVolume': float(ticker['quoteVolume']),
-                'openTime': int(ticker['openTime']),
-                'closeTime': int(ticker['closeTime']),
-                'firstId': int(ticker['firstId']),
-                'lastId': int(ticker['lastId']),
-                'count': int(ticker['count'])
-            }
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=60)
-            
-            return result
+            if not self.client:
+                self._init_client()
+            return await asyncio.to_thread(self.client.futures_ticker, symbol=symbol)
         except Exception as e:
-            logger.error(f"Unexpected error fetching ticker for {symbol}: {str(e)}")
-            return {}
+            logger.error(f"Unexpected error fetching ticker for {symbol}: {e}")
+            raise
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
     async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
-        """Fetch order book data for a symbol."""
+        """Get order book for a symbol."""
         try:
-            cache_key = f"orderbook_{symbol}_{limit}"
-            max_age = self._get_cache_ttl('orderbook', self.scalping_mode)
-            
-            # Check cache first
-            cached_data = self.cache.get(cache_key, max_age=max_age)
-            if cached_data:
-                logger.debug(f"Using cached orderbook for {symbol}")
-                return cached_data
-
-            logger.debug(f"Fetching orderbook for {symbol} (limit: {limit})")
-            
-            # Get orderbook from Binance
-            depth = await asyncio.to_thread(self.client.futures_order_book, symbol=symbol, limit=limit)
-            
-            if not depth:
-                logger.warning(f"No orderbook data for {symbol}")
-                return {'bids': [], 'asks': []}
-                
-            result = {
-                'bids': [[float(price), float(qty)] for price, qty in depth['bids']],
-                'asks': [[float(price), float(qty)] for price, qty in depth['asks']],
-                'lastUpdateId': depth['lastUpdateId']
-            }
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=5)
-            
-            return result
-            
-        except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e}")
-            # Try with different proxy
-            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
-            depth = await asyncio.to_thread(self.client.futures_order_book, symbol=symbol, limit=limit)
-            
-            if not depth:
-                logger.warning(f"No orderbook data for {symbol}")
-                return {'bids': [], 'asks': []}
-                
-            result = {
-                'bids': [[float(price), float(qty)] for price, qty in depth['bids']],
-                'asks': [[float(price), float(qty)] for price, qty in depth['asks']],
-                'lastUpdateId': depth['lastUpdateId']
-            }
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=5)
-            
-            return result
+            if not self.client:
+                self._init_client()
+            return await asyncio.to_thread(self.client.futures_order_book, symbol=symbol, limit=limit)
         except Exception as e:
-            logger.error(f"Unexpected error fetching orderbook for {symbol}: {str(e)}")
-            return {'bids': [], 'asks': []}
+            logger.error(f"Unexpected error fetching orderbook for {symbol}: {e}")
+            raise
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
     async def get_funding_rate(self, symbol: str) -> float:
-        """Fetch current funding rate for a symbol."""
+        """Get current funding rate for a symbol."""
         try:
-            # Check cache first
-            cache_key = f'funding_rate_{symbol}'
-            cached_data = self.cache.get(cache_key, max_age=300)  # Cache for 5 minutes
-            if cached_data is not None:
-                logger.debug(f"Using cached funding rate for {symbol}")
-                return cached_data
-
-            logger.debug(f"Fetching funding rate for {symbol}")
-            
-            # Get funding rate from Binance
+            if not self.client:
+                self._init_client()
             funding_rate = await asyncio.to_thread(self.client.futures_funding_rate, symbol=symbol)
-            
-            if not funding_rate:
-                logger.warning(f"No funding rate data for {symbol}")
-                return 0.0
-                
-            result = float(funding_rate[0]['fundingRate'])
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=300)
-            
-            return result
-            
-        except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e}")
-            # Try with different proxy
-            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
-            funding_rate = await asyncio.to_thread(self.client.futures_funding_rate, symbol=symbol)
-            
-            if not funding_rate:
-                logger.warning(f"No funding rate data for {symbol}")
-                return 0.0
-                
-            result = float(funding_rate[0]['fundingRate'])
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=300)
-            
-            return result
+            return float(funding_rate[0]['fundingRate'])
         except Exception as e:
-            logger.error(f"Unexpected error fetching funding rate for {symbol}: {str(e)}")
-            return 0.0
+            logger.error(f"Unexpected error fetching funding rate for {symbol}: {e}")
+            raise
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
-    async def get_open_interest(self, symbol: str) -> float:
-        """Fetch open interest for a symbol."""
+    async def get_open_interest(self, symbol: str) -> Dict:
+        """Get open interest for a symbol."""
         try:
-            cache_key = f"open_interest_{symbol}"
-            max_age = self._get_cache_ttl('open_interest', self.scalping_mode)
-            
-            # Check cache first
-            cached_data = self.cache.get(cache_key, max_age=max_age)
-            if cached_data is not None:
-                logger.debug(f"Using cached open interest for {symbol}")
-                return cached_data
-
-            logger.debug(f"Fetching open interest for {symbol}")
-            
-            # Get open interest from Binance
-            open_interest = await asyncio.to_thread(self.client.futures_open_interest, symbol=symbol)
-            
-            if not open_interest:
-                logger.warning(f"No open interest data for {symbol}")
-                return 0.0
-                
-            result = float(open_interest['openInterest'])
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=60)
-            
-            return result
-            
-        except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e}")
-            # Try with different proxy
-            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
-            open_interest = await asyncio.to_thread(self.client.futures_open_interest, symbol=symbol)
-            
-            if not open_interest:
-                logger.warning(f"No open interest data for {symbol}")
-                return 0.0
-                
-            result = float(open_interest['openInterest'])
-            
-            # Cache the result
-            self.cache.set(cache_key, result, max_age=60)
-            
-            return result
+            if not self.client:
+                self._init_client()
+            return await asyncio.to_thread(self.client.futures_open_interest, symbol=symbol)
         except Exception as e:
-            logger.error(f"Unexpected error fetching open interest for {symbol}: {str(e)}")
-            return 0.0
+            logger.error(f"Unexpected error fetching open interest for {symbol}: {e}")
+            raise
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
-    async def get_historical_data(self, symbol: str, interval: str, limit: int) -> List[Dict]:
-        """Fetch historical market data (OHLCV) from Binance."""
+    async def get_historical_data(self, symbol: str, interval: str = '1h', limit: int = 100) -> pd.DataFrame:
+        """Get historical klines/candlestick data."""
         try:
-            cache_key = f"historical_{symbol}_{interval}_{limit}"
-            max_age = self._get_cache_ttl('ohlcv', self.scalping_mode)
-            
-            # Check cache first
-            cached_data = self.cache.get(cache_key, max_age=max_age)
-            if cached_data:
-                logger.debug(f"Using cached historical data for {symbol}")
-                return cached_data
-
-            logger.debug(f"Fetching {limit} {interval} candles for {symbol}")
-            
+            if not self.client:
+                self._init_client()
             klines = await asyncio.to_thread(
                 self.client.futures_klines,
                 symbol=symbol,
                 interval=interval,
                 limit=limit
             )
-            
-            formatted_data = []
-            for k in klines:
-                try:
-                    formatted_data.append({
-                        'timestamp': int(k[0]),
-                'open': float(k[1]),
-                'high': float(k[2]),
-                'low': float(k[3]),
-                'close': float(k[4]),
-                        'volume': float(k[5]),
-                        'close_time': int(k[6]),
-                        'quote_volume': float(k[7]),
-                        'trades': int(k[8]),
-                        'taker_buy_base': float(k[9]),
-                        'taker_buy_quote': float(k[10])
-                    })
-                except (IndexError, ValueError) as e:
-                    logger.warning(f"Malformed kline data: {k}. Error: {str(e)}")
-                    continue
-            
-            if not formatted_data:
-                logger.warning(f"No valid data points received for {symbol}")
-                return []
-            
-            # Cache the result
-            self.cache.set(cache_key, formatted_data, max_age=60)
-            
-            logger.debug(f"Retrieved {len(formatted_data)} valid data points for {symbol}")
-            return formatted_data
-            
-        except BinanceAPIException as e:
-            logger.error(f"Binance API error for {symbol}: {e}")
-            # Try with different proxy
-            self.client.proxies = {'http': self._get_next_proxy(), 'https': self._get_next_proxy()}
-            klines = await asyncio.to_thread(
-                self.client.futures_klines,
-                symbol=symbol,
-                interval=interval,
-                limit=limit
-            )
-            
-            formatted_data = []
-            for k in klines:
-                try:
-                    formatted_data.append({
-                        'timestamp': int(k[0]),
-                        'open': float(k[1]),
-                        'high': float(k[2]),
-                        'low': float(k[3]),
-                        'close': float(k[4]),
-                        'volume': float(k[5]),
-                        'close_time': int(k[6]),
-                        'quote_volume': float(k[7]),
-                        'trades': int(k[8]),
-                        'taker_buy_base': float(k[9]),
-                        'taker_buy_quote': float(k[10])
-                    })
-                except (IndexError, ValueError) as e:
-                    logger.warning(f"Malformed kline data: {k}. Error: {str(e)}")
-                    continue
-            
-            if not formatted_data:
-                logger.warning(f"No valid data points received for {symbol}")
-                return []
-            
-            # Cache the result
-            self.cache.set(cache_key, formatted_data, max_age=60)
-            
-            logger.debug(f"Retrieved {len(formatted_data)} valid data points for {symbol}")
-            return formatted_data
+            df = pd.DataFrame(klines, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+                'taker_buy_quote', 'ignore'
+            ])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            return df
         except Exception as e:
-            logger.error(f"Unexpected error fetching data for {symbol}: {str(e)}")
-            return []
+            logger.error(f"Unexpected error fetching data for {symbol}: {e}")
+            raise
             
     def _should_rotate_proxy(self) -> bool:
         metrics = self.proxy_metrics[self.proxy_port]
@@ -679,12 +391,24 @@ class ExchangeClient:
         avg_response = statistics.mean(metrics.response_times) if metrics.response_times else float('inf')
         return error_rate > self.rotation_threshold or avg_response > 1.0
 
+    async def _find_best_proxy(self):
+        """Find the best proxy port based on latency (placeholder: just rotate through the list)."""
+        # Always return a port string from the proxy list
+        if hasattr(self, 'proxy_list') and self.proxy_list:
+            # Simple round-robin for now
+            self.current_port_index = (self.current_port_index + 1) % len(self.proxy_list)
+            return str(self.proxy_list[self.current_port_index])
+        return str(os.getenv('PROXY_PORT', '10001'))
+
     async def _rotate_proxy(self):
-        best_port = self._find_best_proxy()
+        best_port = await self._find_best_proxy()
         if best_port != self.proxy_port:
             logger.info(f"Rotating proxy from {self.proxy_port} to {best_port}")
-            self.proxy_port = best_port
-            self.proxy_config["port"] = best_port
+            self.proxy_port = str(best_port)
+            if not isinstance(self.proxy_port, str) or not self.proxy_port.isdigit():
+                logger.error(f"Proxy port is not a valid string: {self.proxy_port}")
+                raise ValueError(f"Proxy port is not a valid string: {self.proxy_port}")
+            self.proxy_config["port"] = str(best_port)
             self._setup_proxy()
             self._init_client()
             await self._reinitialize_websockets()
@@ -713,7 +437,7 @@ class ExchangeClient:
             self.ws_clients[symbol] = ws_client
             
             # Connect and subscribe to channels
-            await ws_client.connect()
+            ws_client.connect()
             
             # Start heartbeat monitoring
             self.ws_last_message[symbol] = time.time()
@@ -755,11 +479,15 @@ class ExchangeClient:
                 await asyncio.sleep(5)  # Wait before retrying
 
     async def close(self):
-        """Close all WebSocket connections."""
-        for symbol, ws_client in self.ws_clients.items():
-            if ws_client:
-                await ws_client.close()
-        logger.info("Exchange client shutdown complete")
+        """Close all connections and stop background tasks."""
+        try:
+            self.running = False
+            if self.ws_manager:
+                await self.ws_manager.stop()
+            logger.info("Exchange client stopped")
+        except Exception as e:
+            logger.error(f"Error stopping exchange client: {e}")
+            raise
 
     def _get_next_proxy(self) -> str:
         """Get next proxy in rotation."""
@@ -943,14 +671,14 @@ class ExchangeClient:
             trades = await self.get_recent_trades(symbol)
             
             # Get klines
-            klines = await self.get_klines(symbol)
+            klines = await self.get_historical_data(symbol)
             
             # Combine all data
             market_data = {
                 'orderbook': orderbook,
                 'ticker': ticker,
                 'trades': trades,
-                'klines': klines
+                'klines': klines.to_dict() if not klines.empty else {}
             }
             
             return market_data
@@ -959,62 +687,55 @@ class ExchangeClient:
             return {}
 
     async def get_all_symbols(self):
-        # Replace this with actual logic to fetch symbols from the exchange
-        return ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        """Get all available trading symbols from the exchange."""
+        try:
+            if not self.client:
+                raise ConnectionError("Exchange client not initialized")
+            
+            # Get exchange info
+            exchange_info = await asyncio.to_thread(
+                self.client.futures_exchange_info
+            )
+            
+            if not exchange_info or 'symbols' not in exchange_info:
+                raise ValueError("Invalid exchange info response")
+            
+            # Filter for USDT-margined futures
+            symbols = [
+                symbol['symbol'] for symbol in exchange_info['symbols']
+                if symbol['symbol'].endswith('USDT') and
+                symbol['status'] == 'TRADING' and
+                symbol['contractType'] == 'PERPETUAL'
+            ]
+            
+            logger.info(f"Retrieved {len(symbols)} trading symbols from exchange")
+            return symbols
+            
+        except Exception as e:
+            logger.error(f"Error getting symbols from exchange: {e}")
+            return []
 
     async def initialize(self):
-        """Initialize the exchange client."""
+        """Initialize the exchange client and WebSocket manager."""
         try:
-            # Initialize CCXT client
-            self._init_client()
-            
-            # Test connection
-            if not await self.check_connection():
-                # Try reconnecting with different proxy
-                await self._rotate_proxy()
-                if not await self.check_connection():
-                    raise Exception("Failed to connect to exchange after proxy rotation")
-            
-            # Initialize WebSocket manager
-            self._init_ws_manager()
-            
-            # Get available symbols
-            symbols = await self.get_all_symbols()
-            self.symbols = set(symbols)
-            
-            # Initialize WebSocket connections
-            for symbol in self.symbols:
-                await self._setup_symbol_websocket(symbol)
-                
-            logger.info(f"Exchange client initialized with {len(self.symbols)} symbols")
-            
+            if not self.client:
+                self._init_client()
+            if not self.ws_manager:
+                self._init_ws_manager()
+            await self.ws_manager.initialize()
+            logger.info("Exchange client initialized with WebSocket manager")
         except Exception as e:
             logger.error(f"Error initializing exchange client: {e}")
             raise
             
-    async def shutdown(self):
-        """Shutdown the exchange client."""
+    async def stop(self):
+        """Stop the exchange client and WebSocket manager."""
         try:
-            self.running = False
-            
-            # Cancel background tasks
-            if hasattr(self, 'health_check_task'):
-                self.health_check_task.cancel()
-            if hasattr(self, 'funding_rate_task'):
-                self.funding_rate_task.cancel()
-            
-            # Close all WebSocket connections
-            for symbol, ws_client in self.ws_clients.items():
-                try:
-                    await ws_client.close()
+            if self.ws_manager:
+                await self.ws_manager.stop()
+            logger.info("Exchange client stopped")
                 except Exception as e:
-                    logger.error(f"Error closing WebSocket for {symbol}: {e}")
-            
-            self.ws_clients.clear()
-            logger.info("Exchange client shutdown complete")
-            
-        except Exception as e:
-            logger.error(f"Error during exchange client shutdown: {e}")
+            logger.error(f"Error stopping exchange client: {e}")
             raise
 
     async def _handle_kline_update(self, symbol: str, kline_data: dict):
@@ -1066,11 +787,6 @@ class ExchangeClient:
         await self.close()
         await self.initialize()
 
-    async def _find_best_proxy(self):
-        """Find the best proxy based on latency."""
-        # Placeholder for proxy selection logic
-        return "http://example-proxy.com:8080"
-
     async def _test_proxy_connection(self) -> bool:
         """Test the proxy connection."""
         try:
@@ -1116,10 +832,7 @@ class ExchangeClient:
             )
             
             # Connect to WebSocket
-            await ws_client.connect()
-            
-            # Start the WebSocket client in a background task
-            asyncio.create_task(ws_client.start())
+            ws_client.connect()
             
             # Store the client
             self.ws_clients[symbol] = ws_client
@@ -1347,9 +1060,11 @@ class ExchangeClient:
             return []
 
     async def check_connection(self) -> bool:
-        """Check connection to exchange."""
+        """Check if the exchange connection is working."""
         try:
-            # Test connection with a simple API call
+            if not self.client:
+                self._init_client()
+            # Use asyncio.to_thread to run the synchronous ping method
             await asyncio.to_thread(self.client.ping)
             return True
         except Exception as e:
@@ -1378,7 +1093,7 @@ class ExchangeClient:
             
             # Reconnect WebSocket
             if self.ws_manager:
-                await self.ws_manager.initialize(self.symbols)
+                self.ws_manager.connect()
                 
             logger.info("Successfully reconnected to exchange")
             return True
@@ -1386,3 +1101,31 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error reconnecting to exchange: {e}")
             return False
+
+    @retry_with_backoff(max_retries=3)
+    @rate_limit(limit=10, period=1.0)
+    async def get_klines(self, symbol: str, interval: str = '1m', limit: int = 100) -> List[Dict]:
+        """Get klines/candlestick data for a symbol."""
+        try:
+            # Use the existing get_historical_data method
+            df = await self.get_historical_data(symbol, interval, limit)
+            df = df.reset_index()  # Bring 'timestamp' back as a column
+
+            # Convert DataFrame to list of dictionaries
+            klines = []
+            for _, row in df.iterrows():
+                kline = {
+                    'timestamp': int(row['timestamp'].timestamp() * 1000),  # Convert to ms
+                    'open': float(row['open']),
+                    'high': float(row['high']),
+                    'low': float(row['low']),
+                    'close': float(row['close']),
+                    'volume': float(row['volume'])
+                }
+                klines.append(kline)
+
+            return klines
+            
+        except Exception as e:
+            logger.error(f"Error getting klines for {symbol}: {e}")
+            return []

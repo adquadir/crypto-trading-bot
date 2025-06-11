@@ -67,6 +67,17 @@ def validate_config(config: Dict[str, Any]) -> bool:
                 logger.error(f"Missing required monitoring config: {key}")
                 return False
                 
+        # Add default for health_check_interval if not present in monitoring section
+        if 'health_check_interval' not in monitoring:
+            env_val = os.getenv('HEALTH_CHECK_INTERVAL')
+            if env_val is not None:
+                try:
+                    monitoring['health_check_interval'] = int(env_val)
+                except ValueError:
+                    monitoring['health_check_interval'] = 60
+            else:
+                monitoring['health_check_interval'] = 60  # Default to 60 seconds
+                
         logger.info("Configuration validation successful")
         return True
         
@@ -104,7 +115,8 @@ def get_default_config() -> Dict[str, Any]:
             'log_level': 'INFO',
             'enable_telegram': False,
             'telegram_token': '',
-            'telegram_chat_id': ''
+            'telegram_chat_id': '',
+            'metrics_enabled': True
         },
         'strategy': {
             'default_profile': 'default',

@@ -16,15 +16,15 @@ export const WebSocketProvider = ({ children }) => {
     }
 
     // Create new WebSocket instance
-    const newWs = new WebSocket(config.wsUrl);
+    const ws = new WebSocket(getWsBaseUrl());
     
-    newWs.onopen = () => {
+    ws.onopen = () => {
       console.log('WebSocket connected');
       setIsConnected(true);
       setReconnectAttempt(0);
     };
 
-    newWs.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         setLastMessage(data);
@@ -33,12 +33,12 @@ export const WebSocketProvider = ({ children }) => {
       }
     };
 
-    newWs.onerror = (error) => {
+    ws.onerror = (error) => {
       console.error('WebSocket error:', error);
       setIsConnected(false);
     };
 
-    newWs.onclose = () => {
+    ws.onclose = () => {
       console.log('WebSocket disconnected');
       setIsConnected(false);
       
@@ -51,19 +51,19 @@ export const WebSocketProvider = ({ children }) => {
     };
 
     // Update the WebSocket instance in state
-    setWs(newWs);
+    setWs(ws);
   }, [ws, reconnectAttempt]);
 
   useEffect(() => {
-    connectWebSocket();
-    
-    // Cleanup function
+    if (!ws) {
+      connectWebSocket();
+    }
     return () => {
       if (ws) {
         ws.close();
       }
     };
-  }, []);
+  }, [ws, connectWebSocket]);
 
   const value = {
     ws,

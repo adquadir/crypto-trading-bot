@@ -1,6 +1,8 @@
 from src.database.base import Base
-from .strategy import Strategy, MACDStrategy, RSIStrategy, BollingerBandsStrategy
-from .signal import TradingSignal
+from src.models.strategy import Strategy, MACDStrategy, RSIStrategy, BollingerBandsStrategy
+from src.models.signal import TradingSignal
+from .trading import Trade
+from .performance import PerformanceMetrics
 
 __all__ = [
     'Base',
@@ -8,5 +10,7 @@ __all__ = [
     'MACDStrategy',
     'RSIStrategy',
     'BollingerBandsStrategy',
-    'TradingSignal'
+    'TradingSignal',
+    'Trade',
+    'PerformanceMetrics'
 ] 

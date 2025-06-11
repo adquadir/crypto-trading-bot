@@ -14,14 +14,11 @@ const getApiBaseUrl = () => {
     return `http://${hostname}:8000`; // Or window.location.origin if backend is on same port
 };
 
-const getWsBaseUrl = () => {
-    const hostname = window.location.hostname;
-    const isDevelopment = process.env.NODE_ENV === 'development';
-
-    if (isDevelopment || hostname === 'localhost' || hostname === '127.0.0.1') {
-        return `ws://${hostname}:8000`; // Default to port 8000 for local dev
+export const getWsBaseUrl = () => {
+    if (process.env.NODE_ENV === 'production') {
+        return `wss://${window.location.hostname}:8000/ws/signals`;
     }
-    return `ws://${hostname}:8000`; // Use ws:// protocol for production
+    return 'ws://localhost:8000/ws/signals';
 };
 
 const config = {
@@ -40,7 +37,7 @@ const config = {
     },
     // API endpoints
     apiUrl: process.env.REACT_APP_API_URL || 'http://localhost:8000',
-    wsUrl: process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws',
+    wsUrl: process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws/signals',
     
     // WebSocket settings
     wsReconnectDelay: 1000,

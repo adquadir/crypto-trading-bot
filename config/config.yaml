@@ -7,7 +7,6 @@ exchange:
   ws_url: ${BINANCE_WS_URL}
 
 trading:
-  health_check_interval: ${HEALTH_CHECK_INTERVAL}
   funding_rate_interval: 300        # seconds
   position_interval: 30             # seconds
   signal_interval: 15               # seconds
@@ -88,6 +87,7 @@ risk:
   daily_loss_limit: ${DAILY_LOSS_LIMIT}
 
 monitoring:
+  health_check_interval: ${HEALTH_CHECK_INTERVAL}
   funding_rate_check_interval: ${FUNDING_RATE_CHECK_INTERVAL}
   position_update_interval: ${POSITION_UPDATE_INTERVAL}
 

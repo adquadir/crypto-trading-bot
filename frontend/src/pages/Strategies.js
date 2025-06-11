@@ -136,11 +136,25 @@ const Strategies = () => {
     }));
   };
 
+  const toggleStrategy = async (strategyId) => {
+    try {
+      const response = await axios.post(`/api/trading/strategies/${strategyId}/toggle`);
+      if (response.data.success) {
+        setStrategies(strategies.map(strategy => 
+          strategy.id === strategyId 
+            ? { ...strategy, enabled: !strategy.enabled }
+            : strategy
+        ));
+      }
+    } catch (err) {
+      console.error('Error toggling strategy:', err);
+      setError('Failed to toggle strategy');
+    }
+  };
+
   useEffect(() => {
     fetchStrategies();
-    const interval = setInterval(fetchStrategies, 30000);
-    return () => clearInterval(interval);
-  }, [retryCount]);
+  }, [fetchStrategies]);
 
   const handleSort = (field) => {
     if (sortBy === field) {
@@ -300,7 +314,7 @@ const Strategies = () => {
                         control={
                           <Switch
                             checked={strategy.active}
-                            onChange={() => toggleStrategy(strategy.name, strategy.active)}
+                            onChange={() => toggleStrategy(strategy.id)}
                             color="primary"
                           />
                         }

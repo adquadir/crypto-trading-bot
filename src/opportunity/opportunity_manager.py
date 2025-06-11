@@ -2,9 +2,9 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from src.market_data.exchange_client import ExchangeClient
-from src.strategy.strategy_manager import StrategyManager
-from src.risk.risk_manager import RiskManager
+from market_data.exchange_client import ExchangeClient
+from strategy.strategy_manager import StrategyManager
+from risk.risk_manager import RiskManager
 
 logger = logging.getLogger(__name__)
 
@@ -118,3 +118,7 @@ class OpportunityManager:
         except Exception as e:
             logger.error(f"Error calculating opportunity score: {e}")
             return 0.0 
+
+    async def initialize(self):
+        """Async initialization hook for compatibility with bot startup."""
+        pass 

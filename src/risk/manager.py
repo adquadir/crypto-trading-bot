@@ -470,3 +470,7 @@ class RiskManager:
         """Check if daily loss limit has been reached."""
         max_daily_loss = self.account_balance * self.risk_params[self.risk_mode]['max_daily_loss']
         return daily_pnl >= -max_daily_loss 
+
+    async def initialize(self):
+        """Async initialization hook for compatibility with bot startup."""
+        pass 

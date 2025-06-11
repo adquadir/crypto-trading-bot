@@ -1,9 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, List, Any
 import logging
+from sqlalchemy import func
 
-from src.trading_bot import trading_bot
-from src.utils.config import validate_config
+from trading_bot import trading_bot
+from utils.config import validate_config
+from database.database import Database
+from database.models import Trade
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -78,3 +81,35 @@ async def update_config(config: Dict[str, Any]):
     except Exception as e:
         logger.error(f"Error updating config: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 
+
+@router.get("/trading/stats")
+async def get_stats():
+    """Get trading statistics."""
+    try:
+        db = Database()
+        session = db.SessionLocal()
+        
+        # Get total trades
+        total_trades = session.query(Trade).count()
+        
+        # Get winning trades
+        winning_trades = session.query(Trade).filter(Trade.pnl > 0).count()
+        
+        # Get total PnL
+        total_pnl = session.query(func.sum(Trade.pnl)).scalar() or 0
+        
+        # Get average trade duration
+        avg_duration = session.query(func.avg(Trade.duration)).scalar() or 0
+        
+        return {
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "win_rate": (winning_trades / total_trades * 100) if total_trades > 0 else 0,
+            "total_pnl": total_pnl,
+            "avg_duration": avg_duration
+        }
+    except Exception as e:
+        logger.error(f"Error getting stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close() 

@@ -21,6 +21,15 @@ class RiskManager:
         self.max_drawdown_seen = 0.0
         self.last_balance_update = datetime.now()
         
+    async def initialize(self):
+        """Initialize the risk manager."""
+        try:
+            # Perform any necessary setup or validation here
+            logger.info("Risk manager initialized")
+        except Exception as e:
+            logger.error(f"Error initializing risk manager: {e}")
+            raise
+        
     def check_risk_limits(self, symbol: str, market_data: Dict[str, Any]) -> bool:
         """Check if a trade would exceed risk limits."""
         try:

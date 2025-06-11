@@ -3,8 +3,9 @@ import asyncio
 import logging
 from fastapi import FastAPI
 import uvicorn
-from src.api.routes import router
-from src.trading_bot import trading_bot
+from api.routes import router
+from trading_bot import trading_bot
+from market_data.exchange_client import ExchangeClient
 
 # Configure logging
 logging.basicConfig(
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(title="Crypto Trading Bot API")
 
+# Initialize exchange client
+exchange_client = ExchangeClient()
+
 # Include API routes
 app.include_router(router, prefix="/api/v1")
 
@@ -23,6 +27,7 @@ app.include_router(router, prefix="/api/v1")
 async def startup_event():
     """Initialize the trading bot on startup."""
     try:
+        await exchange_client.initialize()
         await trading_bot.initialize()
     except Exception as e:
         logger.error(f"Error initializing trading bot: {e}")
@@ -32,6 +37,7 @@ async def startup_event():
 async def shutdown_event():
     """Shutdown the trading bot on shutdown."""
     try:
+        await exchange_client.shutdown()
         await trading_bot.shutdown()
     except Exception as e:
         logger.error(f"Error shutting down trading bot: {e}")

@@ -122,7 +122,7 @@ BINANCE_API_SECRET=your_api_secret_here
 USE_TESTNET=True
 
 # Frontend/Backend Communication
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000 # Comma-separated list of allowed frontend origins (e.g., http://yourfrontend.com)
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 
 # Database Configuration
 DATABASE_URL=postgresql://user:password@localhost:5432/crypto_trading
@@ -151,15 +151,16 @@ INDICATOR_WINDOWS=20,50,200
 ORDERBOOK_DEPTH=10
 
 # Dynamic Symbol Discovery
-# SYMBOL_DISCOVERY_MODE: Set to 'dynamic' to automatically discover pairs, or 'static' to use TRADING_SYMBOLS.
-# TRADING_SYMBOLS is ignored when SYMBOL_DISCOVERY_MODE is 'dynamic'.
-SYMBOL_DISCOVERY_MODE=dynamic # or 'static'
-TRADING_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT # Comma-separated list (only used if SYMBOL_DISCOVERY_MODE is 'static')
+SYMBOL_DISCOVERY_MODE=dynamic
+TRADING_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT
 
 # Signal Filtering
-# The minimum confidence required for a signal to be considered a valid opportunity.
-# Default is 0.4. Can be set at runtime via API or by setting MIN_CONFIDENCE in the environment.
 MIN_CONFIDENCE=0.4
+
+# Service Configuration
+BOT_LOG_LEVEL=INFO
+API_LOG_LEVEL=INFO
+FRONTEND_LOG_LEVEL=INFO
 ```
 
 B. **YAML Configuration (Alternative)**
@@ -175,24 +176,41 @@ The database tables are automatically created and initial strategies are populat
 5. **Setup Services**
 Choose one of the following methods:
 
-A. **Quick Setup (Development)**
+A. **Systemd Service Setup (Recommended for Production)**
+```bash
+# Create systemd service files
+sudo cp scripts/crypto-trading-bot.service /etc/systemd/system/
+sudo cp scripts/crypto-trading-api.service /etc/systemd/system/
+sudo cp scripts/crypto-trading-frontend.service /etc/systemd/system/
+
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable and start services
+sudo systemctl enable crypto-trading-bot
+sudo systemctl enable crypto-trading-api
+sudo systemctl enable crypto-trading-frontend
+
+sudo systemctl start crypto-trading-bot
+sudo systemctl start crypto-trading-api
+sudo systemctl start crypto-trading-frontend
+```
+
+B. **Quick Setup (Development)**
 ```bash
 ./scripts/setup.sh
 ```
 
-B. **Service Setup (Production)**
-```bash
-sudo ./scripts/setup_service.sh
-```
-
 6. **Start the Services**
 ```bash
-# Start the trading bot
-python run_bot.py
+# Using systemd (Production)
+sudo systemctl start crypto-trading-bot
+sudo systemctl start crypto-trading-api
+sudo systemctl start crypto-trading-frontend
 
-# Start the web interface
-cd frontend
-npm start
+# Or manually (Development)
+python run_bot.py
+cd frontend && npm start
 ```
 
 ## Project Structure
@@ -220,7 +238,10 @@ crypto-trading-bot/
 │   ├── setup.sh             # Development setup script
 │   ├── setup_service.sh     # Production service setup
 │   ├── crypto-trading-bot.service  # Systemd service file
-│   └── init_db.py           # Database initialization
+│   ├── init_db.py           # Database initialization
+│   ├── crypto-trading-bot.service    # Bot systemd service file
+│   ├── crypto-trading-api.service    # API systemd service file
+│   └── crypto-trading-frontend.service # Frontend systemd service file
 ├── requirements.txt          # Python dependencies
 ├── run_bot.py               # Main bot entry point
 ├── debug.py                 # Development debugging tools
@@ -264,8 +285,9 @@ crypto-trading-bot/
 #### `scripts/`
 - **setup.sh**: Development environment setup script
 - **setup_service.sh**: Production service installation script
-- **crypto-trading-bot.service**: Systemd service configuration
-- **init_db.py**: Database initialization and migration script
+- **crypto-trading-bot.service**: Systemd service file for the trading bot
+- **crypto-trading-api.service**: Systemd service file for the API
+- **crypto-trading-frontend.service**: Systemd service file for the frontend
 
 ## API Endpoints
 

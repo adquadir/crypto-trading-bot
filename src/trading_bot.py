@@ -11,6 +11,11 @@ from pathlib import Path
 import time
 import pandas as pd
 import yaml
+import sys
+import signal
+
+# Add src directory to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.market_data.exchange_client import ExchangeClient
 from src.market_data.processor import MarketDataProcessor
@@ -28,8 +33,11 @@ from src.database.database import Database
 from src.strategy.dynamic_config import strategy_config
 from src.strategy.strategy_manager import StrategyManager
 from src.opportunity.opportunity_manager import OpportunityManager
+from src.utils.logger import setup_logger
 
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 class TradingBot:
     def __init__(self):
@@ -66,8 +74,8 @@ class TradingBot:
         # Set strategy config
         self.strategy_config = {}
         
-        # Initialize components
-        self._initialize_components()
+        # Do NOT call async _initialize_components here
+        # self._initialize_components()
         
         # Set trading intervals with defaults
         self.health_check_interval = self.config.get('trading', {}).get('health_check_interval', 60)
@@ -178,13 +186,20 @@ class TradingBot:
             self.exchange_client = ExchangeClient()
             await self.exchange_client.initialize()
             
-            # Initialize WebSocket manager
-            self.ws_manager = WebSocketManager(self.exchange_client)
+            # Initialize WebSocket client
+            self.ws_manager = MarketDataWebSocket(
+                exchange_client=self.exchange_client,
+                symbols=[]
+            )
             await self.ws_manager.initialize()
             
             # Initialize symbol discovery
             self.symbol_discovery = SymbolDiscovery(self.exchange_client)
             await self.symbol_discovery.initialize()
+            
+            # Update WebSocket manager with discovered symbols
+            if self.symbol_discovery.symbols:
+                self.ws_manager.update_symbols(list(self.symbol_discovery.symbols))
             
             # Initialize risk manager
             self.risk_manager = RiskManager(self.config)
@@ -203,11 +218,7 @@ class TradingBot:
             await self.opportunity_manager.initialize()
             
             # Initialize signal generator
-            self.signal_generator = SignalGenerator(
-                self.exchange_client,
-                self.strategy_manager,
-                self.opportunity_manager
-            )
+            self.signal_generator = SignalGenerator()
             await self.signal_generator.initialize()
             
             logger.info("All components initialized successfully")
@@ -246,7 +257,7 @@ class TradingBot:
             self.position_task = asyncio.create_task(self._monitor_positions())
             
             # Start WebSocket manager in background
-            asyncio.create_task(self.ws_manager.start())
+            self.ws_manager.connect()
             
             logger.info("Trading bot started successfully")
             
@@ -903,5 +914,11 @@ class TradingBot:
             }
         }
 
-# Create a singleton instance
-trading_bot = TradingBot()
+if __name__ == "__main__":
+    import asyncio
+    bot = TradingBot()
+    try:
+        asyncio.run(bot.start())
+    except KeyboardInterrupt:
+        print("Shutting down bot...")
+        asyncio.run(bot.stop())

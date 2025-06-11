@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Tuple, Any
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 import numpy as np
@@ -17,10 +17,13 @@ from ta.trend import (
 )
 from ta.volatility import BollingerBands, AverageTrueRange
 
-from ..strategy.dynamic_config import strategy_config
-from ..strategies.candle_cluster.detector import CandleClusterDetector
+from src.strategy.dynamic_config import strategy_config
+from src.strategies.candle_cluster.detector import CandleClusterDetector
 from .confidence_calibrator import ConfidenceCalibrator
 from .signal_tracker import SignalTracker, SignalProfile
+from src.market_data.exchange_client import ExchangeClient
+from src.models.signal import TradingSignal
+from src.models.strategy import Strategy
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,10 @@ class SignalGenerator:
         self.candle_detector = CandleClusterDetector()
         self.signal_tracker = SignalTracker()
         self.confidence_calibrator = ConfidenceCalibrator()
+        
+    async def initialize(self):
+        """Async initialization hook for compatibility with bot startup."""
+        pass
         
     def calculate_indicators(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Calculate technical indicators for the given dataframe."""
@@ -70,38 +77,131 @@ class SignalGenerator:
         try:
             # Bollinger Bands
             bb = ta.volatility.BollingerBands(df['close'])
-            indicators['bb'] = {
-                'upper': safe_float(bb.bollinger_hband().iloc[-1]),
-                'middle': safe_float(bb.bollinger_mavg().iloc[-1]),
-                'lower': safe_float(bb.bollinger_lband().iloc[-1])
-            }
+            indicators['bb_upper'] = safe_float(bb.bollinger_hband().iloc[-1])
+            indicators['bb_middle'] = safe_float(bb.bollinger_mavg().iloc[-1])
+            indicators['bb_lower'] = safe_float(bb.bollinger_lband().iloc[-1])
+            indicators['bb_width'] = safe_float((indicators['bb_upper'] - indicators['bb_lower']) / indicators['bb_middle'])
         except Exception as e:
             logger.error(f"Error calculating Bollinger Bands: {str(e)}")
-            indicators['bb'] = {'upper': 0, 'middle': 0, 'lower': 0}
+            indicators['bb_upper'] = 0
+            indicators['bb_middle'] = 0
+            indicators['bb_lower'] = 0
+            indicators['bb_width'] = 0
         
         try:
             # ADX
             adx = ta.trend.ADXIndicator(df['high'], df['low'], df['close'])
             indicators['adx'] = safe_float(adx.adx().iloc[-1])
+            indicators['adx_trend'] = safe_float(adx.adx().iloc[-1] - adx.adx().iloc[-2])
         except Exception as e:
             logger.error(f"Error calculating ADX: {str(e)}")
             indicators['adx'] = 0
+            indicators['adx_trend'] = 0
         
         try:
             # ATR
             atr = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close'])
             indicators['atr'] = safe_float(atr.average_true_range().iloc[-1])
+            
+            # Calculate ATR trend (positive if increasing, negative if decreasing)
+            atr_values = atr.average_true_range()
+            indicators['atr_trend'] = safe_float(atr_values.iloc[-1] - atr_values.iloc[-2])
+            indicators['atr_percent'] = safe_float(indicators['atr'] / df['close'].iloc[-1])
         except Exception as e:
             logger.error(f"Error calculating ATR: {str(e)}")
             indicators['atr'] = 0
+            indicators['atr_trend'] = 0
+            indicators['atr_percent'] = 0
+        
+        try:
+            # EMAs
+            ema20 = ta.trend.EMAIndicator(df['close'], window=20)
+            ema50 = ta.trend.EMAIndicator(df['close'], window=50)
+            ema200 = ta.trend.EMAIndicator(df['close'], window=200)
+            indicators['ema20'] = safe_float(ema20.ema_indicator().iloc[-1])
+            indicators['ema50'] = safe_float(ema50.ema_indicator().iloc[-1])
+            indicators['ema200'] = safe_float(ema200.ema_indicator().iloc[-1])
+            
+            # Calculate EMA trends
+            indicators['ema20_trend'] = safe_float(ema20.ema_indicator().iloc[-1] - ema20.ema_indicator().iloc[-2])
+            indicators['ema50_trend'] = safe_float(ema50.ema_indicator().iloc[-1] - ema50.ema_indicator().iloc[-2])
+            indicators['ema200_trend'] = safe_float(ema200.ema_indicator().iloc[-1] - ema200.ema_indicator().iloc[-2])
+        except Exception as e:
+            logger.error(f"Error calculating EMAs: {str(e)}")
+            indicators['ema20'] = 0
+            indicators['ema50'] = 0
+            indicators['ema200'] = 0
+            indicators['ema20_trend'] = 0
+            indicators['ema50_trend'] = 0
+            indicators['ema200_trend'] = 0
+        
+        try:
+            # Volume MA
+            volume_ma = ta.volume.VolumeWeightedAveragePrice(
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                volume=df['volume'],
+                window=20
+            )
+            indicators['volume_ma'] = safe_float(volume_ma.volume_weighted_average_price().iloc[-1])
+            
+            # Calculate volume trend
+            volume_values = df['volume'].values
+            indicators['volume_trend'] = safe_float(volume_values[-1] - volume_values[-2])
+            indicators['volume_ratio'] = safe_float(volume_values[-1] / np.mean(volume_values[-20:]))
+        except Exception as e:
+            logger.error(f"Error calculating Volume MA: {str(e)}")
+            indicators['volume_ma'] = 0
+            indicators['volume_trend'] = 0
+            indicators['volume_ratio'] = 0
         
         try:
             # CCI
             cci = ta.trend.CCIIndicator(df['high'], df['low'], df['close'])
             indicators['cci'] = safe_float(cci.cci().iloc[-1])
+            indicators['cci_trend'] = safe_float(cci.cci().iloc[-1] - cci.cci().iloc[-2])
         except Exception as e:
             logger.error(f"Error calculating CCI: {str(e)}")
             indicators['cci'] = 0
+            indicators['cci_trend'] = 0
+        
+        try:
+            # Stochastic Oscillator
+            stoch = ta.momentum.StochasticOscillator(df['high'], df['low'], df['close'])
+            indicators['stoch_k'] = safe_float(stoch.stoch().iloc[-1])
+            indicators['stoch_d'] = safe_float(stoch.stoch_signal().iloc[-1])
+            indicators['stoch_trend'] = safe_float(stoch.stoch().iloc[-1] - stoch.stoch().iloc[-2])
+        except Exception as e:
+            logger.error(f"Error calculating Stochastic Oscillator: {str(e)}")
+            indicators['stoch_k'] = 0
+            indicators['stoch_d'] = 0
+            indicators['stoch_trend'] = 0
+        
+        try:
+            # Ichimoku Cloud
+            ichimoku = ta.trend.IchimokuIndicator(df['high'], df['low'])
+            indicators['tenkan_sen'] = safe_float(ichimoku.ichimoku_conversion_line().iloc[-1])
+            indicators['kijun_sen'] = safe_float(ichimoku.ichimoku_base_line().iloc[-1])
+            indicators['senkou_span_a'] = safe_float(ichimoku.ichimoku_a().iloc[-1])
+            indicators['senkou_span_b'] = safe_float(ichimoku.ichimoku_b().iloc[-1])
+        except Exception as e:
+            logger.error(f"Error calculating Ichimoku Cloud: {str(e)}")
+            indicators['tenkan_sen'] = 0
+            indicators['kijun_sen'] = 0
+            indicators['senkou_span_a'] = 0
+            indicators['senkou_span_b'] = 0
+        
+        # Add raw price data for structure analysis
+        indicators['highs'] = df['high'].values
+        indicators['lows'] = df['low'].values
+        indicators['closes'] = df['close'].values
+        indicators['volumes'] = df['volume'].values
+        
+        # Add price trends
+        indicators['price_trend'] = safe_float(df['close'].iloc[-1] - df['close'].iloc[-2])
+        indicators['price_trend_5'] = safe_float(df['close'].iloc[-1] - df['close'].iloc[-5])
+        indicators['price_trend_10'] = safe_float(df['close'].iloc[-1] - df['close'].iloc[-10])
         
         return indicators
 
@@ -113,11 +213,12 @@ class SignalGenerator:
                 return None
 
             # Calculate freshness metrics for each data type
+            current_time = time.time()
             freshness_metrics = {
-                'ohlcv': market_data.get('ohlcv_freshness', float('inf')),
-                'orderbook': market_data.get('orderbook_freshness', float('inf')),
-                'ticker': market_data.get('ticker_freshness', float('inf')),
-                'open_interest': market_data.get('oi_freshness', float('inf'))
+                'ohlcv': current_time - market_data.get('timestamp', current_time),
+                'orderbook': current_time - market_data.get('timestamp', current_time),
+                'ticker': current_time - market_data.get('timestamp', current_time),
+                'open_interest': current_time - market_data.get('timestamp', current_time)
             }
 
             # Log freshness metrics
@@ -128,10 +229,10 @@ class SignalGenerator:
 
             # Check if any critical data is too stale
             max_freshness = {
-                'ohlcv': 60,  # 1 minute
-                'orderbook': 5,  # 5 seconds
-                'ticker': 5,  # 5 seconds
-                'open_interest': 60  # 1 minute
+                'ohlcv': 1800,  # 30 minutes
+                'orderbook': 300,  # 5 minutes
+                'ticker': 300,  # 5 minutes
+                'open_interest': 1800  # 30 minutes
             }
 
             stale_data = {
@@ -147,15 +248,39 @@ class SignalGenerator:
                 )
                 return None
 
-            # Determine market regime
-            regime = self._determine_market_regime(market_data)
+            # Convert klines data to DataFrame for indicator calculation
+            klines = market_data.get('klines', [])
+            if not klines:
+                logger.warning(f"No klines data available for {symbol}")
+                return None
+
+            df = pd.DataFrame(klines)
+            if df.empty:
+                logger.warning(f"Empty DataFrame for {symbol}")
+                return None
 
             # Calculate indicators
-            indicators = self._calculate_indicators(market_data)
+            indicators = self.calculate_indicators(df)
+            if not indicators:
+                logger.warning(f"Failed to calculate indicators for {symbol}")
+                return None
+
+            # Add indicators to market data for regime determination
+            market_data['indicators'] = indicators
+
+            # Determine market regime
+            regime = self._determine_market_regime(market_data)
+            if not regime:
+                logger.warning(f"Could not determine market regime for {symbol}")
+                return None
+
+            # Log regime determination
+            logger.info(f"Market regime for {symbol}: {regime['regime']} with confidence {regime['confidence']:.2f}")
 
             # Generate signal based on regime
-            signal = await self._generate_regime_signal(market_data, regime, indicators)
+            signal = await self._generate_regime_signal(market_data, regime['regime'], indicators)
             if not signal:
+                logger.debug(f"No signal generated for {symbol} in {regime['regime']} regime")
                 return None
 
             # Add freshness metrics to signal
@@ -173,8 +298,9 @@ class SignalGenerator:
                 return None
 
             # Calculate risk/reward ratio
-            rr_ratio = abs(tp - entry) / abs(sl - entry)
-            if rr_ratio < 1.5:  # Minimum 1.5:1 reward-to-risk
+            rr_ratio = abs(tp - entry) / max(abs(sl - entry), entry * 0.001)  # Use 0.1% of entry as minimum risk
+            if rr_ratio < 1.01:  # Lowered from 1.05 (just need any positive R:R)
+                logger.debug(f"Signal rejected for {symbol}: Poor risk/reward ratio: {rr_ratio:.2f}")
                 self.signal_tracker.log_rejection(
                     symbol,
                     f"Poor risk/reward ratio: {rr_ratio:.2f}",
@@ -184,7 +310,8 @@ class SignalGenerator:
 
             # Check spread
             spread = market_data.get('spread', float('inf'))
-            if spread > 0.002:  # 0.2% max spread
+            if spread > 0.01:  # Increased from 0.008 (1% max spread)
+                logger.debug(f"Signal rejected for {symbol}: Spread too high: {spread:.4f}")
                 self.signal_tracker.log_rejection(
                     symbol,
                     f"Spread too high: {spread:.4f}",
@@ -192,48 +319,106 @@ class SignalGenerator:
                 )
                 return None
 
-            # Create signal profile
-            signal_profile = SignalProfile(
-                symbol=symbol,
-                timestamp=datetime.now(),
-                market_regime=regime,
-                indicators=indicators,
-                entry_price=entry,
-                take_profit=tp,
-                stop_loss=sl,
-                risk_reward_ratio=rr_ratio,
-                confidence=signal['confidence'],
-                volume_profile=market_data.get('volume_profile', {}),
-                order_book_metrics=market_data.get('order_book_metrics', {})
-            )
+            # Market regime checks
+            if regime.get('confidence', 0) < 0.3:  # Lowered from 0.6
+                logger.debug(f"Signal rejected for {symbol}: Low regime confidence: {regime.get('confidence', 0):.2f}")
+                self.signal_tracker.log_rejection(
+                    symbol,
+                    f"Low regime confidence: {regime.get('confidence', 0):.2f}",
+                    {**market_data, **signal}
+                )
+                return None
 
-            # Log the signal
-            self.signal_tracker.log_signal(signal_profile)
+            # Volume checks
+            volume_ma = indicators.get('volume_ma', 0)
+            current_volume = float(market_data['klines'][-1]['volume'])
+            if current_volume < volume_ma * 0.5:  # Lowered from 0.8
+                logger.debug(f"Signal rejected for {symbol}: Low volume: {current_volume:.2f} < {volume_ma * 0.5:.2f}")
+                self.signal_tracker.log_rejection(
+                    symbol,
+                    f"Low volume: {current_volume:.2f} < {volume_ma * 0.5:.2f}",
+                    {**market_data, **signal}
+                )
+                return None
 
-            return {
-                'symbol': symbol,
-                'direction': signal['direction'],
-                'entry': entry,
-                'take_profit': tp,
-                'stop_loss': sl,
-                'confidence': signal['confidence'],
-                'indicators': indicators,
-                'market_regime': regime,
-                'data_freshness': freshness_metrics
+            # Trend strength checks
+            adx = indicators.get('adx', 0)
+            if adx < 15:  # Lowered from 20
+                logger.debug(f"Signal rejected for {symbol}: Weak trend (ADX): {adx:.2f}")
+                self.signal_tracker.log_rejection(
+                    symbol,
+                    f"Weak trend (ADX): {adx:.2f}",
+                    {**market_data, **signal}
+                )
+                return None
+
+            # RSI checks
+            rsi = indicators.get('rsi', 50)
+            if (signal['direction'] == 'LONG' and rsi > 80) or (signal['direction'] == 'SHORT' and rsi < 20):
+                logger.debug(f"Signal rejected for {symbol}: Extreme RSI: {rsi:.2f}")
+                self.signal_tracker.log_rejection(
+                    symbol,
+                    f"Extreme RSI: {rsi:.2f}",
+                    {**market_data, **signal}
+                )
+                return None
+
+            # MACD checks
+            macd = indicators.get('macd', {})
+            macd_value = macd.get('value', 0)
+            macd_signal = macd.get('signal', 0)
+            if (signal['direction'] == 'LONG' and macd_value <= macd_signal) or \
+               (signal['direction'] == 'SHORT' and macd_value >= macd_signal):
+                logger.debug(f"Signal rejected for {symbol}: MACD not confirming direction: {macd_value:.2f} vs {macd_signal:.2f}")
+                self.signal_tracker.log_rejection(
+                    symbol,
+                    f"MACD not confirming direction: {macd_value:.2f} vs {macd_signal:.2f}",
+                    {**market_data, **signal}
+                )
+                return None
+
+            # Create final signal with proper data types
+            final_signal = {
+                'symbol': str(symbol),
+                'direction': str(signal['direction']),
+                'entry': float(entry),
+                'take_profit': float(tp),
+                'stop_loss': float(sl),
+                'confidence': float(signal['confidence']),
+                'indicators': {
+                    k: float(v) if isinstance(v, (int, float)) else v
+                    for k, v in indicators.items()
+                },
+                'market_regime': str(regime['regime']),
+                'data_freshness': {
+                    k: float(v) for k, v in freshness_metrics.items()
+                },
+                'timestamp': float(current_time)
             }
 
+            # Log the signal
+            logger.info(f"Generated signal for {symbol}: {signal['direction']} at {entry:.2f}, TP: {tp:.2f}, SL: {sl:.2f}")
+
+            return final_signal
+
         except Exception as e:
-            logger.error(f"Error generating signals: {str(e)}")
+            logger.error(f"Error generating signals for {symbol}: {str(e)}")
             return None
             
     def _determine_market_regime(self, market_data: Dict) -> Dict:
         """Determine the current market regime with confidence score."""
         try:
+            symbol = market_data.get('symbol', 'unknown')
             indicators = market_data.get('indicators', {})
-            adx = indicators.get('adx', {}).get('value', 0)
-            bb_width = (indicators.get('bb_upper', 0) - indicators.get('bb_lower', 0)) / indicators.get('bb_middle', 1)
+            adx = indicators.get('adx', 0)
+            bb_upper = indicators.get('bb_upper', 0)
+            bb_lower = indicators.get('bb_lower', 0)
+            bb_middle = indicators.get('bb_middle', 1)  # Use 1 as fallback to avoid division by zero
             atr = indicators.get('atr', 0)
-            current_price = indicators.get('current_price', 0)
+            current_price = float(market_data['klines'][-1]['close']) if market_data.get('klines') else 1
+            
+            # Add debug logging
+            logger.debug(f"Determining market regime for {symbol} - ADX: {adx:.2f}, BB Width: {(bb_upper - bb_lower) / bb_middle:.4f}, ATR: {atr:.4f}")
             
             # Calculate regime scores
             trend_score = 0
@@ -241,28 +426,70 @@ class SignalGenerator:
             volatile_score = 0
             
             # ADX contribution (0-1)
-            if adx > 25:
+            if adx > 25:  # Strong trend
                 trend_score += 0.6
-            elif adx > 20:
+            elif adx > 20:  # Moderate trend
                 trend_score += 0.3
-            elif adx < 15:
+            elif adx < 15:  # Weak trend, likely ranging
                 range_score += 0.4
             
             # BB Width contribution (0-1)
-            if bb_width < 0.02:
-                range_score += 0.4
-            elif bb_width < 0.03:
-                range_score += 0.2
-            elif bb_width > 0.05:
-                volatile_score += 0.3
+            epsilon = 1e-8
+            if abs(bb_middle) > epsilon:  # Avoid division by zero
+                bb_width = (bb_upper - bb_lower) / bb_middle
+                if bb_width < 0.02:  # Tight range
+                    range_score += 0.4
+                elif bb_width < 0.03:  # Moderate range
+                    range_score += 0.2
+                elif bb_width > 0.05:  # Wide range, likely volatile
+                    volatile_score += 0.3
+            else:
+                bb_width = 0
             
             # ATR contribution (0-1)
-            if atr > 0 and current_price > 0:
+            if atr > epsilon and current_price > epsilon:
                 atr_percent = atr / current_price
-                if atr_percent > 0.03:
+                if atr_percent > 0.03:  # High volatility
                     volatile_score += 0.4
-                elif atr_percent > 0.02:
+                elif atr_percent > 0.02:  # Moderate volatility
                     volatile_score += 0.2
+            else:
+                atr_percent = 0
+            
+            # Volume contribution (0-1)
+            volume_ma = indicators.get('volume_ma', 0)
+            current_volume = float(market_data['klines'][-1]['volume'])
+            if current_volume > volume_ma * 1.5:  # High volume
+                volatile_score += 0.2
+            elif current_volume < volume_ma * 0.5:  # Low volume
+                range_score += 0.2
+            
+            # RSI contribution (0-1)
+            rsi = indicators.get('rsi', 50)
+            if rsi > 70 or rsi < 30:  # Extreme RSI
+                volatile_score += 0.2
+            elif 40 <= rsi <= 60:  # Neutral RSI
+                range_score += 0.2
+            
+            # MACD contribution (0-1)
+            macd = indicators.get('macd', {})
+            macd_value = macd.get('value', 0)
+            macd_signal = macd.get('signal', 0)
+            if abs(macd_value - macd_signal) > abs(macd_signal * 0.1):  # Strong MACD divergence
+                trend_score += 0.2
+            
+            # EMA contribution (0-1)
+            ema20 = indicators.get('ema20', current_price)
+            ema50 = indicators.get('ema50', current_price)
+            ema200 = indicators.get('ema200', current_price)
+            
+            # Check EMA alignment
+            if ema20 > ema50 > ema200:  # Strong uptrend
+                trend_score += 0.3
+            elif ema20 < ema50 < ema200:  # Strong downtrend
+                trend_score += 0.3
+            elif abs(ema20 - ema50) / ema50 < 0.01:  # EMAs close together
+                range_score += 0.3
             
             # Calculate final scores
             scores = {
@@ -276,13 +503,44 @@ class SignalGenerator:
             
             # Calculate confidence (0-1)
             total_score = sum(scores.values())
-            confidence = primary_regime[1] / total_score if total_score > 0 else 0
+            confidence = primary_regime[1] / total_score if abs(total_score) > epsilon else 0
+            
+            # Add debug logging
+            logger.debug(f"Regime scores for {symbol} - Trending: {trend_score:.2f}, Ranging: {range_score:.2f}, Volatile: {volatile_score:.2f}")
+            logger.debug(f"Selected regime: {primary_regime[0]} with confidence: {confidence:.2f}")
             
             # Check for regime transition
             previous_regime = market_data.get('previous_regime', 'unknown')
             if previous_regime != primary_regime[0]:
                 # Require higher confidence for regime changes
                 if confidence < 0.6:
+                    logger.debug(f"Regime change rejected for {symbol} - Previous: {previous_regime}, New: {primary_regime[0]}, Confidence: {confidence:.2f}")
+                    return {
+                        'regime': previous_regime,
+                        'confidence': confidence,
+                        'scores': scores,
+                        'is_transitioning': True
+                    }
+                
+                # Check for false regime changes
+                if previous_regime == 'trending' and trend_score > 0.3:
+                    logger.debug(f"Regime change rejected for {symbol} - Still showing trend characteristics")
+                    return {
+                        'regime': previous_regime,
+                        'confidence': confidence,
+                        'scores': scores,
+                        'is_transitioning': True
+                    }
+                elif previous_regime == 'ranging' and range_score > 0.3:
+                    logger.debug(f"Regime change rejected for {symbol} - Still showing range characteristics")
+                    return {
+                        'regime': previous_regime,
+                        'confidence': confidence,
+                        'scores': scores,
+                        'is_transitioning': True
+                    }
+                elif previous_regime == 'volatile' and volatile_score > 0.3:
+                    logger.debug(f"Regime change rejected for {symbol} - Still showing volatile characteristics")
                     return {
                         'regime': previous_regime,
                         'confidence': confidence,
@@ -338,13 +596,57 @@ class SignalGenerator:
     async def _generate_regime_signal(self, market_data: Dict, regime: str, indicators: Dict) -> Optional[Dict]:
         """Generate signal based on market regime."""
         try:
+            symbol = market_data.get('symbol', 'unknown')
+            current_price = float(market_data['klines'][-1]['close'])
+            
+            # Add debug logging
+            logger.debug(f"Generating {regime} signal for {symbol} at price {current_price:.2f}")
+            
+            # Get regime-specific signal
             if regime == 'trending':
-                return self._generate_trending_signal(market_data, indicators)
+                signal = self._generate_trending_signal(market_data, indicators)
             elif regime == 'ranging':
-                return self._generate_ranging_signal(market_data, indicators)
+                signal = self._generate_ranging_signal(market_data, indicators)
             else:  # volatile
-                return self._generate_volatile_signal(market_data, indicators)
+                signal = self._generate_volatile_signal(market_data, indicators)
                 
+            if not signal:
+                logger.debug(f"No {regime} signal generated for {symbol}")
+                return None
+                
+            # Add regime-specific checks
+            if regime == 'trending':
+                # Check trend strength
+                adx = indicators.get('adx', 0)
+                if adx < 20:  # Lowered from 25
+                    logger.debug(f"Trending signal rejected for {symbol}: Weak trend (ADX: {adx:.2f})")
+                    return None
+                    
+                # Check trend direction
+                ema20 = indicators.get('ema20', current_price)
+                ema50 = indicators.get('ema50', current_price)
+                if (signal['direction'] == 'LONG' and ema20 <= ema50) or \
+                   (signal['direction'] == 'SHORT' and ema20 >= ema50):
+                    logger.debug(f"Trending signal rejected for {symbol}: EMA not confirming direction")
+                    return None
+                    
+            elif regime == 'ranging':
+                # Check range boundaries
+                bb_upper = indicators.get('bb_upper', current_price * 1.1)
+                bb_lower = indicators.get('bb_lower', current_price * 0.9)
+                if current_price > bb_upper or current_price < bb_lower:
+                    logger.debug(f"Ranging signal rejected for {symbol}: Price outside Bollinger Bands")
+                    return None
+                    
+            else:  # volatile
+                # Check volatility
+                atr = indicators.get('atr', 0)
+                if atr / current_price < 0.02:  # Low volatility
+                    logger.debug(f"Volatile signal rejected for {symbol}: Low volatility")
+                    return None
+                    
+            return signal
+            
         except Exception as e:
             logger.error(f"Error generating regime signal: {e}")
             return None
@@ -387,17 +689,17 @@ class SignalGenerator:
             if structure_levels:
                 if direction == 'LONG':
                     entry = current_price
-                    tp = structure_levels['next_resistance'] if structure_levels['next_resistance'] else (entry + (2 * indicators.get('atr', 0)))
-                    sl = structure_levels['support'] if structure_levels['support'] else (entry - indicators.get('atr', 0))
+                    tp = structure_levels['next_resistance'] if structure_levels['next_resistance'] else (entry + (2 * max(indicators.get('atr', 0), current_price * 0.01)))
+                    sl = structure_levels['support'] if structure_levels['support'] else (entry - max(indicators.get('atr', 0), current_price * 0.01))
                 else:  # SHORT
                     entry = current_price
-                    tp = structure_levels['next_support'] if structure_levels['next_support'] else (entry - (2 * indicators.get('atr', 0)))
-                    sl = structure_levels['resistance'] if structure_levels['resistance'] else (entry + indicators.get('atr', 0))
+                    tp = structure_levels['next_support'] if structure_levels['next_support'] else (entry - (2 * max(indicators.get('atr', 0), current_price * 0.01)))
+                    sl = structure_levels['resistance'] if structure_levels['resistance'] else (entry + max(indicators.get('atr', 0), current_price * 0.01))
                 
                 return entry, tp, sl
             
             # Fallback to ATR-based levels if no structure found
-            atr = indicators.get('atr', 0)
+            atr = max(indicators.get('atr', 0), current_price * 0.01)  # Use 1% of price as minimum ATR
             if direction == 'LONG':
                 entry = current_price
                 tp = entry + (2 * atr)
@@ -426,7 +728,7 @@ class SignalGenerator:
             avg_gain = (avg_gain * (period - 1) + gain[i]) / period
             avg_loss = (avg_loss * (period - 1) + loss[i]) / period
             
-        rs = avg_gain / avg_loss if avg_loss != 0 else 0
+        rs = avg_gain / avg_loss if abs(avg_loss) > 1e-8 else 0
         rsi = 100 - (100 / (1 + rs))
         
         return np.concatenate(([np.nan], rsi))
@@ -604,46 +906,105 @@ class SignalGenerator:
     def _generate_trending_signal(self, market_data: Dict, indicators: Dict) -> Optional[Dict]:
         """Generate signal for trending market regime."""
         try:
-            # Get trend direction and strength
-            adx = indicators.get('adx', {}).get('value', 0)
-            di_plus = indicators.get('adx', {}).get('di_plus', 0)
-            di_minus = indicators.get('adx', {}).get('di_minus', 0)
+            symbol = market_data.get('symbol', 'unknown')
+            current_price = float(market_data['klines'][-1]['close'])
             
-            # Calculate ATR and structure levels
-            atr = indicators.get('atr', 0)
-            current_price = market_data.get('current_price', 0)
+            # Add debug logging
+            logger.debug(f"Generating trending signal for {symbol} at price {current_price:.2f}")
             
-            # Determine trend direction
-            if di_plus > di_minus and adx > 25:  # Strong uptrend
-                direction = 'LONG'
-                entry = current_price
-                stop_loss = entry - (atr * 2.0)  # Wider stop in trending market
-                take_profit = entry + (atr * 3.0)  # Higher reward target
-            elif di_minus > di_plus and adx > 25:  # Strong downtrend
-                direction = 'SHORT'
-                entry = current_price
-                stop_loss = entry + (atr * 2.0)
-                take_profit = entry - (atr * 3.0)
-            else:
-                return None  # Not a strong enough trend
+            # Get trend indicators
+            ema20 = indicators.get('ema20', current_price)
+            ema50 = indicators.get('ema50', current_price)
+            ema200 = indicators.get('ema200', current_price)
+            adx = indicators.get('adx', 0)
+            macd = indicators.get('macd', {})
+            macd_value = macd.get('value', 0)
+            macd_signal = macd.get('signal', 0)
+            rsi = indicators.get('rsi', 50)
+            
+            # Check trend strength
+            if adx < 20:  # Lowered from 25
+                logger.debug(f"Trending signal rejected for {symbol}: Weak trend (ADX: {adx:.2f})")
+                return None
                 
-            # Calculate confidence based on trend strength
-            confidence = min(adx / 50, 1.0)  # Normalize ADX to 0-1 range
-            
-            return {
-                'direction': direction,
-                'entry': entry,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'confidence': confidence,
-                'regime': 'TRENDING',
+            # Check trend direction
+            if ema20 <= ema50:
+                logger.debug(f"Trending signal rejected for {symbol}: EMA not confirming uptrend")
+                return None
+                
+            # Check MACD
+            if macd_value <= macd_signal:
+                logger.debug(f"Trending signal rejected for {symbol}: MACD not confirming uptrend")
+                return None
+                
+            # Check RSI
+            if rsi > 70:
+                logger.debug(f"Trending signal rejected for {symbol}: Extreme RSI ({rsi:.2f})")
+                return None
+                
+            # Check price relative to EMAs
+            if current_price <= ema20:
+                logger.debug(f"Trending signal rejected for {symbol}: Price below EMA20")
+                return None
+                
+            # Check volume
+            volume_ma = indicators.get('volume_ma', 0)
+            current_volume = float(market_data['klines'][-1]['volume'])
+            if current_volume < volume_ma * 0.5:  # Lowered from 0.8
+                logger.debug(f"Trending signal rejected for {symbol}: Low volume")
+                return None
+                
+            # Check ATR
+            atr = indicators.get('atr', current_price * 0.01)
+            atr_percent = atr / current_price
+            if atr_percent < 0.01:  # Lowered from 0.015
+                logger.debug(f"Trending signal rejected for {symbol}: Low volatility (ATR: {atr_percent:.4f})")
+                return None
+                
+            # Check ATR trend
+            atr_trend = indicators.get('atr_trend', 0)
+            if atr_trend <= 0:
+                logger.debug(f"Trending signal rejected for {symbol}: ATR trend not confirming uptrend")
+                return None
+                
+            # Check price structure
+            structure_levels = self._find_nearest_structure_level(indicators, current_price, 'LONG')
+            if not structure_levels:
+                logger.debug(f"Trending signal rejected for {symbol}: No structure levels found")
+                return None
+                
+            # Check if price is near support
+            if current_price > structure_levels['support'] * 1.01:
+                logger.debug(f"Trending signal rejected for {symbol}: Price not near support")
+                return None
+                
+            # Check if next resistance is far enough
+            if structure_levels['next_resistance'] and \
+               (structure_levels['next_resistance'] - current_price) / current_price < 0.01:
+                logger.debug(f"Trending signal rejected for {symbol}: Next resistance too close")
+                return None
+                
+            # Generate signal
+            signal = {
+                'direction': 'LONG',
+                'confidence': min(0.8, adx / 100),  # Cap confidence at 0.8
                 'indicators': {
+                    'ema20': ema20,
+                    'ema50': ema50,
+                    'ema200': ema200,
                     'adx': adx,
-                    'di_plus': di_plus,
-                    'di_minus': di_minus,
-                    'atr': atr
+                    'macd': macd,
+                    'rsi': rsi,
+                    'atr': atr,
+                    'atr_trend': atr_trend,
+                    'volume_ma': volume_ma,
+                    'current_volume': current_volume,
+                    'structure_levels': structure_levels
                 }
             }
+            
+            logger.info(f"Generated trending signal for {symbol}: LONG at {current_price:.2f}")
+            return signal
             
         except Exception as e:
             logger.error(f"Error generating trending signal: {e}")
@@ -652,59 +1013,94 @@ class SignalGenerator:
     def _generate_ranging_signal(self, market_data: Dict, indicators: Dict) -> Optional[Dict]:
         """Generate signal for ranging market regime."""
         try:
-            # Get range boundaries
-            bb = indicators.get('bb', {})
-            bb_upper = bb.get('upper', 0)
-            bb_lower = bb.get('lower', 0)
-            bb_middle = bb.get('middle', 0)
+            symbol = market_data.get('symbol', 'unknown')
+            current_price = float(market_data['klines'][-1]['close'])
             
-            # Get RSI
+            # Add debug logging
+            logger.debug(f"Generating ranging signal for {symbol} at price {current_price:.2f}")
+            
+            # Get range indicators
+            bb_upper = indicators.get('bb_upper', current_price * 1.02)
+            bb_lower = indicators.get('bb_lower', current_price * 0.98)
+            bb_middle = indicators.get('bb_middle', current_price)
             rsi = indicators.get('rsi', 50)
+            macd = indicators.get('macd', {})
+            macd_value = macd.get('value', 0)
+            macd_signal = macd.get('signal', 0)
+            adx = indicators.get('adx', 0)
             
-            # Get current price
-            current_price = market_data.get('current_price', 0)
-            
-            # Calculate range width
-            range_width = (bb_upper - bb_lower) / bb_middle if bb_middle > 0 else 0
-            
-            # Check if price is near range boundaries
-            if current_price <= bb_lower * 1.01 and rsi < 30:  # Near lower boundary and oversold
+            # Check if market is actually ranging
+            if adx > 25:  # Market is trending
+                logger.debug(f"Ranging signal rejected for {symbol}: Market is trending (ADX: {adx:.2f})")
+                return None
+                
+            # Calculate distance from middle band
+            distance_from_middle = abs(current_price - bb_middle) / bb_middle
+            if distance_from_middle < 0.005:  # Price too close to middle band
+                logger.debug(f"Ranging signal rejected for {symbol}: Price too close to middle band")
+                return None
+                
+            # Check volume
+            volume_ma = indicators.get('volume_ma', 0)
+            current_volume = float(market_data['klines'][-1]['volume'])
+            if current_volume < volume_ma * 0.5:  # Lowered from 0.8
+                logger.debug(f"Ranging signal rejected for {symbol}: Low volume")
+                return None
+                
+            # Check price structure
+            structure_levels = self._find_nearest_structure_level(indicators, current_price, 'LONG')
+            if not structure_levels:
+                logger.debug(f"Ranging signal rejected for {symbol}: No structure levels found")
+                return None
+                
+            # Determine signal direction based on RSI, Bollinger Bands, and MACD
+            if rsi < 30 and current_price <= bb_lower * 1.01 and macd_value > macd_signal:
                 direction = 'LONG'
-                entry = current_price
-                stop_loss = entry - (range_width * 0.5)  # Tighter stop in ranging market
-                take_profit = bb_middle  # Target middle of range
-            elif current_price >= bb_upper * 0.99 and rsi > 70:  # Near upper boundary and overbought
+                confidence = 0.7
+            elif rsi > 70 and current_price >= bb_upper * 0.99 and macd_value < macd_signal:
                 direction = 'SHORT'
-                entry = current_price
-                stop_loss = entry + (range_width * 0.5)
-                take_profit = bb_middle
+                confidence = 0.7
             else:
-                return None  # Not at range boundaries
+                logger.debug(f"Ranging signal rejected for {symbol}: RSI: {rsi:.2f}, Price vs BB: {distance_from_middle:.4f}, MACD: {macd_value:.2f}")
+                return None
                 
-            # Calculate confidence based on range strength
-            confidence = 0.7  # Base confidence for range trades
-            
-            # Adjust confidence based on RSI extremes
-            if direction == 'LONG' and rsi < 20:
-                confidence += 0.1
-            elif direction == 'SHORT' and rsi > 80:
-                confidence += 0.1
+            # Check if price is near structure level
+            if direction == 'LONG' and current_price > structure_levels['support'] * 1.01:
+                logger.debug(f"Ranging signal rejected for {symbol}: Price not near support")
+                return None
+            elif direction == 'SHORT' and current_price < structure_levels['resistance'] * 0.99:
+                logger.debug(f"Ranging signal rejected for {symbol}: Price not near resistance")
+                return None
                 
-            return {
+            # Check if next level is far enough
+            if direction == 'LONG' and structure_levels['next_resistance'] and \
+               (structure_levels['next_resistance'] - current_price) / current_price < 0.01:
+                logger.debug(f"Ranging signal rejected for {symbol}: Next resistance too close")
+                return None
+            elif direction == 'SHORT' and structure_levels['next_support'] and \
+                 (current_price - structure_levels['next_support']) / current_price < 0.01:
+                logger.debug(f"Ranging signal rejected for {symbol}: Next support too close")
+                return None
+                
+            # Generate signal
+            signal = {
                 'direction': direction,
-                'entry': entry,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'confidence': min(confidence, 1.0),
-                'regime': 'RANGING',
+                'confidence': confidence,
                 'indicators': {
-                    'rsi': rsi,
                     'bb_upper': bb_upper,
                     'bb_lower': bb_lower,
                     'bb_middle': bb_middle,
-                    'range_width': range_width
+                    'rsi': rsi,
+                    'macd': macd,
+                    'adx': adx,
+                    'volume_ma': volume_ma,
+                    'current_volume': current_volume,
+                    'structure_levels': structure_levels
                 }
             }
+            
+            logger.info(f"Generated ranging signal for {symbol}: {direction} at {current_price:.2f}")
+            return signal
             
         except Exception as e:
             logger.error(f"Error generating ranging signal: {e}")
@@ -713,56 +1109,94 @@ class SignalGenerator:
     def _generate_volatile_signal(self, market_data: Dict, indicators: Dict) -> Optional[Dict]:
         """Generate signal for volatile market regime."""
         try:
-            # Get volatility metrics
-            atr = indicators.get('atr', 0)
-            bb_width = indicators.get('bb_width', 0)
+            symbol = market_data.get('symbol', 'unknown')
+            current_price = float(market_data['klines'][-1]['close'])
             
-            # Get current price and recent highs/lows
-            current_price = market_data.get('current_price', 0)
-            recent_high = max([float(c['high']) for c in market_data.get('klines', [])[-5:]])
-            recent_low = min([float(c['low']) for c in market_data.get('klines', [])[-5:]])
+            # Add debug logging
+            logger.debug(f"Generating volatile signal for {symbol} at price {current_price:.2f}")
             
-            # Calculate volatility range
-            vol_range = recent_high - recent_low
+            # Get volatility indicators
+            atr = indicators.get('atr', current_price * 0.01)
+            atr_trend = indicators.get('atr_trend', 0)
+            rsi = indicators.get('rsi', 50)
+            macd = indicators.get('macd', {})
+            macd_value = macd.get('value', 0)
+            macd_signal = macd.get('signal', 0)
+            adx = indicators.get('adx', 0)
             
-            # Determine if price is near recent extremes
-            if current_price <= recent_low * 1.01:  # Near recent low
+            # Calculate ATR percentage
+            atr_percent = atr / current_price
+            
+            # Check if market is actually volatile
+            if atr_percent < 0.015:  # Market is not volatile enough
+                logger.debug(f"Volatile signal rejected for {symbol}: Low volatility (ATR: {atr_percent:.4f})")
+                return None
+                
+            # Check if market is trending
+            if adx > 25:  # Market is trending
+                logger.debug(f"Volatile signal rejected for {symbol}: Market is trending (ADX: {adx:.2f})")
+                return None
+                
+            # Check volume
+            volume_ma = indicators.get('volume_ma', 0)
+            current_volume = float(market_data['klines'][-1]['volume'])
+            if current_volume < volume_ma * 0.5:  # Lowered from 0.8
+                logger.debug(f"Volatile signal rejected for {symbol}: Low volume")
+                return None
+                
+            # Check price structure
+            structure_levels = self._find_nearest_structure_level(indicators, current_price, 'LONG')
+            if not structure_levels:
+                logger.debug(f"Volatile signal rejected for {symbol}: No structure levels found")
+                return None
+                
+            # Determine signal direction based on ATR trend, RSI, and MACD
+            if atr_trend > 0 and rsi < 40 and macd_value > macd_signal:
                 direction = 'LONG'
-                entry = current_price
-                stop_loss = entry - (atr * 1.5)  # Tighter stop in volatile market
-                take_profit = entry + (atr * 2.0)  # Quick profit target
-            elif current_price >= recent_high * 0.99:  # Near recent high
+                confidence = 0.6
+            elif atr_trend < 0 and rsi > 60 and macd_value < macd_signal:
                 direction = 'SHORT'
-                entry = current_price
-                stop_loss = entry + (atr * 1.5)
-                take_profit = entry - (atr * 2.0)
+                confidence = 0.6
             else:
-                return None  # Not at volatility extremes
+                logger.debug(f"Volatile signal rejected for {symbol}: ATR Trend: {atr_trend:.4f}, RSI: {rsi:.2f}, MACD: {macd_value:.2f}")
+                return None
                 
-            # Calculate confidence based on volatility
-            confidence = 0.6  # Base confidence for volatile trades
-            
-            # Adjust confidence based on volatility strength
-            if bb_width > 0.1:  # Very volatile
-                confidence -= 0.1
-            elif bb_width < 0.05:  # Less volatile
-                confidence += 0.1
+            # Check if price is near structure level
+            if direction == 'LONG' and current_price > structure_levels['support'] * 1.01:
+                logger.debug(f"Volatile signal rejected for {symbol}: Price not near support")
+                return None
+            elif direction == 'SHORT' and current_price < structure_levels['resistance'] * 0.99:
+                logger.debug(f"Volatile signal rejected for {symbol}: Price not near resistance")
+                return None
                 
-            return {
+            # Check if next level is far enough
+            if direction == 'LONG' and structure_levels['next_resistance'] and \
+               (structure_levels['next_resistance'] - current_price) / current_price < 0.01:
+                logger.debug(f"Volatile signal rejected for {symbol}: Next resistance too close")
+                return None
+            elif direction == 'SHORT' and structure_levels['next_support'] and \
+                 (current_price - structure_levels['next_support']) / current_price < 0.01:
+                logger.debug(f"Volatile signal rejected for {symbol}: Next support too close")
+                return None
+                
+            # Generate signal
+            signal = {
                 'direction': direction,
-                'entry': entry,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'confidence': min(confidence, 1.0),
-                'regime': 'VOLATILE',
+                'confidence': confidence,
                 'indicators': {
                     'atr': atr,
-                    'bb_width': bb_width,
-                    'vol_range': vol_range,
-                    'recent_high': recent_high,
-                    'recent_low': recent_low
+                    'atr_trend': atr_trend,
+                    'rsi': rsi,
+                    'macd': macd,
+                    'adx': adx,
+                    'volume_ma': volume_ma,
+                    'current_volume': current_volume,
+                    'structure_levels': structure_levels
                 }
             }
+            
+            logger.info(f"Generated volatile signal for {symbol}: {direction} at {current_price:.2f}")
+            return signal
             
         except Exception as e:
             logger.error(f"Error generating volatile signal: {e}")
