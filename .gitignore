@@ -1,0 +1,9 @@
+node_modules/
+venv/
+logs
+*log
+*.log
+*.pack
+frontend/node_modules/
+venv/
+logs/
