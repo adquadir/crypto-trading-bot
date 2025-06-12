@@ -169,7 +169,7 @@ Create configuration files in the `config/` directory:
 - `config/production.yaml` - Production-specific settings
 
 4. **Initialize Database**
-The database tables are automatically created and initial strategies are populated when the backend API service (`src/api/main.py`) starts for the first time. There is no separate `init_db.py` script to run.
+The database tables are automatically created and initial strategies are populated when the backend API service (`src/main.py`) starts for the first time. There is no separate `init_db.py` script to run.
 
    If you need to perform database migrations for schema changes, it is recommended to use a dedicated migration tool like Alembic.
 
@@ -393,7 +393,7 @@ To understand why symbols are excluded by advanced filters (such as volume trend
   export LOG_LEVEL=DEBUG
   ```
 
-- **Or by editing your logging configuration in `src/api/main.py` or your entrypoint:**
+- **Or by editing your logging configuration in `src/main.py` or your entrypoint:**
   ```python
   logging.basicConfig(level=logging.DEBUG, ...)
   ```

@@ -25,15 +25,15 @@ const config = {
     API_BASE_URL: getApiBaseUrl(),
     WS_BASE_URL: getWsBaseUrl(),
     ENDPOINTS: {
-        STATS: '/api/trading/stats',
-        POSITIONS: '/api/trading/positions',
-        STRATEGIES: '/api/trading/strategies',
-        SETTINGS: '/api/trading/settings',
-        SIGNALS: '/api/trading/signals',
+        STATS: '/api/v1/trading/stats',
+        POSITIONS: '/api/v1/trading/positions',
+        STRATEGIES: '/api/v1/trading/strategies',
+        SETTINGS: '/api/v1/trading/settings',
+        SIGNALS: '/api/v1/trading/signals',
         WS_SIGNALS: '/ws/signals',
-        OPPORTUNITIES: '/api/trading/opportunities',
-        OPPORTUNITY_STATS: '/api/trading/opportunities/stats',
-        SYMBOL_OPPORTUNITY: (symbol) => `/api/trading/opportunities/${symbol}`
+        OPPORTUNITIES: '/api/v1/trading/opportunities',
+        OPPORTUNITY_STATS: '/api/v1/trading/opportunities/stats',
+        SYMBOL_OPPORTUNITY: (symbol) => `/api/v1/trading/opportunities/${symbol}`
     },
     // API endpoints
     apiUrl: process.env.REACT_APP_API_URL || 'http://localhost:8000',

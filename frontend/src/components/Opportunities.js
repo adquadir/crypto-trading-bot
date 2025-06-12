@@ -255,34 +255,40 @@ const Opportunities = () => {
   useEffect(() => {
     let ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
     
-    ws.onopen = () => {
-        console.log('WebSocket connected');
-        setWsConnected(true);
+    const attachHandlers = (socket) => {
+        socket.onopen = () => {
+            console.log('WebSocket connected');
+            setWsConnected(true);
+        };
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'opportunities') {
+                setOpportunities(data.data);
+            }
+        };
+
+        socket.onclose = () => {
+            console.log('WebSocket disconnected');
+            setWsConnected(false);
+            
+            // Attempt to reconnect after a delay
+            setTimeout(() => {
+                console.log('Attempting to reconnect WebSocket...');
+                const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+                attachHandlers(newWs);  // Reattach handlers to new instance
+                ws = newWs;  // Replace the old WebSocket instance
+            }, 5000);
+        };
+
+        socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            setError('WebSocket connection error');
+        };
     };
 
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'opportunities') {
-            setOpportunities(data.data);
-        }
-    };
-
-    ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        setWsConnected(false);
-        
-        // Attempt to reconnect after a delay
-        setTimeout(() => {
-            console.log('Attempting to reconnect WebSocket...');
-            const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
-            ws = newWs;  // Replace the old WebSocket instance
-        }, 5000);
-    };
-
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setError('WebSocket connection error');
-    };
+    // Attach handlers to initial WebSocket
+    attachHandlers(ws);
 
     return () => {
         ws.close();

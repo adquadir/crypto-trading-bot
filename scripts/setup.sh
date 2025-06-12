@@ -44,8 +44,8 @@ check_bot() {
 
 # Function to check if web interface is running
 check_web_interface() {
-    if check_process "src/api/main.py"; then
-        echo "Web interface is already running"
+    if check_process "src/main.py"; then
+        echo "API service is already running"
         return 0
     fi
     return 1
@@ -55,7 +55,6 @@ check_web_interface() {
 stop_existing_processes() {
     echo "Stopping existing processes..."
     pkill -f "src/main.py" || true
-    pkill -f "src/api/main.py" || true
     sleep 2  # Give them time to shut down
 }
 
@@ -71,11 +70,11 @@ start_bot() {
 
 # Function to start the web interface
 start_web_interface() {
-    echo "Starting web interface..."
+    echo "Starting API service..."
     cd "$PROJECT_ROOT"  # Go to project root
-    python src/api/main.py > logs/web_interface.log 2>&1 &
+    python src/main.py > logs/web_interface.log 2>&1 &
     WEB_PID=$!
-    echo "Web interface started with PID: $WEB_PID"
+    echo "API service started with PID: $WEB_PID"
     cd frontend  # Return to frontend directory
 }
 
@@ -113,7 +112,7 @@ Type=simple
 User=$USER
 WorkingDirectory=$PROJECT_ROOT
 Environment=PYTHONPATH=$PROJECT_ROOT
-ExecStart=$PROJECT_ROOT/venv/bin/python $PROJECT_ROOT/src/api/main.py
+ExecStart=$PROJECT_ROOT/venv/bin/python $PROJECT_ROOT/src/main.py
 Restart=always
 RestartSec=10
 
@@ -193,7 +192,7 @@ fi
 
 # Check if web interface is running
 if ! check_web_interface; then
-    read -p "Web interface is not running. Do you want to start it? (y/n) " -n 1 -r
+    read -p "API service is not running. Do you want to start it? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         start_web_interface
