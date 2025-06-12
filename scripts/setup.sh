@@ -110,8 +110,8 @@ setup_database() {
             sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y locales
             
             # Configure locales non-interactively
-            sudo -n locale-gen en_US.UTF-8
-            sudo -n update-locale LANG=en_US.UTF-8
+            sudo -n /usr/sbin/locale-gen en_US.UTF-8
+            sudo -n /usr/sbin/update-locale LANG=en_US.UTF-8
             export LANG=en_US.UTF-8
             export LC_ALL=en_US.UTF-8
             
