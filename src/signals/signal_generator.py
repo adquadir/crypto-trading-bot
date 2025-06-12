@@ -438,11 +438,11 @@ class SignalGenerator:
             if abs(bb_middle) > epsilon:  # Avoid division by zero
                 bb_width = (bb_upper - bb_lower) / bb_middle
                 if bb_width < 0.02:  # Tight range
-                    range_score += 0.4
+                range_score += 0.4
                 elif bb_width < 0.03:  # Moderate range
-                    range_score += 0.2
+                range_score += 0.2
                 elif bb_width > 0.05:  # Wide range, likely volatile
-                    volatile_score += 0.3
+                volatile_score += 0.3
             else:
                 bb_width = 0
             
@@ -646,7 +646,7 @@ class SignalGenerator:
                     return None
                     
             return signal
-            
+                
         except Exception as e:
             logger.error(f"Error generating regime signal: {e}")
             return None

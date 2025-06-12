@@ -2,9 +2,9 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from market_data.exchange_client import ExchangeClient
-from strategy.strategy_manager import StrategyManager
-from risk.risk_manager import RiskManager
+from src.market_data.exchange_client import ExchangeClient
+from src.strategy.strategy_manager import StrategyManager
+from src.risk.risk_manager import RiskManager
 
 logger = logging.getLogger(__name__)
 

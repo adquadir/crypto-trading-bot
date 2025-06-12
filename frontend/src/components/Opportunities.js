@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Card,
@@ -251,49 +251,59 @@ const Opportunities = () => {
     direction: 'desc'
   });
   const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = useRef(null);
+
+  const attachHandlers = (socket) => {
+    socket.onopen = () => {
+      console.log('WebSocket connected');
+      setWsConnected(true);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'opportunities') {
+          setOpportunities(data.data);
+        }
+      } catch (err) {
+        console.error('Error parsing WebSocket message:', err);
+      }
+    };
+
+    socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setWsConnected(false);
+    };
+
+    socket.onclose = () => {
+      console.log('WebSocket disconnected');
+      setWsConnected(false);
+      // Attempt to reconnect after a delay
+      setTimeout(() => {
+        connectWebSocket();
+      }, 1000);
+    };
+  };
+
+  const connectWebSocket = () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      console.log('WebSocket already connected');
+      return;
+    }
+
+    const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+    attachHandlers(newWs);
+    wsRef.current = newWs;
+  };
 
   useEffect(() => {
-    let ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
-    
-    const attachHandlers = (socket) => {
-        socket.onopen = () => {
-            console.log('WebSocket connected');
-            setWsConnected(true);
-        };
-
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === 'opportunities') {
-                setOpportunities(data.data);
-            }
-        };
-
-        socket.onclose = () => {
-            console.log('WebSocket disconnected');
-            setWsConnected(false);
-            
-            // Attempt to reconnect after a delay
-            setTimeout(() => {
-                console.log('Attempting to reconnect WebSocket...');
-                const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
-                attachHandlers(newWs);  // Reattach handlers to new instance
-                ws = newWs;  // Replace the old WebSocket instance
-            }, 5000);
-        };
-
-        socket.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            setError('WebSocket connection error');
-        };
-    };
-
-    // Attach handlers to initial WebSocket
-    attachHandlers(ws);
-
+    connectWebSocket();
     return () => {
-        ws.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
-}, []);
+  }, []);
 
   useEffect(() => {
     if (wsConnected) {
