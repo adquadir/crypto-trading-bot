@@ -3,11 +3,11 @@ import asyncio
 import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
-from api.routes import router
-from trading_bot import trading_bot
-from market_data.exchange_client import ExchangeClient
-from api.connection_manager import ConnectionManager
-from market_data.symbol_discovery import SymbolDiscovery
+from src.api.routes import router
+from src.trading_bot import trading_bot
+from src.market_data.exchange_client import ExchangeClient
+from src.api.connection_manager import ConnectionManager
+from src.market_data.symbol_discovery import SymbolDiscovery
 from datetime import datetime
 
 # Configure logging

@@ -3,10 +3,10 @@ from typing import Dict, List, Any
 import logging
 from sqlalchemy import func
 
-from trading_bot import trading_bot
-from utils.config import validate_config
-from database.database import Database
-from database.models import Trade
+from src.trading_bot import trading_bot
+from src.utils.config import validate_config
+from src.database.database import Database
+from src.database.models import Trade
 
 # Configure logging
 logger = logging.getLogger(__name__)
