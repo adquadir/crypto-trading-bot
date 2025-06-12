@@ -30,30 +30,30 @@ logger = logging.getLogger(__name__)
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time trading signals."""
     try:
-    await manager.connect(websocket)
+        await manager.connect(websocket)
         logger.info(f"WebSocket connection accepted for: {websocket.client}")
-    try:
-        while True:
-            # Get latest opportunities
+        try:
+            while True:
+                # Get latest opportunities
                 opportunities = await symbol_discovery.scan_opportunities()
                 
                 # Format opportunities for WebSocket
                 formatted_opportunities = []
                 for opp in opportunities:
                     formatted_opp = {
-                    "symbol": opp.symbol,
+                        "symbol": opp.symbol,
                         "direction": opp.direction,
                         "entry_price": opp.entry_price,
-                    "take_profit": opp.take_profit,
-                    "stop_loss": opp.stop_loss,
+                        "take_profit": opp.take_profit,
+                        "stop_loss": opp.stop_loss,
                         "confidence": opp.confidence,
-                    "leverage": opp.leverage,
-                    "risk_reward": opp.risk_reward,
-                    "volume_24h": opp.volume_24h,
-                    "volatility": opp.volatility,
-                    "score": opp.score,
-                    "indicators": opp.indicators,
-                    "reasoning": opp.reasoning,
+                        "leverage": opp.leverage,
+                        "risk_reward": opp.risk_reward,
+                        "volume_24h": opp.volume_24h,
+                        "volatility": opp.volatility,
+                        "score": opp.score,
+                        "indicators": opp.indicators,
+                        "reasoning": opp.reasoning,
                         "book_depth": opp.book_depth,
                         "oi_trend": opp.oi_trend,
                         "volume_trend": opp.volume_trend,
@@ -68,15 +68,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     "data": formatted_opportunities,
                     "timestamp": datetime.utcnow().isoformat()
                 })
-            
+                
                 # Wait before sending next update
                 await asyncio.sleep(1)
-    except WebSocketDisconnect:
+        except WebSocketDisconnect:
             logger.info(f"WebSocket disconnected: {websocket.client}")
-        manager.disconnect(websocket)
-    except Exception as e:
+            manager.disconnect(websocket)
+        except Exception as e:
             logger.error(f"Error in WebSocket connection: {str(e)}")
-        manager.disconnect(websocket)
+            manager.disconnect(websocket)
     except Exception as e:
         logger.error(f"Error accepting WebSocket connection: {str(e)}")
         try:
