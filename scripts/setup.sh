@@ -108,6 +108,25 @@ setup_database() {
         fi
     fi
     
+    # Ensure PostgreSQL service is running
+    if ! sudo -n systemctl is-active --quiet postgresql; then
+        echo "Starting PostgreSQL service..."
+        sudo -n systemctl start postgresql
+        # Wait for PostgreSQL to be ready
+        for i in {1..30}; do
+            if sudo -n systemctl is-active --quiet postgresql; then
+                break
+            fi
+            echo "Waiting for PostgreSQL to start... ($i/30)"
+            sleep 1
+        done
+        
+        if ! sudo -n systemctl is-active --quiet postgresql; then
+            echo "Error: Failed to start PostgreSQL service"
+            exit 1
+        fi
+    fi
+    
     # Run database setup script
     echo "Running database setup script..."
     "$PROJECT_ROOT/scripts/setup_db.sh"
