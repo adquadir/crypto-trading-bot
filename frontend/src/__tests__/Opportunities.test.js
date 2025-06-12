@@ -21,6 +21,11 @@ describe('Opportunities Component', () => {
     }
   ];
 
+  const mockApiResponse = {
+    status: 'success',
+    data: mockOpportunities
+  };
+
   beforeEach(() => {
     // Clear all mocks before each test
     jest.clearAllMocks();
@@ -32,7 +37,7 @@ describe('Opportunities Component', () => {
   });
 
   test('renders opportunities data successfully', async () => {
-    axios.get.mockResolvedValueOnce({ data: mockOpportunities });
+    axios.get.mockResolvedValueOnce({ data: mockApiResponse });
 
     render(<Opportunities />);
 
@@ -62,7 +67,7 @@ describe('Opportunities Component', () => {
   });
 
   test('refreshes data when refresh button is clicked', async () => {
-    axios.get.mockResolvedValueOnce({ data: mockOpportunities });
+    axios.get.mockResolvedValueOnce({ data: mockApiResponse });
 
     render(<Opportunities />);
 
@@ -84,7 +89,11 @@ describe('Opportunities Component', () => {
         timestamp: '2024-01-01T00:01:00Z'
       }
     ];
-    axios.get.mockResolvedValueOnce({ data: newOpportunities });
+    const newApiResponse = {
+      status: 'success',
+      data: newOpportunities
+    };
+    axios.get.mockResolvedValueOnce({ data: newApiResponse });
 
     // Click refresh button
     const refreshButton = screen.getByRole('button', { name: /refresh/i });
@@ -97,7 +106,11 @@ describe('Opportunities Component', () => {
   });
 
   test('displays empty state when no opportunities are available', async () => {
-    axios.get.mockResolvedValueOnce({ data: [] });
+    const emptyResponse = {
+      status: 'success',
+      data: []
+    };
+    axios.get.mockResolvedValueOnce({ data: emptyResponse });
 
     render(<Opportunities />);
 
@@ -113,7 +126,11 @@ describe('Opportunities Component', () => {
         // Missing required fields
       }
     ];
-    axios.get.mockResolvedValueOnce({ data: malformedData });
+    const malformedResponse = {
+      status: 'success',
+      data: malformedData
+    };
+    axios.get.mockResolvedValueOnce({ data: malformedResponse });
 
     render(<Opportunities />);
 
