@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time trading signals."""
     try:
-        await manager.connect(websocket)
+    await manager.connect(websocket)
         logger.info(f"WebSocket connection accepted for: {websocket.client}")
     try:
         while True:
