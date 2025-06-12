@@ -109,15 +109,45 @@ npm install
 cd "$PROJECT_ROOT"
 
 # --------------------------
-# 🐘 PostgreSQL via Docker (only outside Codex)
+# 🐘 PostgreSQL setup
 # --------------------------
 if [[ "$ENVIRONMENT" != "codex" ]]; then
-  echo "🐳 Starting PostgreSQL container..."
-  if ! docker ps | grep -q postgres; then
-    if port_in_use 5432; then
-      echo "❌ Port 5432 already in use"
+  echo "🐳 Checking PostgreSQL setup..."
+  
+  # Check if Docker is installed and running
+  if ! command_exists docker; then
+    echo "❌ Docker is not installed"
+    echo "Installing Docker..."
+    sudo apt-get update && sudo apt-get install -y docker.io
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    sudo usermod -aG docker $USER
+    echo "⚠️ Please log out and log back in for Docker group changes to take effect"
+    exit 1
+  fi
+
+  # Check if user is in docker group
+  if ! groups | grep -q docker; then
+    echo "⚠️ Your user is not in the docker group"
+    echo "Adding your user to the docker group..."
+    sudo usermod -aG docker $USER
+    echo "⚠️ Please log out and log back in for Docker group changes to take effect"
+    exit 1
+  fi
+
+  # Check if PostgreSQL is already running
+  if port_in_use 5432; then
+    echo "ℹ️ PostgreSQL is already running on port 5432"
+    echo "Checking if it's our Docker container..."
+    if ! docker ps | grep -q postgres; then
+      echo "⚠️ PostgreSQL is running but not in our Docker container"
+      echo "Please stop the existing PostgreSQL service or use a different port"
       exit 1
+    else
+      echo "✅ Using existing PostgreSQL container"
     fi
+  else
+    echo "🐳 Starting PostgreSQL container..."
     docker run -d \
       --name postgres \
       -e POSTGRES_USER=trader \
@@ -126,8 +156,6 @@ if [[ "$ENVIRONMENT" != "codex" ]]; then
       -p 5432:5432 \
       postgres:14
     wait_for_service localhost 5432 30 || exit 1
-  else
-    echo "ℹ️ PostgreSQL already running"
   fi
 fi
 
