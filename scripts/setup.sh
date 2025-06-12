@@ -108,12 +108,6 @@ setup_database() {
         fi
     fi
     
-    # Check if .env file exists
-    if [ ! -f "$PROJECT_ROOT/.env" ]; then
-        echo "Error: .env file not found. Please create one with DATABASE_URL"
-        exit 1
-    fi
-    
     # Run database setup script
     echo "Running database setup script..."
     "$PROJECT_ROOT/scripts/setup_db.sh"
@@ -324,14 +318,14 @@ fi
 
 # Start services in order
 if [ "$AUTO_START_BOT" = "true" ]; then
-    start_bot
+        start_bot
     sleep 2  # Give the bot time to initialize
 fi
 
 if [ "$AUTO_START_API" = "true" ]; then
-    start_web_interface
+        start_web_interface
     wait_for_service "http://$VPS_IP:$VPS_PORT/api/trading/stats"
-fi
+    fi
 
 if [ "$AUTO_START_FRONTEND" = "true" ]; then
     start_frontend
