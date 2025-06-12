@@ -238,8 +238,6 @@ crypto-trading-bot/
 │   ├── setup.sh             # Development setup script
 │   ├── setup_service.sh     # Production service setup
 │   ├── crypto-trading-bot.service  # Systemd service file
-│   ├── init_db.py           # Database initialization
-│   ├── crypto-trading-bot.service    # Bot systemd service file
 │   ├── crypto-trading-api.service    # API systemd service file
 │   └── crypto-trading-frontend.service # Frontend systemd service file
 ├── requirements.txt          # Python dependencies
@@ -940,3 +938,173 @@ Response:
 ## Dependencies
 
 In addition to the Python dependencies listed in `requirements.txt` (which now includes `pyyaml`), the frontend requires Node.js and npm.
+
+## Quick Start with Docker
+
+1. **Prerequisites**
+   - Docker
+   - Docker Compose
+   - Python 3.8+
+   - Node.js 18+
+
+2. **Setup**
+   ```bash
+   # Clone the repository
+   git clone https://github.com/yourusername/crypto-trading-bot.git
+   cd crypto-trading-bot
+
+   # Copy environment file
+   cp .env.example .env
+
+   # Edit .env with your configuration
+   nano .env
+
+   # Run setup script
+   bash scripts/setup.sh
+   ```
+
+3. **Database**
+   The project uses PostgreSQL in Docker. The database will be automatically:
+   - Created and started
+   - Configured with the correct user and permissions
+   - Persisted in a Docker volume
+
+   To manually manage the database:
+   ```bash
+   # Start database
+   docker-compose up -d postgres
+
+   # Stop database
+   docker-compose stop postgres
+
+   # View logs
+   docker-compose logs postgres
+
+   # Backup database
+   docker-compose exec postgres pg_dump -U trader crypto_trading > backup.sql
+
+   # Restore database
+   cat backup.sql | docker-compose exec -T postgres psql -U trader crypto_trading
+   ```
+
+4. **Services**
+   The setup script will start:
+   - Trading Bot
+   - API Server
+   - Frontend
+   - PostgreSQL Database
+
+   To manage services manually:
+   ```bash
+   # Start all services
+   docker-compose up -d
+
+   # Stop all services
+   docker-compose down
+
+   # View logs
+   docker-compose logs -f
+   ```
+
+5. **Development**
+   ```bash
+   # Create virtual environment
+   python3 -m venv venv
+   source venv/bin/activate
+
+   # Install dependencies
+   pip install -r requirements.txt
+   cd frontend && npm install
+
+   # Run services
+   python src/main.py  # API Server
+   cd frontend && npm start  # Frontend
+   ```
+
+6. **Configuration**
+   - Edit `.env` for environment variables
+   - Edit `docker-compose.yml` for Docker configuration
+   - Edit `config/` files for application settings
+
+7. **Monitoring**
+   - API: http://localhost:8000
+   - Frontend: http://localhost:3000
+   - Database: localhost:5432
+
+8. **Troubleshooting**
+   ```bash
+   # Check service status
+   docker-compose ps
+
+   # View logs
+   docker-compose logs -f
+
+   # Restart services
+   docker-compose restart
+
+   # Reset database
+   docker-compose down -v
+   docker-compose up -d
+   ```
+
+## Architecture
+
+The project consists of several components:
+
+1. **Trading Bot**
+   - Market data collection
+   - Signal generation
+   - Trade execution
+   - Risk management
+
+2. **API Server**
+   - REST API endpoints
+   - WebSocket for real-time updates
+   - Database operations
+   - Strategy management
+
+3. **Frontend**
+   - Real-time dashboard
+   - Trading interface
+   - Performance monitoring
+   - Configuration management
+
+4. **Database**
+   - PostgreSQL in Docker
+   - Persistent storage
+   - Connection pooling
+   - Automatic backups
+
+## Directory Structure
+
+```
+crypto-trading-bot/
+├── src/                    # Python source code
+│   ├── api/               # API endpoints
+│   ├── market_data/       # Market data handling
+│   ├── signals/           # Signal generation
+│   ├── risk/              # Risk management
+│   ├── database/          # Database models
+│   ├── utils/             # Utilities
+│   ├── ml/                # Machine learning
+│   └── strategy/          # Trading strategies
+├── frontend/              # React frontend
+├── scripts/               # Setup and utility scripts
+├── config/                # Configuration files
+├── tests/                 # Test suite
+├── docker-compose.yml     # Docker configuration
+├── requirements.txt       # Python dependencies
+└── README.md             # Documentation
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

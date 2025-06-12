@@ -12,7 +12,7 @@ VPS_PORT=${VPS_PORT:-"8000"}
 AUTO_START_BOT=${AUTO_START_BOT:-"true"}
 AUTO_START_API=${AUTO_START_API:-"true"}
 AUTO_START_FRONTEND=${AUTO_START_FRONTEND:-"true"}
-AUTO_INSTALL_POSTGRES=${AUTO_INSTALL_POSTGRES:-"true"}
+AUTO_INSTALL_DOCKER=${AUTO_INSTALL_DOCKER:-"true"}
 AUTO_INSTALL_NODE=${AUTO_INSTALL_NODE:-"true"}
 
 # Get the absolute path of the project root
@@ -46,24 +46,64 @@ check_dependencies() {
         exit 1
     fi
     
-    # Check PostgreSQL
-    if ! command -v psql &> /dev/null; then
-        if [ "$AUTO_INSTALL_POSTGRES" = "true" ]; then
-            echo "PostgreSQL is not installed. Installing..."
-            sudo -n locale-gen en_US.UTF-8
-            sudo -n update-locale LANG=en_US.UTF-8
-            export LANG=en_US.UTF-8
-            export LC_ALL=en_US.UTF-8
-            
-            sudo -n apt-get update
-            sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib
+    # Check Docker
+    if ! command -v docker &> /dev/null; then
+        if [ "$AUTO_INSTALL_DOCKER" = "true" ]; then
+            echo "Docker is not installed. Installing..."
+            curl -fsSL https://get.docker.com | sudo -n sh
+            sudo -n usermod -aG docker $USER
         else
-            echo "Error: PostgreSQL is not installed and AUTO_INSTALL_POSTGRES is false"
+            echo "Error: Docker is not installed and AUTO_INSTALL_DOCKER is false"
+            exit 1
+        fi
+    fi
+    
+    # Check Docker Compose
+    if ! command -v docker-compose &> /dev/null; then
+        if [ "$AUTO_INSTALL_DOCKER" = "true" ]; then
+            echo "Docker Compose is not installed. Installing..."
+            sudo -n curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo -n chmod +x /usr/local/bin/docker-compose
+        else
+            echo "Error: Docker Compose is not installed and AUTO_INSTALL_DOCKER is false"
             exit 1
         fi
     fi
     
     echo "All dependencies are satisfied"
+}
+
+# Function to setup database
+setup_database() {
+    echo "Setting up database..."
+    
+    # Check if Docker is running
+    if ! docker info &> /dev/null; then
+        echo "Error: Docker is not running"
+        exit 1
+    fi
+    
+    # Start PostgreSQL container
+    echo "Starting PostgreSQL container..."
+    cd "$PROJECT_ROOT"
+    docker-compose up -d postgres
+    
+    # Wait for PostgreSQL to be ready
+    echo "Waiting for PostgreSQL to be ready..."
+    for i in {1..30}; do
+        if docker-compose exec -T postgres pg_isready -U trader -d crypto_trading &> /dev/null; then
+            break
+        fi
+        echo "Waiting for PostgreSQL to start... ($i/30)"
+        sleep 1
+    done
+    
+    if ! docker-compose exec -T postgres pg_isready -U trader -d crypto_trading &> /dev/null; then
+        echo "Error: PostgreSQL failed to start"
+        exit 1
+    fi
+    
+    echo "Database setup completed"
 }
 
 # Function to check if a port is available
@@ -95,57 +135,6 @@ wait_for_service() {
     
     echo "Error: Service did not become ready in time"
     return 1
-}
-
-# Function to setup database
-setup_database() {
-    echo "Setting up database..."
-    
-    # Check if PostgreSQL is installed
-    if ! command -v psql &> /dev/null; then
-        if [ "$AUTO_INSTALL_POSTGRES" = "true" ]; then
-            echo "PostgreSQL is not installed. Installing..."
-            # Install locales package first
-            sudo -n DEBIAN_FRONTEND=noninteractive apt-get update
-            sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y locales
-            
-            # Configure locales non-interactively
-            sudo -n /usr/sbin/locale-gen en_US.UTF-8
-            sudo -n /usr/sbin/update-locale LANG=en_US.UTF-8
-            export LANG=en_US.UTF-8
-            export LC_ALL=en_US.UTF-8
-            
-            sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib
-        else
-            echo "Error: PostgreSQL is not installed and AUTO_INSTALL_POSTGRES is false"
-            exit 1
-        fi
-    fi
-    
-    # Ensure PostgreSQL service is running
-    if ! sudo -n systemctl is-active --quiet postgresql; then
-        echo "Starting PostgreSQL service..."
-        sudo -n systemctl start postgresql
-        # Wait for PostgreSQL to be ready
-        for i in {1..30}; do
-            if sudo -n systemctl is-active --quiet postgresql; then
-                break
-            fi
-            echo "Waiting for PostgreSQL to start... ($i/30)"
-            sleep 1
-        done
-        
-        if ! sudo -n systemctl is-active --quiet postgresql; then
-            echo "Error: Failed to start PostgreSQL service"
-            exit 1
-        fi
-    fi
-    
-    # Run database setup script
-    echo "Running database setup script..."
-    "$PROJECT_ROOT/scripts/setup_db.sh"
-    
-    echo "Database setup completed"
 }
 
 # Function to check if a process is running
@@ -212,7 +201,6 @@ start_web_interface() {
     python src/main.py > logs/web_interface.log 2>&1 &
     WEB_PID=$!
     echo "API service started with PID: $WEB_PID"
-    cd frontend  # Return to frontend directory
 }
 
 # Function to start the frontend
@@ -226,87 +214,8 @@ start_frontend() {
     cd "$PROJECT_ROOT"  # Return to project root
 }
 
-# Function to create systemd service
-create_systemd_service() {
-    echo "Creating systemd service for trading bot..."
-    
-    # Create the trading bot service file
-    sudo tee /etc/systemd/system/crypto-trading-bot.service << EOF
-[Unit]
-Description=Crypto Trading Bot
-After=network.target
-
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=$PROJECT_ROOT
-Environment=PYTHONPATH=$PROJECT_ROOT
-ExecStart=$PROJECT_ROOT/venv/bin/python $PROJECT_ROOT/src/main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    # Create the web interface service file
-    sudo tee /etc/systemd/system/crypto-trading-bot-web.service << EOF
-[Unit]
-Description=Crypto Trading Bot Web Interface
-After=network.target
-
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=$PROJECT_ROOT
-Environment=PYTHONPATH=$PROJECT_ROOT
-ExecStart=$PROJECT_ROOT/venv/bin/python $PROJECT_ROOT/src/main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    # Reload systemd
-    sudo systemctl daemon-reload
-    
-    # Enable and start the services
-    sudo systemctl enable crypto-trading-bot.service
-    sudo systemctl enable crypto-trading-bot-web.service
-    sudo systemctl start crypto-trading-bot.service
-    sudo systemctl start crypto-trading-bot-web.service
-    
-    echo "Systemd services created and started"
-}
-
-# Function to check if backend is accessible
-check_backend() {
-    echo "Checking backend connection..."
-    echo "Testing connection to http://$VPS_IP:$VPS_PORT"
-    
-    # Try different connection methods
-    echo "1. Testing basic connectivity..."
-    if ! ping -c 1 $VPS_IP > /dev/null 2>&1; then
-        echo "Error: Cannot ping the VPS. Check if the IP is correct and the server is online."
-        return 1
-    fi
-    
-    echo "2. Testing port $VPS_PORT..."
-    if ! nc -z -w5 $VPS_IP $VPS_PORT > /dev/null 2>&1; then
-        echo "Error: Port $VPS_PORT is not accessible. The service might not be running or the port might be blocked."
-        return 1
-    fi
-    
-    echo "3. Testing API endpoint..."
-    if ! curl -s -m 5 http://$VPS_IP:$VPS_PORT/api/trading/stats > /dev/null; then
-        echo "Error: API endpoint is not responding. The service might be running but not responding correctly."
-        return 1
-    fi
-    
-    echo "Backend connection successful"
-    return 0
-}
+# Main execution
+echo "Starting setup..."
 
 # Check dependencies
 check_dependencies
@@ -338,43 +247,28 @@ npm install || { echo "Failed to install frontend dependencies"; exit 1; }
 
 # Stop any existing processes before starting new ones
 stop_existing_processes
-stop_frontend
 
-# Check ports before starting services
-if [ "$AUTO_START_API" = "true" ] && ! check_port $VPS_PORT; then
-    echo "Error: Cannot start API service - port $VPS_PORT is in use"
-    exit 1
-fi
-
-if [ "$AUTO_START_FRONTEND" = "true" ] && ! check_port 3000; then
-    echo "Error: Cannot start frontend - port 3000 is in use"
-    exit 1
-fi
-
-# Start services in order
+# Start services based on configuration
 if [ "$AUTO_START_BOT" = "true" ]; then
-        start_bot
-    sleep 2  # Give the bot time to initialize
+    start_bot
 fi
 
 if [ "$AUTO_START_API" = "true" ]; then
-        start_web_interface
-    wait_for_service "http://$VPS_IP:$VPS_PORT/api/trading/stats"
-    fi
+    start_web_interface
+fi
 
 if [ "$AUTO_START_FRONTEND" = "true" ]; then
     start_frontend
-    wait_for_service "http://localhost:3000"
 fi
 
-echo "All services started successfully!"
+echo "Setup completed successfully!"
 
 # If either service was started, ask about systemd setup
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     read -p "Do you want to set up the services to start automatically with systemd? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        create_systemd_service
+        echo "Systemd setup not implemented in Docker mode"
     fi
 fi
 

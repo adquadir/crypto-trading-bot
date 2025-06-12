@@ -22,14 +22,26 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Get database URL from environment variable or use default SQLite
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite:///./trading_bot.db"
-)
+# Get database configuration from environment variables
+DB_USER = os.getenv("POSTGRES_USER", "trader")
+DB_PASS = os.getenv("POSTGRES_PASSWORD", "current_password")
+DB_NAME = os.getenv("POSTGRES_DB", "crypto_trading")
+DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
+DB_PORT = os.getenv("POSTGRES_PORT", "5432")
 
-# Create SQLAlchemy engine
-engine = create_engine(DATABASE_URL)
+# Construct database URL
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# Create SQLAlchemy engine with connection pooling
+engine = create_engine(
+    DATABASE_URL,
+    poolclass=QueuePool,
+    pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "10")),
+    pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", "30")),
+    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "1800")),
+    echo=os.getenv("DB_ECHO", "false").lower() == "true"
+)
 
 # Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -37,44 +49,50 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Create scoped session
 db_session = scoped_session(SessionLocal)
 
+# Database class for managing connections
 class Database:
-    _instance = None
-    _initialized = False
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(Database, cls).__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if not self._initialized:
-            self.engine = engine
-            self.SessionLocal = SessionLocal
-            self._setup_database()
-            self._initialized = True
+        self.engine = engine
+        self.SessionLocal = SessionLocal
+        self.Base = Base
 
-    def _setup_database(self):
-        """Set up database connection and create tables."""
-        try:
-            # Create tables using the imported Base
-            Base.metadata.create_all(bind=self.engine)
-            logger.info("Database initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing database: {str(e)}")
-            raise
+    def get_engine(self):
+        return self.engine
 
     def get_session(self):
-        """Get a new database session."""
         return self.SessionLocal()
 
-    def close(self):
-        """Close the database connection."""
+    @contextmanager
+    def session_scope(self):
+        """Provide a transactional scope around a series of operations."""
+        session = self.SessionLocal()
         try:
-            self.engine.dispose()
-            logger.info("Database connection closed")
+            yield session
+            session.commit()
         except Exception as e:
-            logger.error(f"Error closing database connection: {e}")
-            raise
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+    def init_db(self):
+        """Initialize database tables."""
+        try:
+            self.Base.metadata.create_all(bind=self.engine)
+            logger.info("Database tables created successfully")
+        except Exception as e:
+            logger.error(f"Error creating database tables: {e}")
+            raise e
+
+    def check_connection(self):
+        """Check database connection."""
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return True
+        except Exception as e:
+            logger.error(f"Database connection error: {e}")
+            return False
 
     def get_strategy(self, strategy_id: int):
         """Get a strategy by ID."""
