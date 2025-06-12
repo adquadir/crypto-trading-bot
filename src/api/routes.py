@@ -11,8 +11,8 @@ from src.database.models import Trade
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Create router
-router = APIRouter()
+# Create router with /trading prefix
+router = APIRouter(prefix="/trading")
 
 @router.get("/health")
 async def health_check():
@@ -82,7 +82,7 @@ async def update_config(config: Dict[str, Any]):
         logger.error(f"Error updating config: {e}")
         raise HTTPException(status_code=500, detail=str(e)) 
 
-@router.get("/trading/stats")
+@router.get("/stats")
 async def get_stats():
     """Get trading statistics."""
     try:
