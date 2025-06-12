@@ -8,8 +8,89 @@ trap 'echo "Error occurred. Exiting..."; exit 1' ERR
 VPS_IP=${VPS_IP:-"localhost"}
 VPS_PORT=${VPS_PORT:-"8000"}
 
+# Non-interactive configuration
+AUTO_START_BOT=${AUTO_START_BOT:-"true"}
+AUTO_START_API=${AUTO_START_API:-"true"}
+AUTO_START_FRONTEND=${AUTO_START_FRONTEND:-"true"}
+AUTO_INSTALL_POSTGRES=${AUTO_INSTALL_POSTGRES:-"true"}
+AUTO_INSTALL_NODE=${AUTO_INSTALL_NODE:-"true"}
+
 # Get the absolute path of the project root
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# Function to check dependencies
+check_dependencies() {
+    echo "Checking dependencies..."
+    
+    # Check Python
+    if ! command -v python3 &> /dev/null; then
+        echo "Error: Python 3 is not installed"
+        exit 1
+    fi
+    
+    # Check Node.js
+    if ! command -v node &> /dev/null; then
+        if [ "$AUTO_INSTALL_NODE" = "true" ]; then
+            echo "Node.js is not installed. Installing..."
+            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -n bash -
+            sudo -n apt-get install -y nodejs
+        else
+            echo "Error: Node.js is not installed and AUTO_INSTALL_NODE is false"
+            exit 1
+        fi
+    fi
+    
+    # Check npm
+    if ! command -v npm &> /dev/null; then
+        echo "Error: npm is not installed"
+        exit 1
+    fi
+    
+    # Check PostgreSQL
+    if ! command -v psql &> /dev/null; then
+        if [ "$AUTO_INSTALL_POSTGRES" = "true" ]; then
+            echo "PostgreSQL is not installed. Installing..."
+            sudo -n apt-get update
+            sudo -n apt-get install -y postgresql postgresql-contrib
+        else
+            echo "Error: PostgreSQL is not installed and AUTO_INSTALL_POSTGRES is false"
+            exit 1
+        fi
+    fi
+    
+    echo "All dependencies are satisfied"
+}
+
+# Function to check if a port is available
+check_port() {
+    local port=$1
+    if nc -z localhost $port > /dev/null 2>&1; then
+        echo "Error: Port $port is already in use"
+        return 1
+    fi
+    return 0
+}
+
+# Function to wait for a service to be ready
+wait_for_service() {
+    local url=$1
+    local max_attempts=30
+    local attempt=1
+    
+    echo "Waiting for service at $url..."
+    while [ $attempt -le $max_attempts ]; do
+        if curl -s "$url" > /dev/null; then
+            echo "Service is ready!"
+            return 0
+        fi
+        echo "Attempt $attempt/$max_attempts: Service not ready yet..."
+        sleep 2
+        attempt=$((attempt + 1))
+    done
+    
+    echo "Error: Service did not become ready in time"
+    return 1
+}
 
 # Function to setup database
 setup_database() {
@@ -17,9 +98,14 @@ setup_database() {
     
     # Check if PostgreSQL is installed
     if ! command -v psql &> /dev/null; then
-        echo "PostgreSQL is not installed. Installing..."
-        sudo apt-get update
-        sudo apt-get install -y postgresql postgresql-contrib
+        if [ "$AUTO_INSTALL_POSTGRES" = "true" ]; then
+            echo "PostgreSQL is not installed. Installing..."
+            sudo -n apt-get update
+            sudo -n apt-get install -y postgresql postgresql-contrib
+        else
+            echo "Error: PostgreSQL is not installed and AUTO_INSTALL_POSTGRES is false"
+            exit 1
+        fi
     fi
     
     # Check if .env file exists
@@ -100,6 +186,15 @@ start_web_interface() {
     WEB_PID=$!
     echo "API service started with PID: $WEB_PID"
     cd frontend  # Return to frontend directory
+}
+
+# Function to start the frontend
+start_frontend() {
+    echo "Starting frontend..."
+    cd "$PROJECT_ROOT/frontend" || { echo "Failed to change to frontend directory"; exit 1; }
+    npm start > ../logs/frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    echo "Frontend started with PID: $FRONTEND_PID"
 }
 
 # Function to create systemd service
@@ -184,18 +279,25 @@ check_backend() {
     return 0
 }
 
+# Check dependencies
+check_dependencies
+
 # Create logs directory if it doesn't exist
 mkdir -p "$PROJECT_ROOT/logs"
 
 # Create virtual environment if it doesn't exist
 if [ ! -d "$PROJECT_ROOT/venv" ]; then
     echo "Creating virtual environment..."
-    python -m venv "$PROJECT_ROOT/venv" || { echo "Failed to create virtual environment"; exit 1; }
+    python3 -m venv "$PROJECT_ROOT/venv" || { echo "Failed to create virtual environment"; exit 1; }
 fi
 
 # Activate virtual environment
 echo "Activating virtual environment..."
 source "$PROJECT_ROOT/venv/bin/activate" || { echo "Failed to activate virtual environment"; exit 1; }
+
+# Install Python dependencies
+echo "Installing Python dependencies..."
+pip install -r requirements.txt || { echo "Failed to install Python dependencies"; exit 1; }
 
 # Setup database
 setup_database
@@ -207,24 +309,36 @@ npm install || { echo "Failed to install frontend dependencies"; exit 1; }
 
 # Stop any existing processes before starting new ones
 stop_existing_processes
+stop_frontend
 
-# Check if bot is running
-if ! check_bot; then
-    read -p "Trading bot is not running. Do you want to start it? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        start_bot
-    fi
+# Check ports before starting services
+if [ "$AUTO_START_API" = "true" ] && ! check_port $VPS_PORT; then
+    echo "Error: Cannot start API service - port $VPS_PORT is in use"
+    exit 1
 fi
 
-# Check if web interface is running
-if ! check_web_interface; then
-    read -p "API service is not running. Do you want to start it? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        start_web_interface
-    fi
+if [ "$AUTO_START_FRONTEND" = "true" ] && ! check_port 3000; then
+    echo "Error: Cannot start frontend - port 3000 is in use"
+    exit 1
 fi
+
+# Start services in order
+if [ "$AUTO_START_BOT" = "true" ]; then
+    start_bot
+    sleep 2  # Give the bot time to initialize
+fi
+
+if [ "$AUTO_START_API" = "true" ]; then
+    start_web_interface
+    wait_for_service "http://$VPS_IP:$VPS_PORT/api/trading/stats"
+fi
+
+if [ "$AUTO_START_FRONTEND" = "true" ]; then
+    start_frontend
+    wait_for_service "http://localhost:3000"
+fi
+
+echo "All services started successfully!"
 
 # If either service was started, ask about systemd setup
 if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -245,27 +359,10 @@ if ! check_backend; then
     exit 1
 fi
 
-# Check if frontend is already running
-if check_frontend; then
-    read -p "Frontend is already running. Do you want to restart it? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        stop_frontend
-    else
-        echo "Keeping existing frontend running"
-        exit 0
-    fi
-fi
-
 # Start the application
 echo "Starting the application..."
 echo "Backend is running on http://$VPS_IP:$VPS_PORT"
 echo "Frontend will run on http://localhost:3000"
-
-# Start frontend
-npm start &
-FRONTEND_PID=$!
-echo "Frontend started with PID: $FRONTEND_PID"
 
 # Handle script termination
 cleanup() {
