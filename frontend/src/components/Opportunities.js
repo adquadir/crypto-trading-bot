@@ -253,78 +253,41 @@ const Opportunities = () => {
   const [wsConnected, setWsConnected] = useState(false);
 
   useEffect(() => {
-    const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
-
+    let ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+    
     ws.onopen = () => {
-      console.log('WebSocket connected');
-      setWsConnected(true);
-      setError(null);
+        console.log('WebSocket connected');
+        setWsConnected(true);
     };
 
     ws.onmessage = (event) => {
-      try {
         const data = JSON.parse(event.data);
         if (data.type === 'opportunities') {
-          setOpportunities(data.data);
+            setOpportunities(data.data);
         }
-      } catch (err) {
-        console.error('Error processing WebSocket message:', err);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setError('WebSocket connection error');
-      setWsConnected(false);
     };
 
     ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      setWsConnected(false);
-      setTimeout(() => {
-        if (!wsConnected) {
-          console.log('Attempting to reconnect WebSocket...');
-          const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
-          ws = newWs;  // Replace the old WebSocket instance
-          
-          // Reattach event handlers
-          newWs.onopen = () => {
-            console.log('WebSocket reconnected');
-            setWsConnected(true);
-            setError(null);
-          };
-          
-          newWs.onmessage = (event) => {
-            try {
-              const data = JSON.parse(event.data);
-              if (data.type === 'opportunities') {
-                setOpportunities(data.data);
-              }
-            } catch (err) {
-              console.error('Error processing WebSocket message:', err);
-            }
-          };
-          
-          newWs.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            setError('WebSocket connection error');
-            setWsConnected(false);
-          };
-          
-          newWs.onclose = () => {
-            console.log('WebSocket disconnected');
-            setWsConnected(false);
-          };
-        }
-      }, 5000);
+        console.log('WebSocket disconnected');
+        setWsConnected(false);
+        
+        // Attempt to reconnect after a delay
+        setTimeout(() => {
+            console.log('Attempting to reconnect WebSocket...');
+            const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+            ws = newWs;  // Replace the old WebSocket instance
+        }, 5000);
     };
 
-    fetchOpportunities();
+    ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setError('WebSocket connection error');
+    };
 
     return () => {
-      ws.close();
+        ws.close();
     };
-  }, []);
+}, []);
 
   useEffect(() => {
     if (wsConnected) {
@@ -336,7 +299,7 @@ const Opportunities = () => {
     try {
       setLoading(true);
       const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.OPPORTUNITIES}`);
-      setOpportunities(response.data.opportunities);
+      setOpportunities(response.data.data);
       setError(null);
     } catch (err) {
       setError('Failed to fetch opportunities');
