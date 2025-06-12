@@ -4,12 +4,36 @@
 set -e
 trap 'echo "Error occurred. Exiting..."; exit 1' ERR
 
-# VPS Configuration
-VPS_IP="50.31.0.105"
-VPS_PORT="8000"
+# VPS Configuration - configurable with defaults to localhost
+VPS_IP=${VPS_IP:-"localhost"}
+VPS_PORT=${VPS_PORT:-"8000"}
 
 # Get the absolute path of the project root
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# Function to setup database
+setup_database() {
+    echo "Setting up database..."
+    
+    # Check if PostgreSQL is installed
+    if ! command -v psql &> /dev/null; then
+        echo "PostgreSQL is not installed. Installing..."
+        sudo apt-get update
+        sudo apt-get install -y postgresql postgresql-contrib
+    fi
+    
+    # Check if .env file exists
+    if [ ! -f "$PROJECT_ROOT/.env" ]; then
+        echo "Error: .env file not found. Please create one with DATABASE_URL"
+        exit 1
+    fi
+    
+    # Run database setup script
+    echo "Running database setup script..."
+    "$PROJECT_ROOT/scripts/setup_db.sh"
+    
+    echo "Database setup completed"
+}
 
 # Function to check if a process is running
 check_process() {
@@ -172,6 +196,9 @@ fi
 # Activate virtual environment
 echo "Activating virtual environment..."
 source "$PROJECT_ROOT/venv/bin/activate" || { echo "Failed to activate virtual environment"; exit 1; }
+
+# Setup database
+setup_database
 
 # Install frontend dependencies
 echo "Installing frontend dependencies..."

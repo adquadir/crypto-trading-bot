@@ -1,8 +1,11 @@
 #!/bin/bash
 
+# Get the absolute path of the project root
+PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
 # Load .env variables
 set -a
-source .env
+source "$PROJECT_ROOT/.env"
 set +a
 
 # Parse DATABASE_URL
@@ -33,4 +36,4 @@ GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;
 GRANT ALL ON SCHEMA public TO $DB_USER;
 EOF
 
-echo "Database and user created successfully!" 
+echo "Database and user created successfully!"
