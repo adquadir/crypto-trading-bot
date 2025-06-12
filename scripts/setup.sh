@@ -105,13 +105,16 @@ setup_database() {
     if ! command -v psql &> /dev/null; then
         if [ "$AUTO_INSTALL_POSTGRES" = "true" ]; then
             echo "PostgreSQL is not installed. Installing..."
+            # Install locales package first
+            sudo -n DEBIAN_FRONTEND=noninteractive apt-get update
+            sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y locales
+            
             # Configure locales non-interactively
             sudo -n locale-gen en_US.UTF-8
             sudo -n update-locale LANG=en_US.UTF-8
             export LANG=en_US.UTF-8
             export LC_ALL=en_US.UTF-8
             
-            sudo -n apt-get update
             sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib
         else
             echo "Error: PostgreSQL is not installed and AUTO_INSTALL_POSTGRES is false"
@@ -215,10 +218,12 @@ start_web_interface() {
 # Function to start the frontend
 start_frontend() {
     echo "Starting frontend..."
-    cd "$PROJECT_ROOT/frontend" || { echo "Failed to change to frontend directory"; exit 1; }
+    cd "$PROJECT_ROOT/frontend"  # Go to frontend directory
+    npm install
     npm start > ../logs/frontend.log 2>&1 &
     FRONTEND_PID=$!
     echo "Frontend started with PID: $FRONTEND_PID"
+    cd "$PROJECT_ROOT"  # Return to project root
 }
 
 # Function to create systemd service
