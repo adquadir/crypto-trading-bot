@@ -61,19 +61,49 @@ wait_for_service() {
 # 🐍 Python setup
 # --------------------------
 echo "📦 Setting up Python environment..."
+
+# Check for python3 and venv
+if ! command_exists python3; then
+    echo "❌ Python 3 is not installed"
+    exit 1
+fi
+
+if ! python3 -m venv --help >/dev/null 2>&1; then
+    echo "❌ python3-venv is not installed"
+    echo "Installing python3-venv..."
+    sudo apt-get update && sudo apt-get install -y python3-venv
+fi
+
+# Create and activate virtual environment
 if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating virtual environment..."
     python3 -m venv "$VENV_DIR"
 fi
+
+# Activate virtual environment
+echo "Activating virtual environment..."
 source "$VENV_DIR/bin/activate"
 
 echo "📦 Installing Python dependencies..."
 pip install --upgrade pip
+
+# Check if requirements.txt exists
+if [ ! -f "$PROJECT_ROOT/requirements.txt" ]; then
+    echo "❌ Error: requirements.txt not found in $PROJECT_ROOT"
+    exit 1
+fi
+
 pip install -r "$PROJECT_ROOT/requirements.txt"
 
 # --------------------------
 # 💻 Frontend setup
 # --------------------------
 echo "🌐 Installing frontend dependencies..."
+if [ ! -d "$FRONTEND_DIR" ]; then
+    echo "❌ Error: Frontend directory not found at $FRONTEND_DIR"
+    exit 1
+fi
+
 cd "$FRONTEND_DIR"
 npm install
 cd "$PROJECT_ROOT"
