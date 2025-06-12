@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Error handling
+# Exit on error
 set -e
-trap 'echo "Error occurred. Exiting..."; exit 1' ERR
+
+echo "Starting setup..."
 
 # VPS Configuration - configurable with defaults to localhost
 VPS_IP=${VPS_IP:-"localhost"}
@@ -17,6 +18,117 @@ AUTO_INSTALL_NODE=${AUTO_INSTALL_NODE:-"true"}
 
 # Get the absolute path of the project root
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Function to detect Linux distribution
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "$ID"
+    else
+        echo "unknown"
+    fi
+}
+
+# Function to install Docker
+install_docker() {
+    echo "Installing Docker..."
+    DISTRO=$(detect_distro)
+    
+    case $DISTRO in
+        "ubuntu"|"debian")
+            # Update package list
+            apt-get update -y
+
+            # Install prerequisites
+            apt-get install -y \
+                apt-transport-https \
+                ca-certificates \
+                curl \
+                gnupg \
+                lsb-release
+
+            # Add Docker's official GPG key
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+            # Set up the stable repository
+            echo \
+                "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+                $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+            # Update package list again
+            apt-get update -y
+
+            # Install Docker Engine
+            apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+            ;;
+        "centos"|"rhel"|"fedora")
+            # Install prerequisites
+            yum install -y yum-utils
+
+            # Add Docker repository
+            yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
+            # Install Docker
+            yum install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+            ;;
+        *)
+            echo "Unsupported distribution: $DISTRO"
+            exit 1
+            ;;
+    esac
+
+    # Start Docker service
+    if command_exists systemctl; then
+        systemctl start docker
+        systemctl enable docker
+    else
+        service docker start
+        chkconfig docker on
+    fi
+
+    # Add current user to docker group
+    if ! groups $USER | grep -q docker; then
+        usermod -aG docker $USER
+        echo "Added $USER to docker group. You may need to log out and back in for this to take effect."
+    fi
+
+    echo "Docker installed successfully"
+}
+
+# Function to install Docker Compose
+install_docker_compose() {
+    echo "Installing Docker Compose..."
+    DISTRO=$(detect_distro)
+    
+    case $DISTRO in
+        "ubuntu"|"debian")
+            # Install Docker Compose plugin
+            apt-get install -y docker-compose-plugin
+            ;;
+        "centos"|"rhel"|"fedora")
+            # Install Docker Compose plugin
+            yum install -y docker-compose-plugin
+            ;;
+        *)
+            echo "Unsupported distribution: $DISTRO"
+            exit 1
+            ;;
+    esac
+
+    # Create symlink for docker-compose command
+    if [ -f /usr/libexec/docker/cli-plugins/docker-compose ]; then
+        ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+    elif [ -f /usr/local/lib/docker/cli-plugins/docker-compose ]; then
+        ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+    fi
+
+    echo "Docker Compose installed successfully"
+}
 
 # Function to check dependencies
 check_dependencies() {
@@ -50,8 +162,7 @@ check_dependencies() {
     if ! command -v docker &> /dev/null; then
         if [ "$AUTO_INSTALL_DOCKER" = "true" ]; then
             echo "Docker is not installed. Installing..."
-            curl -fsSL https://get.docker.com | sudo -n sh
-            sudo -n usermod -aG docker $USER
+            install_docker
         else
             echo "Error: Docker is not installed and AUTO_INSTALL_DOCKER is false"
             exit 1
@@ -62,8 +173,7 @@ check_dependencies() {
     if ! command -v docker-compose &> /dev/null; then
         if [ "$AUTO_INSTALL_DOCKER" = "true" ]; then
             echo "Docker Compose is not installed. Installing..."
-            sudo -n curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            sudo -n chmod +x /usr/local/bin/docker-compose
+            install_docker_compose
         else
             echo "Error: Docker Compose is not installed and AUTO_INSTALL_DOCKER is false"
             exit 1
