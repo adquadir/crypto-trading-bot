@@ -31,7 +31,6 @@ async def health_check():
 async def get_opportunities():
     """Get current trading opportunities."""
     try:
-        # Get opportunities from the opportunity manager
         opportunities = trading_bot.opportunity_manager.get_opportunities()
         return {
             "status": "success",
@@ -80,7 +79,7 @@ async def update_config(config: Dict[str, Any]):
         }
     except Exception as e:
         logger.error(f"Error updating config: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/stats")
 async def get_stats():
@@ -98,18 +97,19 @@ async def get_stats():
         # Get total PnL
         total_pnl = session.query(func.sum(Trade.pnl)).scalar() or 0
         
-        # Get average trade duration
-        avg_duration = session.query(func.avg(Trade.duration)).scalar() or 0
-        
-        return {
+        stats = {
             "total_trades": total_trades,
             "winning_trades": winning_trades,
             "win_rate": (winning_trades / total_trades * 100) if total_trades > 0 else 0,
-            "total_pnl": total_pnl,
-            "avg_duration": avg_duration
+            "total_pnl": total_pnl
+        }
+        
+        return {
+            "status": "success",
+            "data": stats
         }
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        session.close() 
+        session.close()

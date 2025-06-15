@@ -3,7 +3,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
-from src.models.trading import Trade
 
 Base = declarative_base()
 
@@ -81,7 +80,9 @@ class Trade(Base):
     entry_price = Column(Float)
     exit_price = Column(Float)
     position_size = Column(Float)
+    leverage = Column(Float, default=1.0)
     pnl = Column(Float)
+    pnl_pct = Column(Float)
     status = Column(String)  # 'OPEN', 'CLOSED', 'CANCELLED'
     
     # Relationships

@@ -58,6 +58,100 @@ wait_for_service() {
 }
 
 # --------------------------
+# 🛠️ Systemd service management
+# --------------------------
+create_systemd_service() {
+  local service_name=$1
+  local description=$2
+  local exec_start=$3
+  local working_dir=$4
+  local user=$5
+  local environment=$6
+
+  echo "📝 Creating systemd service: $service_name"
+  
+  # Create service file
+  sudo tee "/etc/systemd/system/$service_name.service" > /dev/null << EOF
+[Unit]
+Description=$description
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=$user
+WorkingDirectory=$working_dir
+Environment=$environment
+ExecStart=$exec_start
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Reload systemd and enable service
+  sudo systemctl daemon-reload
+  sudo systemctl enable "$service_name"
+  sudo systemctl start "$service_name"
+  
+  echo "✅ Service $service_name created and started"
+}
+
+check_systemd_service() {
+  local service_name=$1
+  if systemctl is-active --quiet "$service_name"; then
+    echo "✅ Service $service_name is running"
+    return 0
+  elif systemctl is-enabled --quiet "$service_name"; then
+    echo "⚠️ Service $service_name exists but is not running"
+    sudo systemctl start "$service_name"
+    return 0
+  else
+    echo "❌ Service $service_name does not exist"
+    return 1
+  fi
+}
+
+setup_systemd_services() {
+  local user=$(whoami)
+  local python_path="$VENV_DIR/bin/python"
+  local node_path=$(which node)
+  
+  # API Service
+  if ! check_systemd_service "crypto-trading-api"; then
+    create_systemd_service \
+      "crypto-trading-api" \
+      "Crypto Trading Bot API" \
+      "$python_path -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000" \
+      "$PROJECT_ROOT" \
+      "$user" \
+      "PYTHONPATH=$PROJECT_ROOT"
+  fi
+  
+  # Bot Service
+  if ! check_systemd_service "crypto-trading-bot"; then
+    create_systemd_service \
+      "crypto-trading-bot" \
+      "Crypto Trading Bot" \
+      "$python_path -m src.trading_bot" \
+      "$PROJECT_ROOT" \
+      "$user" \
+      "PYTHONPATH=$PROJECT_ROOT"
+  fi
+  
+  # Frontend Service
+  if ! check_systemd_service "crypto-trading-frontend"; then
+    create_systemd_service \
+      "crypto-trading-frontend" \
+      "Crypto Trading Bot Frontend" \
+      "$node_path $FRONTEND_DIR/node_modules/.bin/react-scripts start" \
+      "$FRONTEND_DIR" \
+      "$user" \
+      "PORT=3000"
+  fi
+}
+
+# --------------------------
 # 🐍 Python setup
 # --------------------------
 echo "📦 Setting up Python environment..."
@@ -160,91 +254,11 @@ if [[ "$ENVIRONMENT" != "codex" ]]; then
 fi
 
 # --------------------------
-# 🚀 Service start functions
+# 🚀 Setup systemd services
 # --------------------------
-start_api() {
-  echo "🔌 Starting API (uvicorn)..."
-  uvicorn src.main:app --host 0.0.0.0 --port 8000
-}
-
-start_frontend() {
-  echo "🖥️ Starting frontend (React)..."
-  npm start --prefix "$FRONTEND_DIR"
-}
-
-# --------------------------
-# 🔁 Port checks
-# --------------------------
-for port in 8000 3000; do
-  if port_in_use $port; then
-    echo "❌ Port $port already in use"
-    exit 1
-  fi
-done
-
-# --------------------------
-# 🧠 Environment-based behavior
-# --------------------------
-if [[ "$ENVIRONMENT" = "codex" ]]; then
-  # Codex: foreground process
-  start_api
-else
-  # Local/dev: background + logging
-  start_api > "$LOG_DIR/api.log" 2>&1 &
-  API_PID=$!
-  start_frontend > "$LOG_DIR/frontend.log" 2>&1 &
-  FRONTEND_PID=$!
-
-  echo "✅ Services launched:"
-  echo "  API      → http://localhost:8000  (PID $API_PID)"
-  echo "  Frontend → http://localhost:3000  (PID $FRONTEND_PID)"
-  echo "📄 Logs saved to $LOG_DIR"
-
-  wait_for_service localhost 8000 30
-  wait_for_service localhost 3000 30
-
-  trap 'kill $API_PID $FRONTEND_PID 2>/dev/null || true' EXIT
-  wait
+if [[ "$ENVIRONMENT" != "codex" ]]; then
+  echo "🛠️ Setting up systemd services..."
+  setup_systemd_services
 fi
 
-echo "🎉 Setup completed successfully!"
-
-# If either service was started, ask about systemd setup
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    read -p "Do you want to set up the services to start automatically with systemd? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Systemd setup not implemented in Docker mode"
-    fi
-fi
-
-# Verify backend connection
-if ! check_backend; then
-    echo "Backend connection failed. Please check:"
-    echo "1. Is the VPS running? ($VPS_IP)"
-    echo "2. Is the backend service running? (sudo systemctl status crypto-trading-bot-web.service)"
-    echo "3. Is port $VPS_PORT open? (sudo ufw status)"
-    echo "4. Is the service listening on port $VPS_PORT? (sudo netstat -tulpn | grep $VPS_PORT)"
-    exit 1
-fi
-
-# Start the application
-echo "Starting the application..."
-echo "Backend is running on http://$VPS_IP:$VPS_PORT"
-echo "Frontend will run on http://localhost:3000"
-
-# Handle script termination
-cleanup() {
-    echo "Shutting down services..."
-    stop_existing_processes
-    if [ ! -z "$FRONTEND_PID" ]; then
-        kill $FRONTEND_PID 2>/dev/null || true
-    fi
-    echo "Shutdown complete"
-    exit 0
-}
-
-trap cleanup INT TERM
-
-# Wait for frontend process
-wait 
+echo "🎉 Setup completed successfully!" 

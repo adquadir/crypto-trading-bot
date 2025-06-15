@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+# Create a global instance of TradingBot that can be imported by other modules
+trading_bot = None
+
 class TradingBot:
     def __init__(self):
         """Initialize the trading bot."""
@@ -913,6 +916,9 @@ class TradingBot:
                 }
             }
         }
+
+# Create the global instance
+trading_bot = TradingBot()
 
 if __name__ == "__main__":
     import asyncio
