@@ -15,10 +15,14 @@ const getApiBaseUrl = () => {
 };
 
 export const getWsBaseUrl = () => {
-    if (process.env.NODE_ENV === 'production') {
-        return `wss://${window.location.hostname}`;
+    const hostname = window.location.hostname;
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    
+    if (isDevelopment || hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'ws://localhost:8000';
     }
-    return 'ws://localhost:8000';
+    // For production, use the same protocol as the current page
+    return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${hostname}`;
 };
 
 const config = {
