@@ -1,6 +1,25 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.api.routes import router as api_router
+import logging
+import os
+from dotenv import load_dotenv
+
+from src.api.routes import router as trading_router
+from src.api.websocket import router as websocket_router
+
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/api.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Crypto Trading Bot API")
 
@@ -13,8 +32,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes
-app.include_router(api_router, prefix="/api")
+# Include routers
+app.include_router(trading_router, prefix="/api/v1/trading")
+app.include_router(websocket_router, prefix="/ws")
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup."""
+    try:
+        # Create logs directory if it doesn't exist
+        os.makedirs('logs', exist_ok=True)
+        logger.info("API server started successfully")
+    except Exception as e:
+        logger.error(f"Error during startup: {e}")
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown."""
+    try:
+        logger.info("API server shutting down")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 @app.get("/")
 async def root():

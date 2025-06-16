@@ -11,8 +11,8 @@ from src.database.models import Trade
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Create router with /trading prefix
-router = APIRouter(prefix="/trading")
+# Create router without prefix
+router = APIRouter()
 
 @router.get("/health")
 async def health_check():

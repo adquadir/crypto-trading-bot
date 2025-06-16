@@ -291,7 +291,7 @@ const Opportunities = () => {
       return;
     }
 
-    const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+    const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}?api_key=${process.env.REACT_APP_API_KEY}`);
     attachHandlers(newWs);
     wsRef.current = newWs;
   };

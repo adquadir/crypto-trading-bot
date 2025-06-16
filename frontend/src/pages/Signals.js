@@ -309,7 +309,7 @@ const Signals = () => {
       wsRef.current.close();
       }
 
-    const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}`);
+    const ws = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}?api_key=${process.env.REACT_APP_API_KEY}`);
       wsRef.current = ws;
 
       ws.onopen = () => {

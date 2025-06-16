@@ -15,8 +15,16 @@ export const WebSocketProvider = ({ children }) => {
       ws.close();
     }
 
-    // Create new WebSocket instance
-    const ws = new WebSocket(getWsBaseUrl());
+    // Get API key from environment variable
+    const apiKey = process.env.REACT_APP_API_KEY;
+    if (!apiKey) {
+      console.error('API key not found in environment variables');
+      return;
+    }
+
+    // Create new WebSocket instance with API key
+    const wsUrl = `${getWsBaseUrl()}${config.ENDPOINTS.WS_SIGNALS}?api_key=${apiKey}`;
+    const ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
       console.log('WebSocket connected');
@@ -38,9 +46,15 @@ export const WebSocketProvider = ({ children }) => {
       setIsConnected(false);
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
+    ws.onclose = (event) => {
+      console.log('WebSocket disconnected:', event.code, event.reason);
       setIsConnected(false);
+      
+      // Don't reconnect if closed due to invalid API key
+      if (event.code === 4003) {
+        console.error('WebSocket closed due to invalid API key');
+        return;
+      }
       
       // Implement exponential backoff for reconnection
       const delay = Math.min(1000 * Math.pow(2, reconnectAttempt), 30000);
