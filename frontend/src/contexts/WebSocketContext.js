@@ -3,6 +3,9 @@ import config, { getWsBaseUrl } from '../config';
 
 const WebSocketContext = createContext(null);
 
+// Hardcoded API key to match backend
+const API_KEY = 'crypto_trading_bot_api_key_2024'.trim();
+
 export const WebSocketProvider = ({ children }) => {
   const [ws, setWs] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -16,15 +19,11 @@ export const WebSocketProvider = ({ children }) => {
         ws.close();
       }
 
-      // Get API key from environment variable
-      const apiKey = process.env.REACT_APP_API_KEY;
-      if (!apiKey) {
-        console.error('API key not found in environment variables');
-        return;
-      }
-
       // Create new WebSocket instance with API key
-      const wsUrl = `${getWsBaseUrl()}${config.ENDPOINTS.WS_SIGNALS}?api_key=${apiKey}`;
+      const wsUrl = `${getWsBaseUrl()}${config.ENDPOINTS.WS_SIGNALS}?api_key=${encodeURIComponent(API_KEY)}`;
+      console.log('Connecting to WebSocket with URL:', wsUrl);
+      console.log('API key being sent:', API_KEY);
+      console.log('API key length:', API_KEY.length);
       const newWs = new WebSocket(wsUrl);
       
       newWs.onopen = () => {

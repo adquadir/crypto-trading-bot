@@ -450,45 +450,33 @@ class SignalGenerator:
             return None
             
     def _determine_market_regime(self, market_data: Dict) -> Dict:
-        """Determine the current market regime with confidence score."""
+        """Determine the current market regime."""
         try:
             symbol = market_data.get("symbol", "unknown")
-            indicators = market_data.get("indicators", {})
-            adx = indicators.get("adx", 0)
-            bb_upper = indicators.get("bb_upper", 0)
-            bb_lower = indicators.get("bb_lower", 0)
-            bb_middle = indicators.get(
-                "bb_middle", 1
-            )  # Use 1 as fallback to avoid division by zero
-            atr = indicators.get("atr", 0)
-            current_price = (
-                float(market_data["klines"][-1]["close"])
-                if market_data.get("klines")
-                else 1
-            )
-
-            # Add debug logging
-            logger.debug(
-                f"Determining market regime for {symbol} - ADX: {adx:.2f}, BB Width: {(bb_upper - bb_lower) / bb_middle:.4f}, ATR: {atr:.4f}"
-            )
+            current_price = float(market_data["klines"][-1]["close"])
+            indicators = self._calculate_indicators(market_data)
             
-            # Calculate regime scores
-            trend_score = 0
-            range_score = 0
-            volatile_score = 0
+            # Initialize scores
+            trend_score = 0.0
+            range_score = 0.0
+            volatile_score = 0.0
+            
+            # Get previous regime
+            previous_regime = self.regime_history.get(symbol, "unknown")
             
             # ADX contribution (0-1)
+            adx = indicators.get("adx", 0)
             if adx > 25:  # Strong trend
-                trend_score += 0.6
+                trend_score += 0.4
             elif adx > 20:  # Moderate trend
-                trend_score += 0.3
+                trend_score += 0.2
             elif adx < 15:  # Weak trend, likely ranging
                 range_score += 0.4
             
             # BB Width contribution (0-1)
             epsilon = 1e-8
-            if abs(bb_middle) > epsilon:  # Avoid division by zero
-                bb_width = (bb_upper - bb_lower) / bb_middle
+            if abs(indicators["bb_middle"]) > epsilon:  # Avoid division by zero
+                bb_width = (indicators["bb_upper"] - indicators["bb_lower"]) / indicators["bb_middle"]
                 if bb_width < 0.02:  # Tight range
                     range_score += 0.4
                 elif bb_width < 0.03:  # Moderate range
@@ -499,8 +487,8 @@ class SignalGenerator:
                 bb_width = 0
             
             # ATR contribution (0-1)
-            if atr > epsilon and current_price > epsilon:
-                atr_percent = atr / current_price
+            if indicators["atr"] > epsilon and current_price > epsilon:
+                atr_percent = indicators["atr"] / current_price
                 if atr_percent > 0.03:  # High volatility
                     volatile_score += 0.4
                 elif atr_percent > 0.02:  # Moderate volatility
@@ -527,9 +515,7 @@ class SignalGenerator:
             macd = indicators.get("macd", {})
             macd_value = macd.get("value", 0)
             macd_signal = macd.get("signal", 0)
-            if abs(macd_value - macd_signal) > abs(
-                macd_signal * 0.1
-            ):  # Strong MACD divergence
+            if abs(macd_value - macd_signal) > abs(macd_signal * 0.1):  # Strong MACD divergence
                 trend_score += 0.2
 
             # EMA contribution (0-1)
@@ -557,25 +543,17 @@ class SignalGenerator:
             
             # Calculate confidence (0-1)
             total_score = sum(scores.values())
-            confidence = (
-                primary_regime[1] / total_score if abs(total_score) > epsilon else 0
-            )
+            confidence = primary_regime[1] / total_score if abs(total_score) > epsilon else 0
 
             # Add debug logging
-            logger.debug(
-                f"Regime scores for {symbol} - Trending: {trend_score:.2f}, Ranging: {range_score:.2f}, Volatile: {volatile_score:.2f}"
-            )
-            logger.debug(
-                f"Selected regime: {primary_regime[0]} with confidence: {confidence:.2f}"
-            )
+            logger.debug(f"Regime scores for {symbol} - Trending: {trend_score:.2f}, Ranging: {range_score:.2f}, Volatile: {volatile_score:.2f}")
+            logger.debug(f"Selected regime: {primary_regime[0]} with confidence: {confidence:.2f}")
             
             # Check for regime transitions
             if previous_regime and previous_regime != primary_regime[0]:
                 # Require higher confidence for regime changes
                 if confidence < 0.7:  # Increased threshold
-                    logger.debug(
-                        f"Regime change rejected for {symbol} - Insufficient confidence ({confidence:.2f})"
-                    )
+                    logger.debug(f"Regime change rejected for {symbol} - Insufficient confidence ({confidence:.2f})")
                     return {
                         "regime": previous_regime,
                         "confidence": confidence,
@@ -583,9 +561,7 @@ class SignalGenerator:
                         "is_transitioning": True,
                     }
                 elif previous_regime == "trending" and trend_score > 0.3:
-                    logger.debug(
-                        f"Regime change rejected for {symbol} - Still showing trend characteristics"
-                    )
+                    logger.debug(f"Regime change rejected for {symbol} - Still showing trend characteristics")
                     return {
                         "regime": previous_regime,
                         "confidence": confidence,
@@ -593,9 +569,7 @@ class SignalGenerator:
                         "is_transitioning": True,
                     }
                 elif previous_regime == "ranging" and range_score > 0.3:
-                    logger.debug(
-                        f"Regime change rejected for {symbol} - Still showing range characteristics"
-                    )
+                    logger.debug(f"Regime change rejected for {symbol} - Still showing range characteristics")
                     return {
                         "regime": previous_regime,
                         "confidence": confidence,
@@ -603,9 +577,7 @@ class SignalGenerator:
                         "is_transitioning": True,
                     }
                 elif previous_regime == "volatile" and volatile_score > 0.3:
-                    logger.debug(
-                        f"Regime change rejected for {symbol} - Still showing volatile characteristics"
-                    )
+                    logger.debug(f"Regime change rejected for {symbol} - Still showing volatile characteristics")
                     return {
                         "regime": previous_regime,
                         "confidence": confidence,

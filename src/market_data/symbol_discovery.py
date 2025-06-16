@@ -656,107 +656,23 @@ class SymbolDiscovery:
         len(symbols)} static symbols due to error")
             return symbols
 
-    async def get_market_data(self, symbol: str) -> Optional[Dict]:
-        """Get market data for a symbol with proper formatting for signal generation."""
+    async def _get_market_data(self, symbol: str) -> Optional[Dict]:
+        """Get market data for a symbol with caching."""
         try:
-            # Get cached data
-            cache_key = f"market_data_{symbol}"
+            cache_key = f"{symbol}_market_data"
             cached_data = self.cache.get(cache_key)
-            current_time = time.time()
-
-            # Check if cached data is fresh (less than 5 seconds old)
-            if cached_data and (
-    current_time -
-    cached_data.get(
-        'timestamp',
-         0)) < 5:
-                    return cached_data
-
-            # Get fresh data from exchange
-            klines = await self.exchange_client.get_klines(symbol, '1m', limit=100)
-            ticker_24h = await self.exchange_client.get_ticker_24h(symbol)
-            orderbook = await self.exchange_client.get_orderbook(symbol, limit=20)
-            funding_rate = await self.exchange_client.get_funding_rate(symbol)
-            open_interest = await self.exchange_client.get_open_interest(symbol)
-
-            # Process klines data
-            klines_dict = []
-            for k in klines:
-                if isinstance(k, (list, tuple)) and len(k) >= 6:
-                    klines_dict.append({
-                        'timestamp': k[0],
-                        'open': float(k[1]),
-                        'high': float(k[2]),
-                        'low': float(k[3]),
-                        'close': float(k[4]),
-                        'volume': float(k[5])
-                    })
-                elif isinstance(k, dict):
-                    klines_dict.append({
-                        'timestamp': k.get('timestamp', 0),
-                        'open': float(k.get('open', 0)),
-                        'high': float(k.get('high', 0)),
-                        'low': float(k.get('low', 0)),
-                        'close': float(k.get('close', 0)),
-                        'volume': float(k.get('volume', 0))
-                    })
-
-            # Process orderbook data
-            orderbook_processed = {
-                'bids': [[float(price), float(qty)] for price, qty in orderbook.get('bids', [])],
-                'asks': [[float(price), float(qty)] for price, qty in orderbook.get('asks', [])]
-            }
-
-            # Process ticker data
-            ticker_processed = {}
-            if isinstance(ticker_24h, dict):
-                ticker_processed = {
-                    'price': float(ticker_24h.get('lastPrice', 0)),
-                    'volume': float(ticker_24h.get('volume', 0)),
-                    'priceChange': float(ticker_24h.get('priceChange', 0)),
-                    'priceChangePercent': float(ticker_24h.get('priceChangePercent', 0)),
-                    'highPrice': float(ticker_24h.get('highPrice', 0)),
-                    'lowPrice': float(ticker_24h.get('lowPrice', 0))
-                }
-
-            # Process funding rate
-            funding_rate_float = 0.0
-            if isinstance(funding_rate, dict):
-                funding_rate_float = float(funding_rate.get('fundingRate', 0))
-            else:
-                try:
-                    funding_rate_float = float(funding_rate)
-                except (ValueError, TypeError):
-                    funding_rate_float = 0.0
-
-            # Process open interest
-            open_interest_float = 0.0
-            if isinstance(open_interest, dict):
-                open_interest_float = float(
-                    open_interest.get('openInterest', 0))
-            else:
-                try:
-                    open_interest_float = float(open_interest)
-                except (ValueError, TypeError):
-                    open_interest_float = 0.0
-
-            # Calculate additional metrics
-            spread = self._calculate_spread(orderbook_processed)
-            liquidity = self._calculate_liquidity(orderbook_processed)
-            volatility = self.calculate_volatility(klines_dict)
-
-            # Create market data dictionary
+            
+            if cached_data and self.check_data_freshness(cached_data):
+                return cached_data
+                
+            # Get fresh data
             market_data = {
                 'symbol': symbol,
-                'klines': klines_dict,
-                'ticker_24h': ticker_processed,
-                'orderbook': orderbook_processed,
-                'funding_rate': funding_rate_float,
-                'open_interest': open_interest_float,
-                'spread': spread,
-                'liquidity': liquidity,
-                'volatility': volatility,
-                'timestamp': current_time,
+                'orderbook': await self.exchange_client.get_orderbook(symbol),
+                'klines': await self.exchange_client.get_klines(symbol),
+                'ticker_24h': await self.exchange_client.get_ticker_24h(symbol),
+                'open_interest': await self.exchange_client.get_open_interest(symbol),
+                'funding_rate': await self.exchange_client.get_funding_rate(symbol),
                 'ohlcv_freshness': 0.0,  # Will be updated by the signal generator
                 'orderbook_freshness': 0.0,
                 'ticker_freshness': 0.0,
@@ -770,7 +686,7 @@ class SymbolDiscovery:
         except Exception as e:
             logger.error(f"Error getting market data for {symbol}: {e}")
             return None
-            
+
     def _calculate_spread(self, orderbook: Dict) -> float:
         """Calculate the current spread from orderbook."""
         try:
@@ -1403,10 +1319,10 @@ class SymbolDiscovery:
     f"Error saving signal to cache file for {symbol}: {e}")
 
     async def _process_symbol_with_retry(
-    self,
-    symbol: str,
-    risk_per_trade: float,
-     max_retries: int) -> Optional[TradingOpportunity]:
+        self,
+        symbol: str,
+        risk_per_trade: float,
+        max_retries: int) -> Optional[TradingOpportunity]:
         """Process a symbol with retry logic."""
         for attempt in range(max_retries):
             try:
@@ -1424,9 +1340,7 @@ class SymbolDiscovery:
                 # Apply advanced filters
                 passed, reasons = self._apply_advanced_filters(market_data)
                 if not passed:
-                    logger.debug(
-    f"Symbol {symbol} excluded by filters: {
-        '; '.join(reasons)}")
+                    logger.debug(f"Symbol {symbol} excluded by filters: {'; '.join(reasons)}")
                     return None
 
                 # Generate signal
@@ -1452,34 +1366,26 @@ class SymbolDiscovery:
                     market_regime=extracted_signal['market_regime'],
                     indicators=extracted_signal['indicators'],
                     data_freshness=extracted_signal['data_freshness'],
-                    timestamp=datetime.fromtimestamp(
-                        extracted_signal['timestamp'])
+                    timestamp=datetime.fromtimestamp(extracted_signal['timestamp'])
                 )
 
                 # Calculate opportunity score
-                opportunity.score = self.calculate_opportunity_score(
-                    opportunity)
+                opportunity.score = self.calculate_opportunity_score(opportunity)
 
                 # Log successful opportunity creation
-                logger.info(
-    f"Created opportunity for {symbol}: {
-        opportunity.direction} at {
-            opportunity.entry_price}")
+                logger.info(f"Created opportunity for {symbol}: {opportunity.direction} at {opportunity.entry_price}")
 
                 return opportunity
 
             except Exception as e:
-                logger.error(
-    f"Error processing {symbol} (attempt {
-        attempt + 1}/{max_retries}): {e}")
+                logger.error(f"Error processing {symbol} (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1)  # Wait before retry
                 continue
 
         return None
 
-    def _apply_advanced_filters(
-        self, market_data: Dict) -> Tuple[bool, List[str]]:
+    def _apply_advanced_filters(self, market_data: Dict) -> Tuple[bool, List[str]]:
         """Apply advanced filters to market data, returning reasons for exclusion."""
         symbol = market_data.get('symbol', 'UNKNOWN')
         reasons = []
@@ -1501,27 +1407,27 @@ class SymbolDiscovery:
                 try:
                     mid_price = (float(orderbook['asks'][0][0]) + float(orderbook['bids'][0][0])) / 2
                     volatility = float(self.calculate_volatility(market_data.get('klines', [])))
-
+            
                     # Define depth ranges and their minimum requirements
                     depth_ranges = [
                         (0.001, 0.0025, 10000),  # 0.1% range, minimum $10k
                         (0.0025, 0.005, 20000),  # 0.25% range, minimum $20k
                         (0.005, 0.01, 50000)     # 0.5% range, minimum $50k
                     ]
-
+            
                     # Adjust requirements based on volatility
                     volatility_factor = 1 + (volatility * 10)
-
+            
                     # Check each depth range
                     depth_metrics = []
                     for min_range, max_range, min_depth in depth_ranges:
                         range_min = mid_price * (1 - max_range)
                         range_max = mid_price * (1 + max_range)
-
+                
                         buy_depth = sum(float(qty) for price, qty in orderbook['bids'] if range_min <= float(price) <= mid_price)
                         sell_depth = sum(float(qty) for price, qty in orderbook['asks'] if mid_price <= float(price) <= range_max)
                         avg_depth = (buy_depth + sell_depth) / 2
-
+                
                         adjusted_min_depth = min_depth * volatility_factor
                         depth_metrics.append({
                             'range': f"{min_range*100:.1f}%-{max_range*100:.1f}%",
@@ -1529,14 +1435,14 @@ class SymbolDiscovery:
                             'required': adjusted_min_depth,
                             'passed': avg_depth >= adjusted_min_depth
                         })
-
+            
                     # Log depth metrics
                     depth_log = "; ".join([
                         f"{m['range']}: ${m['depth']:.2f} (req: ${m['required']:.2f})"
                         for m in depth_metrics
                     ])
                     logger.debug(f"Depth metrics for {symbol}: {depth_log}")
-
+            
                     # Check if any range passes
                     if not any(m['passed'] for m in depth_metrics):
                         reasons.append(
@@ -1705,7 +1611,6 @@ class SymbolDiscovery:
                     self.symbols = set(static_symbols)
                     logger.info(f"Using fallback static symbols: {', '.join(static_symbols)}")
             logger.info(f"Symbol discovery initialized with {len(self.symbols)} symbols")
-
         except Exception as e:
             logger.error(f"Error initializing symbol discovery: {e}")
             raise

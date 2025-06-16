@@ -13,9 +13,11 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Get API key from environment variable
-API_KEY = os.getenv('API_KEY')
-logger.info(f"Loaded API_KEY from environment: {API_KEY}")
+# Hardcoded API key for now
+API_KEY = 'crypto_trading_bot_api_key_2024'
+logger.info(f"Using hardcoded API_KEY: {API_KEY}")
+logger.info(f"API_KEY type: {type(API_KEY)}")
+logger.info(f"API_KEY length: {len(API_KEY)}")
 
 # Initialize connection manager
 manager = ConnectionManager()
@@ -31,10 +33,26 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str = Query(None)):
     """WebSocket endpoint for real-time trading signals."""
     try:
         # Verify API key
-        logger.info(f"Received API key from client: {api_key}")
-        logger.info(f"Expected API key: {API_KEY}")
-        if not api_key or api_key != API_KEY:
-            logger.warning(f"Invalid API key attempt from {websocket.client}")
+        logger.info(f"Received API key from client: '{api_key}'")
+        logger.info(f"Received API key type: {type(api_key)}")
+        logger.info(f"Received API key length: {len(api_key) if api_key else 0}")
+        logger.info(f"Expected API key: '{API_KEY}'")
+        logger.info(f"Expected API key type: {type(API_KEY)}")
+        logger.info(f"Expected API key length: {len(API_KEY)}")
+        
+        if not api_key:
+            logger.warning("No API key provided")
+            await websocket.close(code=4003, reason="No API key provided")
+            return
+            
+        # Trim whitespace and newlines from received API key
+        api_key = api_key.strip()
+        logger.info(f"Trimmed API key: '{api_key}'")
+        logger.info(f"Trimmed API key length: {len(api_key)}")
+        
+        if api_key != API_KEY:
+            logger.warning(f"API key mismatch. Received: '{api_key}', Expected: '{API_KEY}'")
+            logger.warning(f"API key comparison result: {api_key == API_KEY}")
             await websocket.close(code=4003, reason="Invalid API key")
             return
 
