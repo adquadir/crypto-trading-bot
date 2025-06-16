@@ -57,3 +57,6 @@ logs/
 # OS specific
 .DS_Store
 Thumbs.dblogs/frontend.log
+frontend/build/
+.env
+frontend/.env

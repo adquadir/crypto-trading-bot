@@ -16,7 +16,7 @@ const getApiBaseUrl = () => {
 
 export const getWsBaseUrl = () => {
     if (process.env.NODE_ENV === 'production') {
-        return `wss://${window.location.hostname}:8000`;
+        return `wss://${window.location.hostname}`;
     }
     return 'ws://localhost:8000';
 };
