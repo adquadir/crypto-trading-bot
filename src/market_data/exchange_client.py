@@ -1200,28 +1200,21 @@ class ExchangeClient:
             symbol: str,
             interval: str = '1m',
             limit: int = 100) -> List[Dict]:
-        """Get klines/candlestick data for a symbol."""
+        """Get kline/candlestick data for a symbol."""
         try:
-            # Use the existing get_historical_data method
-            df = await self.get_historical_data(symbol, interval, limit)
-            df = df.reset_index()  # Bring 'timestamp' back as a column
-
-            # Convert DataFrame to list of dictionaries
-            klines = []
-            for _, row in df.iterrows():
-                kline = {
-                    # Convert to ms
-                    'timestamp': int(row['timestamp'].timestamp() * 1000),
-                    'open': float(row['open']),
-                    'high': float(row['high']),
-                    'low': float(row['low']),
-                    'close': float(row['close']),
-                    'volume': float(row['volume'])
-                }
-                klines.append(kline)
-
-            return klines
-
+            if self.testnet:
+                return await self.futures_client.klines(
+                    symbol=symbol,
+                    interval=interval,
+                    limit=limit)
+            return await self.client.klines(
+                symbol=symbol,
+                interval=interval,
+                limit=limit)
         except Exception as e:
             logger.error(f"Error getting klines for {symbol}: {e}")
-            return []
+            raise
+
+    async def get_ohlcv(self, symbol: str, timeframe: str = '1m', limit: int = 100) -> List[Dict]:
+        """Alias for get_klines to maintain compatibility with other parts of the codebase."""
+        return await self.get_klines(symbol=symbol, interval=timeframe, limit=limit)

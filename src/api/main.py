@@ -34,7 +34,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(trading_router, prefix="/api/v1/trading")
-app.include_router(websocket_router, prefix="/ws")
+app.include_router(websocket_router)  # No prefix needed since endpoint includes /ws
 
 @app.on_event("startup")
 async def startup_event():

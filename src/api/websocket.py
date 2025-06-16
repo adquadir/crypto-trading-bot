@@ -26,6 +26,14 @@ manager = ConnectionManager()
 exchange_client = ExchangeClient()
 symbol_discovery = SymbolDiscovery(exchange_client)
 
+# Initialize components
+async def initialize_components():
+    await exchange_client.initialize()
+    await symbol_discovery.initialize()
+
+# Create initialization task
+asyncio.create_task(initialize_components())
+
 router = APIRouter()
 
 @router.websocket("/ws/signals")
