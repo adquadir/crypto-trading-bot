@@ -50,7 +50,7 @@ class CacheManager:
         self.cache_dir.mkdir(exist_ok=True)
         self.memory_cache: Dict[str, CacheEntry] = {}
         self.ttl = ttl
-
+        
     def get(self, key: str, max_age: int = 300) -> Optional[any]:
         """Get data from cache if not expired."""
         # Check memory cache first
@@ -59,7 +59,7 @@ class CacheManager:
             if datetime.now() < entry.expires_at:
                 return entry.data
             del self.memory_cache[key]
-
+            
         # Check disk cache
         cache_file = self.cache_dir / f"{key}.json"
         if cache_file.exists():
@@ -78,7 +78,7 @@ class CacheManager:
             except Exception as e:
                 logger.error(f"Error reading cache file {key}: {e}")
         return None
-
+        
     def set(self, key: str, data: any, max_age: int = 300):
         """Store data in both memory and disk cache."""
         expires_at = datetime.now() + timedelta(seconds=max_age)
@@ -86,10 +86,10 @@ class CacheManager:
             data=data,
             timestamp=datetime.now(),
             expires_at=expires_at)
-
+        
         # Update memory cache
         self.memory_cache[key] = entry
-
+        
         # Update disk cache
         try:
             cache_file = self.cache_dir / f"{key}.json"
@@ -137,24 +137,24 @@ def rate_limit(limit: int = 10, period: float = 1.0):
     """Rate limiting decorator."""
     last_reset = time.time()
     calls = 0
-
+    
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
             nonlocal last_reset, calls
-
+            
             current_time = time.time()
             if current_time - last_reset >= period:
                 last_reset = current_time
                 calls = 0
-
+                
             if calls >= limit:
                 sleep_time = period - (current_time - last_reset)
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
                 last_reset = time.time()
                 calls = 0
-
+                
             calls += 1
             return await func(*args, **kwargs)
         return wrapper
@@ -163,7 +163,7 @@ def rate_limit(limit: int = 10, period: float = 1.0):
 
 class ExchangeClient:
     """Client for interacting with cryptocurrency exchange APIs."""
-
+    
     def __init__(self, config: Optional[Dict] = None):
         self.config = config if config is not None else load_config()
         self.client = None
@@ -176,7 +176,7 @@ class ExchangeClient:
             'BINANCE_WS_URL',
             'wss://fstream.binance.com/ws/stream')
         self.testnet = os.getenv('USE_TESTNET', 'false').lower() == 'true'
-
+        
         # Initialize proxy configuration
         self.proxy_host = os.getenv('PROXY_HOST', '')
         # Always a string, never a coroutine
@@ -186,7 +186,7 @@ class ExchangeClient:
         self.proxy_auth = None
         if self.proxy_user and self.proxy_pass:
             self.proxy_auth = BasicAuth(self.proxy_user, self.proxy_pass)
-
+            
         # Initialize proxy configuration from environment variables
         use_proxy = os.getenv('USE_PROXY', 'false').lower() == 'true'
         if use_proxy:
@@ -198,7 +198,7 @@ class ExchangeClient:
                         self.proxy_pass}@{
                         self.proxy_host}:{
                         self.proxy_port}"
-
+                
                 self.proxy_config = {
                     'http': proxy_url,
                     'https': proxy_url
@@ -213,29 +213,29 @@ class ExchangeClient:
                 self.proxies = None
         else:
             self.proxies = None
-
+        
         # Initialize WebSocket tracking
         self.ws_last_message = {}
         self.order_books = {}
         self.last_trade_price = {}
         self.symbols = set()
         self.ws_clients = {}  # Initialize ws_clients as an empty dict
-
+        
         # Initialize cache manager
         self.cache = CacheManager(
             cache_dir=os.getenv('CACHE_DIR', 'cache'),
             ttl=int(os.getenv('CACHE_TTL', '60'))
         )
-
+        
         # Initialize the client with proxy configuration
         self._init_client()
-
+        
         # Initialize WebSocket manager
         self._init_ws_manager()
-
+        
         self.logger = logging.getLogger(__name__)
         self.scalping_mode = self.config.get('scalping_mode', False)
-
+        
         # Initialize proxy rotation
         self.proxy_metrics = {}
         self.rotation_threshold = 0.8
@@ -250,7 +250,7 @@ class ExchangeClient:
             'failover_ports', os.getenv(
                 'FAILOVER_PORTS', '10001,10002,10003').split(','))
         self.current_port_index = 0
-
+        
         # Initialize data structures
         self.open_interest_history = {}
         self.history_length = 24
@@ -266,7 +266,7 @@ class ExchangeClient:
                         self.proxy_pass}@{
                         self.proxy_host}:{
                         self.proxy_port}"
-
+                
                 self.proxy_config = {
                     'http': proxy_url,
                     'https': proxy_url
@@ -301,7 +301,7 @@ class ExchangeClient:
         """Test and log proxy connection details."""
         logger.info("=== Proxy Connection Test ===")
         logger.info(f"Current proxy: {self.proxy_host}:{self.proxy_port}")
-
+        
         # Test direct connection without proxy
         try:
             async with aiohttp.ClientSession() as session:
@@ -309,7 +309,7 @@ class ExchangeClient:
                     logger.info("Direct connection test (no proxy): SUCCESS")
         except Exception as e:
             logger.warning(f"Direct connection failed: {str(e)}")
-
+        
         # Test proxy connection
         try:
             success = await self._test_proxy_connection()
@@ -319,7 +319,7 @@ class ExchangeClient:
                 logger.error("Proxy connection test: FAILED")
         except Exception as e:
             logger.error(f"Proxy test error: {str(e)}")
-
+        
         logger.info(f"Available proxy ports: {self.proxy_list}")
         logger.info("=== End Proxy Test ===")
 
@@ -421,7 +421,7 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Unexpected error fetching data for {symbol}: {e}")
             raise
-
+            
     def _should_rotate_proxy(self) -> bool:
         metrics = self.proxy_metrics[self.proxy_port]
         if metrics.total_requests < 10:
@@ -477,24 +477,24 @@ class ExchangeClient:
         try:
             # Create WebSocket client with the correct parameters
             ws_client = MarketDataWebSocket(self, [symbol], cache_ttl=5)
-
+            
             # Register the unified handler for all event types
             ws_client.register_callback("kline", self._handle_ws_message)
             ws_client.register_callback("trade", self._handle_ws_message)
             ws_client.register_callback("depth", self._handle_ws_message)
-
+            
             # Store client
             self.ws_clients[symbol] = ws_client
-
+            
             # Connect and subscribe to channels
             ws_client.connect()
-
+            
             # Start heartbeat monitoring
             self.ws_last_message[symbol] = time.time()
             asyncio.create_task(self._monitor_websocket_heartbeat())
-
+            
             logger.info(f"WebSocket initialized for {symbol}")
-
+            
         except Exception as e:
             logger.error(
                 f"Error initializing WebSocket for {symbol}: {
@@ -553,7 +553,7 @@ class ExchangeClient:
         try:
             if not message:
                 return
-
+                
             # Process message based on type
             if 'e' in message:
                 event_type = message['e']
@@ -563,7 +563,7 @@ class ExchangeClient:
                     await self._handle_trade_update(message['s'], message)
                 elif event_type == 'depth':
                     await self._handle_depth_update(message['s'], message)
-
+                    
         except Exception as e:
             logger.error(f"Error handling WebSocket message: {e}")
 
@@ -671,28 +671,28 @@ class ExchangeClient:
 
     def get_data_freshness(self, symbol: str) -> Dict[str, int]:
         """Get data freshness timestamps for a symbol.
-
+        
         Args:
             symbol: Trading pair symbol
-
+            
         Returns:
             Dict[str, int]: Timestamps of when each data type was last updated
         """
         try:
             if symbol not in self.data_freshness:
                 return {}
-
+                
             return self.data_freshness[symbol]
-
+            
         except Exception as e:
             logger.error(
                 f"Error getting data freshness for {symbol}: {
                     str(e)}")
             return {}
-
+            
     def _update_data_freshness(self, symbol: str, data_type: str) -> None:
         """Update data freshness timestamp for a symbol and data type.
-
+        
         Args:
             symbol: Trading pair symbol
             data_type: Type of data (ohlcv, orderbook, etc.)
@@ -700,14 +700,14 @@ class ExchangeClient:
         try:
             if symbol not in self.data_freshness:
                 self.data_freshness[symbol] = {}
-
+                
             self.data_freshness[symbol][data_type] = int(time.time() * 1000)
-
+            
         except Exception as e:
             logger.error(
                 f"Error updating data freshness for {symbol} {data_type}: {
                     str(e)}")
-
+            
     def _get_cached_data(self, key: str) -> Optional[Dict]:
         """Get data from cache."""
         return self.cache.get(key)
@@ -721,16 +721,16 @@ class ExchangeClient:
         try:
             # Get orderbook
             orderbook = await self.get_orderbook(symbol)
-
+            
             # Get 24h ticker
             ticker = await self.get_ticker_24h(symbol)
-
+            
             # Get recent trades
             trades = await self.get_recent_trades(symbol)
-
+            
             # Get klines
             klines = await self.get_historical_data(symbol)
-
+            
             # Combine all data
             market_data = {
                 'orderbook': orderbook,
@@ -738,7 +738,7 @@ class ExchangeClient:
                 'trades': trades,
                 'klines': klines.to_dict() if not klines.empty else {}
             }
-
+            
             return market_data
         except Exception as e:
             logger.error(f"Error getting market data for {symbol}: {e}")
@@ -787,7 +787,7 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error initializing exchange client: {e}")
             raise
-
+            
     async def stop(self):
         """Stop the exchange client and WebSocket manager."""
         try:
@@ -812,7 +812,7 @@ class ExchangeClient:
             if not self.proxy_host or not self.proxy_port:
                 logger.warning("No proxy configured for health check")
                 return False
-
+                
             # Test proxy connection
             proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
             if self.proxy_auth:
@@ -821,7 +821,7 @@ class ExchangeClient:
                     self.proxy_pass}@{
                     self.proxy_host}:{
                     self.proxy_port}"
-
+                
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/v3/time",
@@ -836,7 +836,7 @@ class ExchangeClient:
                             f"Proxy health check failed: {
                                 response.status}")
                         return False
-
+                        
         except Exception as e:
             logger.error(f"Error checking proxy health: {e}")
             return False
@@ -862,7 +862,7 @@ class ExchangeClient:
             if not self.proxy_host or not self.proxy_port:
                 logger.warning("No proxy configured for connection test")
                 return False
-
+                
             # Test proxy connection
             proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
             if self.proxy_auth:
@@ -871,7 +871,7 @@ class ExchangeClient:
                     self.proxy_pass}@{
                     self.proxy_host}:{
                     self.proxy_port}"
-
+                
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/v3/time",
@@ -886,7 +886,7 @@ class ExchangeClient:
                             f"Proxy connection test failed: {
                                 response.status}")
                         return False
-
+                        
         except Exception as e:
             logger.error(f"Error testing proxy connection: {e}")
             return False
@@ -908,10 +908,10 @@ class ExchangeClient:
                 symbols=[symbol],
                 cache_ttl=5
             )
-
+            
             # Connect to WebSocket
             ws_client.connect()
-
+            
             # Store the client
             self.ws_clients[symbol] = ws_client
             logger.info(f"WebSocket client started for {symbol}")
@@ -941,14 +941,14 @@ class ExchangeClient:
             logger.debug("Fetching account information")
             if not self.client:
                 raise ConnectionError("Exchange client not initialized")
-
+                
             account = await asyncio.to_thread(
                 self.client.futures_account
             )
-
+            
             if not account:
                 raise ValueError("Empty account response received")
-
+                
             required_fields = [
                 'totalWalletBalance',
                 'availableBalance',
@@ -958,7 +958,7 @@ class ExchangeClient:
             if missing_fields:
                 raise ValueError(
                     f"Missing required account fields: {missing_fields}")
-
+                
             logger.debug(
                 f"Account information retrieved: {
                     account.get('totalWalletBalance')} total balance")
@@ -972,7 +972,7 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Unexpected error getting account information: {e}")
             raise
-
+            
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
     async def get_position(self, symbol: str) -> Dict:
@@ -983,10 +983,10 @@ class ExchangeClient:
                 self.client.fetch_position,
                 symbol=symbol
             )
-
+            
             if not position:
                 return {}
-
+                
             # Format position data
             return {
                 'symbol': symbol,
@@ -999,7 +999,7 @@ class ExchangeClient:
                 'marginType': position.get('marginMode', 'cross'),
                 'updateTime': position.get('timestamp', 0)
             }
-
+            
         except Exception as e:
             logger.error(f"Error getting position for {symbol}: {e}")
             return {}
@@ -1013,10 +1013,10 @@ class ExchangeClient:
             positions = await asyncio.to_thread(
                 self.client.fetch_positions
             )
-
+            
             if not positions:
                 return []
-
+                
             # Filter and format open positions
             open_positions = []
             for pos in positions:
@@ -1032,25 +1032,25 @@ class ExchangeClient:
                         'marginType': pos.get('marginMode', 'cross'),
                         'updateTime': pos.get('timestamp', 0)
                     })
-
+                    
             return open_positions
-
+            
         except Exception as e:
             logger.error(f"Error getting open positions: {e}")
             return []
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=10, period=1.0)
-    async def place_order(self, symbol: str, side: str, order_type: str,
-                          quantity: float, price: Optional[float] = None,
-                          stop_price: Optional[float] = None,
-                          reduce_only: bool = False) -> Dict:
+    async def place_order(self, symbol: str, side: str, order_type: str, 
+                         quantity: float, price: Optional[float] = None,
+                         stop_price: Optional[float] = None,
+                         reduce_only: bool = False) -> Dict:
         """Place an order on the exchange."""
         try:
             # Validate inputs
             if not symbol or not side or not order_type or not quantity:
                 raise ValueError("Missing required order parameters")
-
+                
             # Prepare order parameters
             params = {
                 'symbol': symbol,
@@ -1059,24 +1059,24 @@ class ExchangeClient:
                 'amount': quantity,
                 'reduceOnly': reduce_only
             }
-
+            
             # Add price for limit orders
             if order_type == 'limit' and price:
                 params['price'] = price
-
+                
             # Add stop price for stop orders
             if stop_price:
                 params['stopPrice'] = stop_price
-
+                
             # Place order
             order = await asyncio.to_thread(
                 self.client.create_order,
                 **params
             )
-
+            
             logger.info(f"Order placed: {order}")
             return order
-
+            
         except Exception as e:
             logger.error(f"Error placing order for {symbol}: {e}")
             raise
@@ -1093,11 +1093,11 @@ class ExchangeClient:
             position = await self.get_position(symbol)
             if not position or float(position.get('positionAmt', 0)) == 0:
                 return {'status': 'no_position'}
-
+                
             # Determine order side based on position
             position_amt = float(position.get('positionAmt', 0))
             side = 'sell' if position_amt > 0 else 'buy'
-
+            
             # Place closing order
             order = await self.place_order(
                 symbol=symbol,
@@ -1106,10 +1106,10 @@ class ExchangeClient:
                 quantity=abs(position_amt),
                 reduce_only=reduce_only
             )
-
+            
             logger.info(f"Position closed for {symbol}: {order}")
             return order
-
+            
         except Exception as e:
             logger.error(f"Error closing position for {symbol}: {e}")
             raise
@@ -1128,10 +1128,10 @@ class ExchangeClient:
                 symbol=symbol,
                 limit=limit
             )
-
+            
             if not trades:
                 return []
-
+                
             # Format trade data
             formatted_trades = []
             for trade in trades:
@@ -1143,9 +1143,9 @@ class ExchangeClient:
                     'isBuyerMaker': trade.get('side') == 'sell',
                     'isBestMatch': True
                 })
-
+                
             return formatted_trades
-
+            
         except Exception as e:
             logger.error(f"Error getting recent trades for {symbol}: {e}")
             return []
@@ -1166,29 +1166,29 @@ class ExchangeClient:
         """Attempt to reconnect to the exchange."""
         try:
             logger.info("Attempting to reconnect to exchange...")
-
+            
             # Close existing connections
             if self.ws_manager:
                 await self.ws_manager.close()
-
+                
             # Reinitialize client
             self._init_client()
-
+            
             # Test connection
             if not await self.check_connection():
                 logger.error("Failed to reconnect to exchange")
                 return False
-
+                
             # Reinitialize WebSocket manager
             self._init_ws_manager()
-
+            
             # Reconnect WebSocket
             if self.ws_manager:
                 self.ws_manager.connect()
-
+                
             logger.info("Successfully reconnected to exchange")
             return True
-
+            
         except Exception as e:
             logger.error(f"Error reconnecting to exchange: {e}")
             return False

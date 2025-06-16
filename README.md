@@ -87,19 +87,19 @@ The system consists of three main components:
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/yourusername/crypto-trading-bot.git
-   cd crypto-trading-bot
+git clone https://github.com/yourusername/crypto-trading-bot.git
+cd crypto-trading-bot
    ```
 
 2. **Install Dependencies**
    ```bash
-   # Backend
+# Backend
    pip install -r requirements.txt
 
-   # Frontend
-   cd frontend
-   npm install
-   ```
+# Frontend
+cd frontend
+npm install
+```
 
 3. **Configure Environment**
 Create a `.env` file in the root directory:

@@ -78,12 +78,12 @@ class SignalTracker:
             'very_low': (0.0, 0.4)
         }
         self.score_bucket_stats = {}
-
+        
     def add_signal(self, signal: SignalEvaluation):
         """Add a new signal for tracking."""
         self.signals.append(signal)
         self._log_signal_details(signal)
-
+        
     def _log_signal_details(self, signal: SignalEvaluation):
         """Log detailed signal information for analysis."""
         log_entry = {
@@ -98,16 +98,16 @@ class SignalTracker:
             'metrics': signal.metrics,
             'reasoning': signal.reasoning
         }
-
+        
         # Log to daily file
         log_dir = Path('logs/signals')
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / \
             f"signals_{signal.timestamp.strftime('%Y%m%d')}.jsonl"
-
+        
         with open(log_file, 'a') as f:
             f.write(json.dumps(log_entry) + '\n')
-
+            
     def update_outcome(
     self,
     symbol: str,
@@ -121,14 +121,14 @@ class SignalTracker:
                 signal.pnl = pnl
                 signal.exit_price = exit_price
                 signal.exit_time = datetime.now()
-
+                
                 # Log outcome
                 self._log_outcome(signal)
-
+                
                 # Update analytics
                 self._update_analytics(signal)
                 break
-
+                
     def _log_outcome(self, signal: SignalEvaluation):
         """Log trade outcome for analysis."""
         log_entry = {
@@ -142,15 +142,15 @@ class SignalTracker:
             'score': signal.score,
             'confidence': signal.confidence
         }
-
+        
         log_dir = Path('logs/outcomes')
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / \
             f"outcomes_{signal.exit_time.strftime('%Y%m%d')}.jsonl"
-
+        
         with open(log_file, 'a') as f:
             f.write(json.dumps(log_entry) + '\n')
-
+            
     def _update_analytics(self, signal: SignalEvaluation):
         """Update performance analytics."""
         # Update score bucket performance
@@ -163,7 +163,7 @@ class SignalTracker:
                 'total_pnl': 0.0,
                 'avg_holding_time': 0.0
             }
-
+            
         stats = self.score_bucket_stats[bucket]
         stats['total'] += 1
         if signal.outcome == 'win':
@@ -176,14 +176,14 @@ class SignalTracker:
              (signal.exit_time - signal.timestamp).total_seconds() / 3600) /
             stats['total']
         )
-
+        
     def _get_score_bucket(self, score: float) -> str:
         """Get the score bucket for a given score."""
         for bucket, (low, high) in self.score_buckets.items():
             if low <= score < high:
                 return bucket
         return 'very_low'
-
+        
     def get_performance_metrics(self) -> Dict:
         """Get comprehensive performance metrics."""
         metrics = {
@@ -193,23 +193,23 @@ class SignalTracker:
             'by_regime': self._calculate_regime_metrics(),
             'by_timeframe': self._calculate_timeframe_metrics()
         }
-
+        
         # Calculate optimal thresholds
         metrics['optimal_thresholds'] = self.get_optimal_thresholds()
-
+        
         return metrics
-
+        
     def _calculate_overall_metrics(self) -> Dict:
         """Calculate overall performance metrics."""
         completed = [s for s in self.signals if s.outcome is not None]
         if not completed:
             return {}
-
+            
         return {
             'total_trades': len(completed),
             'win_rate': sum(1 for s in completed if s.outcome == 'win') / len(completed),
             'avg_pnl': sum(s.pnl for s in completed) / len(completed),
-            'avg_holding_time': sum((s.exit_time - s.timestamp).total_seconds() / 3600
+            'avg_holding_time': sum((s.exit_time - s.timestamp).total_seconds() / 3600 
                                   for s in completed) / len(completed),
             'profit_factor': (
                 sum(s.pnl for s in completed if s.pnl > 0) /
@@ -217,7 +217,7 @@ class SignalTracker:
                 if any(s.pnl < 0 for s in completed) else float('inf')
             )
         }
-
+        
     def _calculate_score_metrics(self) -> Dict:
         """Calculate performance metrics by score bucket."""
         return {
@@ -229,20 +229,20 @@ class SignalTracker:
             }
             for bucket, stats in self.score_bucket_stats.items()
         }
-
+        
     def _calculate_confidence_metrics(self) -> Dict:
         """Calculate performance metrics by confidence level."""
         completed = [s for s in self.signals if s.outcome is not None]
         if not completed:
             return {}
-
+            
         confidence_ranges = {
             'high': (0.8, 1.0),
             'medium': (0.6, 0.8),
             'low': (0.4, 0.6),
             'very_low': (0.0, 0.4)
         }
-
+        
         metrics = {}
         for level, (low, high) in confidence_ranges.items():
             level_signals = [
@@ -253,15 +253,15 @@ class SignalTracker:
                     'avg_pnl': sum(s.pnl for s in level_signals) / len(level_signals),
                     'total_trades': len(level_signals)
                 }
-
+                
         return metrics
-
+        
     def _calculate_regime_metrics(self) -> Dict:
         """Calculate performance metrics by market regime."""
         completed = [s for s in self.signals if s.outcome is not None]
         if not completed:
             return {}
-
+            
         regimes = {}
         for signal in completed:
             regime = signal.metrics.get('regime', 'unknown')
@@ -271,13 +271,13 @@ class SignalTracker:
                     'wins': 0,
                     'total_pnl': 0.0
                 }
-
+                
             stats = regimes[regime]
             stats['total'] += 1
             if signal.outcome == 'win':
                 stats['wins'] += 1
             stats['total_pnl'] += signal.pnl
-
+            
         return {
             regime: {
                 'win_rate': stats['wins'] / stats['total'],
@@ -286,20 +286,20 @@ class SignalTracker:
             }
             for regime, stats in regimes.items()
         }
-
+        
     def _calculate_timeframe_metrics(self) -> Dict:
         """Calculate performance metrics by time of day."""
         completed = [s for s in self.signals if s.outcome is not None]
         if not completed:
             return {}
-
+            
         timeframes = {
             'morning': (6, 12),
             'afternoon': (12, 18),
             'evening': (18, 24),
             'night': (0, 6)
         }
-
+        
         metrics = {}
         for period, (start, end) in timeframes.items():
             period_signals = [
@@ -312,7 +312,7 @@ class SignalTracker:
                     'avg_pnl': sum(s.pnl for s in period_signals) / len(period_signals),
                     'total_trades': len(period_signals)
                 }
-
+                
         return metrics
 
     def get_optimal_thresholds(self) -> Dict:
@@ -324,7 +324,7 @@ class SignalTracker:
                 'min_confidence': 0.6,
                 'min_win_rate': 0.55
             }
-
+            
         # Calculate optimal score threshold
         scores = sorted([s.score for s in completed])
         win_rates = []
@@ -335,13 +335,13 @@ class SignalTracker:
                 win_rate = sum(
     1 for s in signals_above if s.outcome == 'win') / len(signals_above)
                 win_rates.append((threshold, win_rate))
-
+                
         optimal_score = max(
             (threshold for threshold,
      win_rate in win_rates if win_rate >= self.win_rate_threshold),
             default=0.6
         )
-
+        
         # Calculate optimal confidence threshold
         confidences = sorted([s.confidence for s in completed])
         win_rates = []
@@ -352,13 +352,13 @@ class SignalTracker:
                 win_rate = sum(
     1 for s in signals_above if s.outcome == 'win') / len(signals_above)
                 win_rates.append((threshold, win_rate))
-
+                
         optimal_confidence = max(
             (threshold for threshold,
      win_rate in win_rates if win_rate >= self.win_rate_threshold),
             default=0.6
         )
-
+        
         # Calculate optimal win rate threshold
         win_rates = []
         for i in range(len(scores)):
@@ -368,12 +368,12 @@ class SignalTracker:
                 win_rate = sum(
     1 for s in signals_above if s.outcome == 'win') / len(signals_above)
                 win_rates.append((threshold, win_rate))
-
+                
         optimal_win_rate = max(
             (win_rate for _, win_rate in win_rates),
             default=self.win_rate_threshold
         )
-
+        
         return {
             'min_score': optimal_score,
             'min_confidence': optimal_confidence,
@@ -383,11 +383,11 @@ class SignalTracker:
 
 class SymbolDiscovery:
     """Discovers and manages trading symbols from the exchange."""
-
+    
     def __init__(
         self, exchange_client_or_config: Union[ExchangeClient, Dict[str, Any]]):
         """Initialize symbol discovery.
-
+        
         Args:
             exchange_client_or_config: Either an ExchangeClient instance or a configuration dictionary.
                 If ExchangeClient: Used directly for API calls
@@ -406,16 +406,16 @@ class SymbolDiscovery:
         else:
             self.config = exchange_client_or_config
             self.exchange_client = None  # Will be set during initialize()
-
+        
         self.logger = logging.getLogger(__name__)
-
+        
         # Parse update interval from config or environment
         update_interval = self.config.get('update_interval')
         if update_interval is None:
             update_interval = float(os.getenv('UPDATE_INTERVAL', '1.0'))
         # Convert to float to handle both int and float strings
         self.update_interval = float(update_interval)
-
+        
         # Initialize filters
         self.min_volume = self.config.get(
     'min_volume', float(
@@ -433,16 +433,16 @@ class SymbolDiscovery:
     'min_market_cap', float(
         os.getenv(
             'MIN_MARKET_CAP', '10000000')))
-
+        
         # Initialize symbol lists
         self.excluded_symbols = set(self.config.get('excluded_symbols', []))
         self.included_symbols = set(self.config.get('included_symbols', []))
-
+        
         # Initialize state
         self.running = False
         self.last_update_time = datetime.now()
         self.symbols = set()
-
+        
         self.signal_generator = SignalGenerator()
         self.opportunities: Dict[str, TradingOpportunity] = {}
         self._update_task = None
@@ -452,7 +452,7 @@ class SymbolDiscovery:
         # 5 seconds for scalping, 5 minutes for normal mode
         self.cache_ttl = 5 if self.config.get('scalping_mode', False) else 300
         logger.info("SymbolDiscovery initialized with caching")
-
+        
         # Load configuration from environment
         self.min_volume_24h = float(os.getenv('MIN_24H_VOLUME', '1000000'))
         self.min_volume_24h = max(
@@ -462,13 +462,13 @@ class SymbolDiscovery:
             logger.debug(
     f"MIN_24H_VOLUME was <= 0, using minimum threshold of {
         self.min_volume_24h}")
-
+            
         # Minimum confidence for accepting a signal (default 0.4, can be set at
         # runtime or via API)
         self.min_confidence = float(os.getenv('MIN_CONFIDENCE', '0.4'))
         self.min_risk_reward = float(os.getenv('MIN_RISK_REWARD', '1.5'))
         self.max_leverage = float(os.getenv('MAX_LEVERAGE', '20.0'))
-
+        
         # Advanced filtering parameters
         self.max_spread = float(os.getenv('MAX_SPREAD', '0.002'))
         self.min_liquidity = float(os.getenv('MIN_LIQUIDITY', '500000'))
@@ -480,7 +480,7 @@ class SymbolDiscovery:
         self.min_open_interest = float(
             os.getenv('MIN_OPEN_INTEREST', '100000'))
         self.max_symbols = int(os.getenv('MAX_SYMBOLS', '50'))
-
+        
         # Log the actual values being used
         logger.info("SymbolDiscovery filter parameters:")
         logger.info(f"min_volume_24h: {self.min_volume_24h}")
@@ -503,7 +503,7 @@ class SymbolDiscovery:
         self.config.get(
             'scalping_mode',
              False)}")
-
+        
         # Cache configuration
         self.cache_dir = Path('cache/signals')
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -512,12 +512,12 @@ class SymbolDiscovery:
     os.getenv(
         'SYMBOL_CACHE_DURATION',
          '3600'))  # Use SYMBOL_CACHE_DURATION from .env
-
+        
     async def start(self):
         """Start the symbol discovery process."""
         self._update_task = asyncio.create_task(self._update_loop())
         logger.info("Symbol discovery started")
-
+        
     async def stop(self):
         """Stop the symbol discovery process."""
         if self._update_task:
@@ -527,7 +527,7 @@ class SymbolDiscovery:
             except asyncio.CancelledError:
                 pass
         logger.info("Symbol discovery stopped")
-
+        
     async def _update_loop(self):
         """Periodic update loop for symbol discovery."""
         while True:
@@ -539,14 +539,14 @@ class SymbolDiscovery:
             except Exception as e:
                 logger.error(f"Error in symbol update loop: {e}")
                 await asyncio.sleep(60)  # Wait a minute before retrying
-
+                
     async def discover_symbols(self) -> List[str]:
         """Fetch available futures trading pairs based on configuration mode."""
         try:
             logger.debug("Starting symbol discovery")
             discovery_mode = os.getenv('SYMBOL_DISCOVERY_MODE', 'static')
             logger.debug(f"Using discovery mode: {discovery_mode}")
-
+            
             if discovery_mode == 'static':
                 # Use symbols from configuration
                 symbols = os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
@@ -576,7 +576,7 @@ class SymbolDiscovery:
                 except Exception as e:
                     logger.error(f"Failed to fetch exchange info: {e}")
                     raise
-
+                
                 futures_symbols = []
                 for symbol in exchange_info.get('symbols', []):
                     try:
@@ -607,14 +607,14 @@ class SymbolDiscovery:
                 if futures_symbols:
                     logger.debug(
                         f"First 5 symbols: {', '.join(futures_symbols[:5])}")
-
+                
                 # Limit the number of symbols to process
                 MAX_SYMBOLS = 20  # Process only top 20 symbols
                 if len(futures_symbols) > MAX_SYMBOLS:
                     logger.info(
     f"Limiting symbol processing to top {MAX_SYMBOLS} symbols")
                     futures_symbols = futures_symbols[:MAX_SYMBOLS]
-
+                
                 # Apply filters
                 filtered_symbols = []
                 for symbol in futures_symbols:
@@ -637,7 +637,7 @@ class SymbolDiscovery:
                     except Exception as e:
                         logger.error(f"Error processing {symbol}: {e}")
                         continue
-
+                
                 logger.info(
     f"Discovered {
         len(filtered_symbols)} trading pairs after filtering")
@@ -646,7 +646,7 @@ class SymbolDiscovery:
     f"Filtered symbols: {
         ', '.join(filtered_symbols)}")
                 return filtered_symbols
-
+                
         except Exception as e:
             logger.error(f"Error discovering symbols: {e}")
             # Fallback to static symbols on error
@@ -770,21 +770,21 @@ class SymbolDiscovery:
         except Exception as e:
             logger.error(f"Error getting market data for {symbol}: {e}")
             return None
-
+            
     def _calculate_spread(self, orderbook: Dict) -> float:
         """Calculate the current spread from orderbook."""
         try:
             if not orderbook['bids'] or not orderbook['asks']:
                 return float('inf')
-
+                
             best_bid = float(orderbook['bids'][0][0])
             best_ask = float(orderbook['asks'][0][0])
-
+            
             return (best_ask - best_bid) / best_bid
         except Exception as e:
             logger.error(f"Error calculating spread: {e}")
             return float('inf')
-
+            
     def _calculate_liquidity(self, orderbook: Dict) -> float:
         """Calculate the current liquidity from orderbook."""
         try:
@@ -794,12 +794,12 @@ class SymbolDiscovery:
                                 for bid in orderbook['bids'][:10])
             ask_liquidity = sum(float(ask[0]) * float(ask[1])
                                 for ask in orderbook['asks'][:10])
-
+            
             return (bid_liquidity + ask_liquidity) / 2
         except Exception as e:
             logger.error(f"Error calculating liquidity: {e}")
             return 0.0
-
+            
     def _calculate_market_cap(self, ticker_24h: Dict) -> float:
         """Calculate market cap from 24h ticker data."""
         try:
@@ -863,16 +863,16 @@ class SymbolDiscovery:
         try:
             # Base score from signal confidence (30%)
             score = opportunity.confidence * 0.3
-
+            
             # Volume factor (15%)
             volume_threshold = self.min_volume_24h if self.min_volume_24h > 0 else 1.0
             volume_score = min(opportunity.volume_24h / volume_threshold, 2.0)
-
+            
             # Check for recent volume spike (3-bar volume surge)
             recent_volume_surge = self._check_volume_surge(opportunity.symbol)
             if recent_volume_surge:
                 volume_score *= 1.2  # Boost score if volume is surging
-
+                
             logger.debug(
     f"Volume score for {
         opportunity.symbol}: {
@@ -880,7 +880,7 @@ class SymbolDiscovery:
                 opportunity.volume_24h:.2f}, threshold: {
                     volume_threshold:.2f})")
             score += volume_score * 0.15
-
+            
             # Risk-reward factor (15%)
             rr_score = min(opportunity.risk_reward / self.min_risk_reward, 3.0)
             logger.debug(
@@ -890,7 +890,7 @@ class SymbolDiscovery:
                 opportunity.risk_reward:.2f}, min: {
                     self.min_risk_reward:.2f})")
             score += rr_score * 0.15
-
+            
             # Volatility factor (15% - increased from 10%)
             # Target 1.5% volatility for scalping
             vol_score = 1.0 - abs(opportunity.volatility - 0.015) / 0.015
@@ -900,7 +900,7 @@ class SymbolDiscovery:
             vol_score:.2f} (vol: {
                 opportunity.volatility:.4f})")
             score += vol_score * 0.15
-
+            
             # Leverage factor (5%)
             lev_score = 1.0 - (opportunity.leverage / self.max_leverage)
             logger.debug(
@@ -910,7 +910,7 @@ class SymbolDiscovery:
                 opportunity.leverage:.2f}, max: {
                     self.max_leverage:.2f})")
             score += lev_score * 0.05
-
+            
             # Technical indicators (20% - reduced from 25%)
             tech_score = self._calculate_technical_score(
                 opportunity.indicators)
@@ -919,7 +919,7 @@ class SymbolDiscovery:
         opportunity.symbol}: {
             tech_score:.2f}")
             score += tech_score * 0.20
-
+            
             # Apply risk/reward confidence scaling
             if opportunity.risk_reward > 1.5:
                 score *= 1.1
@@ -931,20 +931,20 @@ class SymbolDiscovery:
                 logger.debug(
     f"Reducing score for {
         opportunity.symbol} due to poor risk/reward ratio")
-
+            
             final_score = min(score, 1.0)
             logger.debug(
     f"Final opportunity score for {
         opportunity.symbol}: {
             final_score:.2f}")
             return final_score
-
+            
         except Exception as e:
             logger.error(
     f"Error calculating opportunity score for {
         opportunity.symbol}: {e}")
             return 0.0
-
+            
     def _calculate_technical_score(self, indicators: Dict) -> float:
         """Calculate score based on technical indicators."""
         try:
@@ -1052,43 +1052,43 @@ class SymbolDiscovery:
         except Exception as e:
             logger.error(f"Error calculating technical score: {e}")
             return 0.0
-
+            
     async def scan_opportunities(
     self, risk_per_trade: float = 50.0) -> List[TradingOpportunity]:
         """Scan all symbols for trading opportunities with rate limiting and batch processing."""
         if not hasattr(self, '_processing_lock'):
             self._processing_lock = asyncio.Lock()
-
+            
         async with self._processing_lock:  # Add lock to prevent concurrent processing
             try:
                 logger.info("Starting opportunity scan")
                 # Get all available symbols
                 symbols = await self.discover_symbols()
-
+                
                 # Limit the number of symbols to process
                 MAX_SYMBOLS_TO_PROCESS = 20  # Process only top 20 symbols
                 if len(symbols) > MAX_SYMBOLS_TO_PROCESS:
                     logger.info(
     f"Limiting symbol processing to top {MAX_SYMBOLS_TO_PROCESS} symbols")
                     symbols = symbols[:MAX_SYMBOLS_TO_PROCESS]
-
+                
                 logger.info(
     f"Processing {
         len(symbols)} symbols: {
             ', '.join(symbols)}")
-
+                
                 # Constants for rate limiting and concurrency control
                 BATCH_SIZE = 5  # Number of symbols to process in parallel
                 RATE_LIMIT_DELAY = 1.0  # Delay between batches in seconds
                 MAX_RETRIES = 2  # Reduced from 3 to 2
                 MAX_CONCURRENT_TASKS = 5  # Reduced from 10 to 5
-
+                
                 opportunities = []
                 total_symbols = len(symbols)
-
+                
                 # Create a semaphore to limit concurrent tasks
                 semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
-
+                
                 async def process_with_semaphore(
     symbol: str) -> Optional[TradingOpportunity]:
                     """Process a symbol with semaphore control."""
@@ -1101,20 +1101,20 @@ class SymbolDiscovery:
         result.direction} at {
             result.entry_price}")
                         return result
-
+                
                 # Process symbols in batches
                 for i in range(0, total_symbols, BATCH_SIZE):
                     batch_symbols = symbols[i:i + BATCH_SIZE]
                     logger.info(
                         f"Processing batch {i // BATCH_SIZE + 1}/{(total_symbols + BATCH_SIZE - 1) // BATCH_SIZE}: {', '.join(batch_symbols)}")
-
+                    
                     # Create tasks for the current batch with semaphore control
                     tasks = []
                     for symbol in batch_symbols:
                         task = asyncio.create_task(
                             process_with_semaphore(symbol))
                         tasks.append(task)
-
+                    
                     # Process batch concurrently with timeout
                     try:
                         batch_results = await asyncio.wait_for(
@@ -1126,7 +1126,7 @@ class SymbolDiscovery:
     f"Batch processing timed out for symbols: {
         ', '.join(batch_symbols)}")
                         continue
-
+                    
                     # Filter out exceptions and add valid opportunities
                     for result in batch_results:
                         if isinstance(result, Exception):
@@ -1134,17 +1134,17 @@ class SymbolDiscovery:
                             continue
                         if result:
                             opportunities.append(result)
-
+                    
                     # Add delay between batches to respect rate limits
                     if i + BATCH_SIZE < total_symbols:
                         await asyncio.sleep(RATE_LIMIT_DELAY)
-
+                
                 # Sort opportunities by score
                 opportunities.sort(key=lambda x: x.score, reverse=True)
-
+                
                 # Update opportunities dictionary
                 self.opportunities = {opp.symbol: opp for opp in opportunities}
-
+                
                 logger.info(
     f"Found {
         len(opportunities)} opportunities out of {total_symbols} symbols")
@@ -1152,11 +1152,11 @@ class SymbolDiscovery:
                     logger.info(
                         f"Top opportunities: {', '.join([f'{opp.symbol}({opp.score:.2f})' for opp in opportunities[:3]])}")
                 return opportunities
-
+                
             except Exception as e:
                 logger.error(f"Error scanning opportunities: {e}")
                 return []
-
+            
     def _validate_signal(self, signal: Dict) -> SignalValidationResult:
         """Validate a trading signal."""
         errors = []
@@ -1173,7 +1173,7 @@ class SymbolDiscovery:
     'stop_loss',
     'confidence',
      'indicators']
-
+        
         # Check for presence of required fields
         for field in required_fields:
             if field not in signal:
@@ -1362,7 +1362,7 @@ class SymbolDiscovery:
     f"Cached signal for {symbol} is missing required keys. Discarding cache.")
                      del self.signal_cache[symbol]
         return None
-
+        
     def _cache_signal(self, symbol: str, signal: Dict):
         """Cache a signal with expiration."""
         # Ensure the signal being cached has the required structure
@@ -1501,7 +1501,7 @@ class SymbolDiscovery:
                 try:
                     mid_price = (float(orderbook['asks'][0][0]) + float(orderbook['bids'][0][0])) / 2
                     volatility = float(self.calculate_volatility(market_data.get('klines', [])))
-
+                    
                     # Define depth ranges and their minimum requirements
                     depth_ranges = [
                         (0.001, 0.0025, 10000),  # 0.1% range, minimum $10k
@@ -1687,14 +1687,11 @@ class SymbolDiscovery:
         """Initialize the symbol discovery process."""
         try:
             logger.info("Initializing symbol discovery...")
-            
             # Ensure exchange client is initialized
             if not self.exchange_client:
                 raise ValueError("Exchange client not initialized")
-            
             # Load initial symbols
             await self._load_symbols()
-            
             # If no symbols loaded, try to discover them
             if not self.symbols:
                 logger.info("No symbols loaded, attempting discovery...")
@@ -1707,9 +1704,8 @@ class SymbolDiscovery:
                     static_symbols = os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
                     self.symbols = set(static_symbols)
                     logger.info(f"Using fallback static symbols: {', '.join(static_symbols)}")
-            
             logger.info(f"Symbol discovery initialized with {len(self.symbols)} symbols")
-            
+
         except Exception as e:
             logger.error(f"Error initializing symbol discovery: {e}")
             raise
