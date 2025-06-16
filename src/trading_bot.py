@@ -920,11 +920,37 @@ class TradingBot:
 # Create the global instance
 trading_bot = TradingBot()
 
+
+
+
+
 if __name__ == "__main__":
     import asyncio
+    import signal
+
     bot = TradingBot()
+
+    async def main():
+        await bot.start()
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            pass
+
+    def handle_shutdown(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down...")
+        for task in asyncio.all_tasks():
+            task.cancel()
+
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
+
     try:
-        asyncio.run(bot.start())
+        asyncio.run(main())
     except KeyboardInterrupt:
-        print("Shutting down bot...")
-        asyncio.run(bot.stop())
+        logger.info("Keyboard interrupt received, shutting down...")
+    except Exception as e:
+        logger.error(f"Error running bot: {e}")
+        raise
+

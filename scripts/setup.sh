@@ -54,7 +54,7 @@ wait_for_service() {
     attempt=$((attempt + 1))
   done
   echo "✅ $host:$port is ready"
-  return 0
+        return 0
 }
 
 # --------------------------
@@ -90,7 +90,7 @@ WantedBy=multi-user.target
 EOF
 
   # Reload systemd and enable service
-  sudo systemctl daemon-reload
+    sudo systemctl daemon-reload
   sudo systemctl enable "$service_name"
   sudo systemctl start "$service_name"
   
@@ -108,8 +108,8 @@ check_systemd_service() {
     return 0
   else
     echo "❌ Service $service_name does not exist"
-    return 1
-  fi
+        return 1
+    fi
 }
 
 setup_systemd_services() {
@@ -227,7 +227,7 @@ if [[ "$ENVIRONMENT" != "codex" ]]; then
     sudo usermod -aG docker $USER
     echo "⚠️ Please log out and log back in for Docker group changes to take effect"
     exit 1
-  fi
+fi
 
   # Check if PostgreSQL is already running
   if port_in_use 5432; then

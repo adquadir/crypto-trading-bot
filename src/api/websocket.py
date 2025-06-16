@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Get API key from environment variable
 API_KEY = os.getenv('API_KEY')
+logger.info(f"Loaded API_KEY from environment: {API_KEY}")
 
 # Initialize connection manager
 manager = ConnectionManager()
@@ -30,6 +31,8 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str = Query(None)):
     """WebSocket endpoint for real-time trading signals."""
     try:
         # Verify API key
+        logger.info(f"Received API key from client: {api_key}")
+        logger.info(f"Expected API key: {API_KEY}")
         if not api_key or api_key != API_KEY:
             logger.warning(f"Invalid API key attempt from {websocket.client}")
             await websocket.close(code=4003, reason="Invalid API key")

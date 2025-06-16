@@ -1501,27 +1501,27 @@ class SymbolDiscovery:
                 try:
                     mid_price = (float(orderbook['asks'][0][0]) + float(orderbook['bids'][0][0])) / 2
                     volatility = float(self.calculate_volatility(market_data.get('klines', [])))
-                    
+
                     # Define depth ranges and their minimum requirements
                     depth_ranges = [
                         (0.001, 0.0025, 10000),  # 0.1% range, minimum $10k
                         (0.0025, 0.005, 20000),  # 0.25% range, minimum $20k
                         (0.005, 0.01, 50000)     # 0.5% range, minimum $50k
                     ]
-                    
+
                     # Adjust requirements based on volatility
                     volatility_factor = 1 + (volatility * 10)
-                    
+
                     # Check each depth range
                     depth_metrics = []
                     for min_range, max_range, min_depth in depth_ranges:
                         range_min = mid_price * (1 - max_range)
                         range_max = mid_price * (1 + max_range)
-                        
+
                         buy_depth = sum(float(qty) for price, qty in orderbook['bids'] if range_min <= float(price) <= mid_price)
                         sell_depth = sum(float(qty) for price, qty in orderbook['asks'] if mid_price <= float(price) <= range_max)
                         avg_depth = (buy_depth + sell_depth) / 2
-                        
+
                         adjusted_min_depth = min_depth * volatility_factor
                         depth_metrics.append({
                             'range': f"{min_range*100:.1f}%-{max_range*100:.1f}%",
@@ -1529,14 +1529,14 @@ class SymbolDiscovery:
                             'required': adjusted_min_depth,
                             'passed': avg_depth >= adjusted_min_depth
                         })
-                    
+
                     # Log depth metrics
                     depth_log = "; ".join([
                         f"{m['range']}: ${m['depth']:.2f} (req: ${m['required']:.2f})"
                         for m in depth_metrics
                     ])
                     logger.debug(f"Depth metrics for {symbol}: {depth_log}")
-                    
+
                     # Check if any range passes
                     if not any(m['passed'] for m in depth_metrics):
                         reasons.append(
@@ -1574,7 +1574,7 @@ class SymbolDiscovery:
                 return False, reasons
 
             return True, []
-            
+
         except Exception as e:
             logger.error(f"Error applying advanced filters for {symbol}: {e}")
             return False, [f"Error in filter application: {str(e)}"]
