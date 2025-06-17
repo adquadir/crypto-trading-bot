@@ -47,18 +47,37 @@ A sophisticated cryptocurrency trading bot with a modern web interface for monit
 - Correlation limits
 
 ### Market Data
-- Comprehensive market data fetching:
-  - OHLCV data with customizable intervals
-  - Real-time funding rates
-  - 24-hour statistics
-  - Order book depth analysis
-  - Spread and liquidity calculations
-  - Open interest tracking
-  - Volatility analysis
-  - Volume analysis
-- Caching system for optimized performance
-- Rate limiting and retry mechanisms
-- Proxy support with automatic failover
+
+The bot uses a combination of REST API calls and WebSocket connections to gather market data:
+
+- **REST API**: Used for historical data, account information, and order management
+- **WebSocket**: Used for real-time market data and order updates
+- **Rate Limiting**: All REST API calls use CCXT's built-in rate limiting to prevent IP bans
+
+### Data Sources
+
+- **Binance Futures API**: Primary data source for market data and trading
+- **WebSocket Streams**: Real-time price and order book updates
+- **Historical Data**: OHLCV data for technical analysis
+
+### Rate Limiting Considerations
+
+When using the Binance API, it's crucial to respect rate limits to avoid temporary IP bans (`APIError(code=-1003)`). The bot implements several strategies to manage rate limits:
+
+1. **CCXT Rate Limiting**: All REST API calls use CCXT's built-in rate limiting
+   - Default rate limit: 3 requests per second
+   - Automatic request spacing: 200ms between requests
+   - Exponential backoff on rate limit errors
+
+2. **WebSocket Usage**: Real-time data is fetched via WebSocket when possible
+   - Reduces REST API calls
+   - Provides faster updates
+   - No rate limits on WebSocket connections
+
+3. **Request Optimization**:
+   - Caching frequently accessed data
+   - Batching requests when possible
+   - Using appropriate request intervals
 
 ## System Architecture
 
@@ -232,24 +251,71 @@ The application logs are stored in the `logs/` directory:
 
 ## Security
 
-### API Key Security
-- Never commit API keys to the repository
-- Use environment variables for sensitive data
-- Rotate API keys regularly
-- Use IP restrictions on exchange accounts
+### API Key Management
 
-### WebSocket Authentication
-- All WebSocket connections require a valid API key
-- API key is passed as a query parameter in the WebSocket URL
-- Invalid or missing API keys result in connection rejection
+- API keys are stored in environment variables
+- Never log or expose API keys in code or logs
+- Use separate API keys for development and production
+- Regularly rotate API keys
 
-## Environment Variables
+### Rate Limiting
 
-### Backend
-- **API_KEY**: The API key used for WebSocket authentication. Loaded via `os.getenv("API_KEY")`. If not set, a warning is logged.
+To prevent IP bans and ensure reliable operation, the bot implements several rate limiting strategies:
 
-### Frontend
-- **REACT_APP_API_KEY**: The API key used for WebSocket authentication in the frontend. Set via `process.env.REACT_APP_API_KEY`.
+1. **CCXT Integration**:
+   ```python
+   self.ccxt_client = ccxt.binance({
+       'enableRateLimit': True,
+       'rateLimit': 200,  # 200ms between requests
+       'timeout': 30000,  # 30 second timeout
+   })
+   ```
+
+2. **Request Limits**:
+   - Maximum 3 requests per second for REST API calls
+   - Exponential backoff on rate limit errors
+   - Maximum backoff time of 60 seconds
+   - Automatic retry with increasing delays
+
+3. **Best Practices**:
+   - Use WebSocket connections for real-time data
+   - Cache frequently accessed data
+   - Implement proper error handling for rate limit errors
+   - Monitor rate limit usage and adjust as needed
+
+4. **Error Handling**:
+   - Automatic retry with exponential backoff
+   - Proper logging of rate limit errors
+   - Graceful degradation when limits are hit
+
+### Environment Variables
+
+The following environment variables are required:
+
+#### Backend
+- `BINANCE_API_KEY`: Your Binance API key
+- `BINANCE_API_SECRET`: Your Binance API secret
+- `API_KEY`: Key for securing WebSocket connections
+
+#### Frontend
+- `REACT_APP_API_KEY`: Key for securing WebSocket connections
+
+### Proxy Configuration
+
+The bot supports proxy configuration to avoid IP bans and rate limits:
+
+- Configure proxy settings in `config/proxy_config.json`
+- Automatic proxy rotation on rate limit errors
+- Proxy health monitoring and failover
+
+### Error Handling
+
+The bot implements comprehensive error handling:
+
+- Automatic retry for transient errors
+- Proper logging of all errors
+- Graceful degradation when services are unavailable
+- Rate limit error handling with exponential backoff
 
 ## Contributing
 

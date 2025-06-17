@@ -255,6 +255,15 @@ class ExchangeClient:
         self.open_interest_history = {}
         self.history_length = 24
 
+        self.ccxt_client = None
+        self.proxy_port = None
+        self.proxy_metrics = {}
+        self.last_proxy_rotation = 0
+        self.rate_limit_errors = 0
+        self.last_rate_limit_error = 0
+        self.rate_limit_backoff = 1.0  # Initial backoff in seconds
+        self.max_rate_limit_backoff = 60.0  # Maximum backoff in seconds
+
     def _setup_proxy(self):
         """Set up proxy configuration."""
         try:
@@ -284,162 +293,320 @@ class ExchangeClient:
             self.proxies = None
 
     def _init_client(self):
-        """Initialize the Binance client with proxy configuration."""
+        """Initialize the Binance client with API credentials."""
         try:
-            # Initialize Binance client
-            self.client = Client(
-                api_key=os.getenv('BINANCE_API_KEY'),
-                api_secret=os.getenv('BINANCE_API_SECRET'),
-                testnet=self.testnet,
-                requests_params={
-                    'proxies': self.proxies} if self.proxies else None)
+            api_key = os.getenv('BINANCE_API_KEY')
+            api_secret = os.getenv('BINANCE_API_SECRET')
             
-            # Initialize CCXT client
+            if not api_key or not api_secret:
+                raise ValueError("BINANCE_API_KEY and BINANCE_API_SECRET must be set")
+            
+            # Initialize CCXT client with rate limiting
             self.ccxt_client = ccxt.binance({
-                'apiKey': os.getenv('BINANCE_API_KEY'),
-                'secret': os.getenv('BINANCE_API_SECRET'),
+                'apiKey': api_key,
+                'secret': api_secret,
                 'enableRateLimit': True,
+                'rateLimit': 200,  # 200ms between requests (5 requests per second)
+                'timeout': 30000,  # 30 second timeout
                 'options': {
                     'defaultType': 'future',
                     'adjustForTimeDifference': True,
-                    'testnet': self.testnet
+                    'recvWindow': 60000
                 }
             })
             
-            # Configure proxy for CCXT client if available
-            if self.proxies:
-                self.ccxt_client.proxies = self.proxies
-                
-            logger.info("Binance and CCXT clients initialized successfully")
+            # Initialize python-binance client for websocket
+            self.client = Client(api_key, api_secret)
+            
+            logger.info("Exchange client initialized successfully")
+            
         except Exception as e:
-            logger.error(f"Error initializing exchange clients: {e}")
+            logger.error(f"Error initializing exchange client: {e}")
             raise
 
-    async def test_proxy_connection(self):
-        """Test and log proxy connection details."""
-        logger.info("=== Proxy Connection Test ===")
-        logger.info(f"Current proxy: {self.proxy_host}:{self.proxy_port}")
+    def _handle_rate_limit_error(self):
+        """Handle rate limit errors with exponential backoff."""
+        current_time = time.time()
+        self.rate_limit_errors += 1
         
-        # Test direct connection without proxy
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get("https://api.binance.com/api/v3/ping") as resp:
-                    logger.info("Direct connection test (no proxy): SUCCESS")
-        except Exception as e:
-            logger.warning(f"Direct connection failed: {str(e)}")
+        # Reset backoff if last error was more than 5 minutes ago
+        if current_time - self.last_rate_limit_error > 300:
+            self.rate_limit_errors = 1
+            self.rate_limit_backoff = 1.0
         
-        # Test proxy connection
-        try:
-            success = await self._test_proxy_connection()
-            if success:
-                logger.info("Proxy connection test: SUCCESS")
-            else:
-                logger.error("Proxy connection test: FAILED")
-        except Exception as e:
-            logger.error(f"Proxy test error: {str(e)}")
+        # Calculate exponential backoff
+        self.rate_limit_backoff = min(
+            self.rate_limit_backoff * 2,
+            self.max_rate_limit_backoff
+        )
         
-        logger.info(f"Available proxy ports: {self.proxy_list}")
-        logger.info("=== End Proxy Test ===")
+        self.last_rate_limit_error = current_time
+        logger.warning(
+            f"Rate limit error #{self.rate_limit_errors}. "
+            f"Backing off for {self.rate_limit_backoff:.1f} seconds"
+        )
+        
+        # Sleep with the calculated backoff
+        time.sleep(self.rate_limit_backoff)
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
-    async def get_exchange_info(self) -> Dict:
-        """Get exchange information."""
-        try:
-            if not self.client:
-                self._init_client()
-            logger.debug("Fetching exchange info from Binance Futures API")
-            exchange_info = await asyncio.to_thread(self.client.futures_exchange_info)
-            logger.debug(f"Exchange info response type: {type(exchange_info)}")
-            logger.debug(f"Exchange info response: {exchange_info}")
-            return exchange_info
-        except Exception as e:
-            logger.error(f"Error fetching exchange info: {e}")
-            raise
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
     async def get_ticker_24h(self, symbol: str) -> Dict:
         """Get 24hr ticker price change statistics."""
         try:
-            if not self.client:
-                self._init_client()
-            return await asyncio.to_thread(self.client.futures_ticker, symbol=symbol)
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Get ticker using CCXT
+            ticker = await asyncio.to_thread(
+                self.ccxt_client.fetch_ticker,
+                symbol=symbol
+            )
+            
+            # Reset rate limit backoff on successful request
+            self.rate_limit_errors = 0
+            self.rate_limit_backoff = 1.0
+            
+            # Format response to match Binance structure exactly
+            return {
+                'symbol': symbol,
+                'priceChange': float(ticker.get('change', 0)),
+                'priceChangePercent': float(ticker.get('percentage', 0)),
+                'lastPrice': float(ticker.get('last', 0)),
+                'highPrice': float(ticker.get('high', 0)),
+                'lowPrice': float(ticker.get('low', 0)),
+                'volume': float(ticker.get('baseVolume', 0)),
+                'quoteVolume': float(ticker.get('quoteVolume', 0)),
+                'openPrice': float(ticker.get('open', 0)),
+                'prevClosePrice': float(ticker.get('previousClose', 0)),
+                'count': int(ticker.get('numberOfTrades', 0))
+            }
+            
+        except ccxt.RateLimitExceeded as e:
+            logger.warning(f"Rate limit exceeded while fetching ticker: {e}")
+            self._handle_rate_limit_error()
+            raise
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while fetching ticker: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while fetching ticker: {e}")
+            raise
         except Exception as e:
             logger.error(f"Unexpected error fetching ticker for {symbol}: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
     async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
         """Get order book for a symbol."""
         try:
-            if not self.client:
-                self._init_client()
-            return await asyncio.to_thread(self.client.futures_order_book, symbol=symbol, limit=limit)
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Get orderbook using CCXT
+            orderbook = await asyncio.to_thread(
+                self.ccxt_client.fetch_order_book,
+                symbol=symbol,
+                limit=limit
+            )
+            
+            # Reset rate limit backoff on successful request
+            self.rate_limit_errors = 0
+            self.rate_limit_backoff = 1.0
+            
+            # Format response to match Binance structure exactly
+            return {
+                'symbol': symbol,
+                'bids': [[float(price), float(amount)] for price, amount in orderbook.get('bids', [])],
+                'asks': [[float(price), float(amount)] for price, amount in orderbook.get('asks', [])],
+                'lastUpdateId': orderbook.get('timestamp', 0)
+            }
+            
+        except ccxt.RateLimitExceeded as e:
+            logger.warning(f"Rate limit exceeded while fetching orderbook: {e}")
+            self._handle_rate_limit_error()
+            raise
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while fetching orderbook: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while fetching orderbook: {e}")
+            raise
         except Exception as e:
-            logger.error(
-                f"Unexpected error fetching orderbook for {symbol}: {e}")
+            logger.error(f"Unexpected error fetching orderbook for {symbol}: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
-    async def get_funding_rate(self, symbol: str) -> float:
+    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
+    async def get_funding_rate(self, symbol: str) -> Dict:
         """Get current funding rate for a symbol."""
         try:
-            if not self.client:
-                self._init_client()
-            funding_rate = await asyncio.to_thread(self.client.futures_funding_rate, symbol=symbol)
-            return float(funding_rate[0]['fundingRate'])
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Get funding rate using CCXT
+            funding_rate = await asyncio.to_thread(
+                self.ccxt_client.fetch_funding_rate,
+                symbol=symbol
+            )
+            
+            # Reset rate limit backoff on successful request
+            self.rate_limit_errors = 0
+            self.rate_limit_backoff = 1.0
+            
+            # Format response to match Binance structure exactly
+            return {
+                'symbol': symbol,
+                'fundingRate': float(funding_rate.get('fundingRate', 0)),
+                'fundingTime': int(funding_rate.get('fundingTimestamp', 0)),
+                'fundingRatePrecision': 8
+            }
+            
+        except ccxt.RateLimitExceeded as e:
+            logger.warning(f"Rate limit exceeded while fetching funding rate: {e}")
+            self._handle_rate_limit_error()
+            raise
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while fetching funding rate: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while fetching funding rate: {e}")
+            raise
         except Exception as e:
-            logger.error(
-                f"Unexpected error fetching funding rate for {symbol}: {e}")
+            logger.error(f"Unexpected error fetching funding rate for {symbol}: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
     async def get_open_interest(self, symbol: str) -> Dict:
         """Get open interest for a symbol."""
         try:
-            if not self.client:
-                self._init_client()
-            return await asyncio.to_thread(self.client.futures_open_interest, symbol=symbol)
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Get open interest using CCXT
+            open_interest = await asyncio.to_thread(
+                self.ccxt_client.fetch_open_interest,
+                symbol=symbol
+            )
+            
+            # Reset rate limit backoff on successful request
+            self.rate_limit_errors = 0
+            self.rate_limit_backoff = 1.0
+            
+            # Format response to match Binance structure exactly
+            return {
+                'symbol': symbol,
+                'openInterest': float(open_interest.get('openInterestAmount', 0)),
+                'time': int(open_interest.get('timestamp', 0))
+            }
+            
+        except ccxt.RateLimitExceeded as e:
+            logger.warning(f"Rate limit exceeded while fetching open interest: {e}")
+            self._handle_rate_limit_error()
+            raise
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while fetching open interest: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while fetching open interest: {e}")
+            raise
         except Exception as e:
-            logger.error(
-                f"Unexpected error fetching open interest for {symbol}: {e}")
+            logger.error(f"Unexpected error fetching open interest for {symbol}: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
-    async def get_historical_data(
-            self,
-            symbol: str,
-            interval: str = '1h',
-            limit: int = 100) -> pd.DataFrame:
+    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
+    async def get_historical_data(self, symbol: str, interval: str, limit: int = 100) -> List[Dict]:
         """Get historical klines/candlestick data."""
         try:
-            if not self.client:
-                self._init_client()
-            klines = await asyncio.to_thread(
-                self.client.futures_klines,
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Map interval to CCXT timeframe
+            timeframe_map = {
+                '1m': '1m',
+                '3m': '3m',
+                '5m': '5m',
+                '15m': '15m',
+                '30m': '30m',
+                '1h': '1h',
+                '2h': '2h',
+                '4h': '4h',
+                '6h': '6h',
+                '8h': '8h',
+                '12h': '12h',
+                '1d': '1d',
+                '3d': '3d',
+                '1w': '1w',
+                '1M': '1M'
+            }
+            
+            timeframe = timeframe_map.get(interval)
+            if not timeframe:
+                raise ValueError(f"Invalid interval: {interval}")
+                
+            # Get OHLCV data using CCXT
+            ohlcv = await asyncio.to_thread(
+                self.ccxt_client.fetch_ohlcv,
                 symbol=symbol,
-                interval=interval,
+                timeframe=timeframe,
                 limit=limit
             )
-            df = pd.DataFrame(klines, columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-                'taker_buy_quote', 'ignore'
-            ])
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('timestamp', inplace=True)
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            return df
-        except Exception as e:
-            logger.error(f"Unexpected error fetching data for {symbol}: {e}")
-            raise
             
+            # Reset rate limit backoff on successful request
+            self.rate_limit_errors = 0
+            self.rate_limit_backoff = 1.0
+            
+            # Format response to match Binance structure exactly
+            return [{
+                'openTime': candle[0],
+                'open': float(candle[1]),
+                'high': float(candle[2]),
+                'low': float(candle[3]),
+                'close': float(candle[4]),
+                'volume': float(candle[5]),
+                'closeTime': candle[0] + self._get_interval_milliseconds(interval),
+                'quoteAssetVolume': 0.0,  # Not provided by CCXT
+                'numberOfTrades': 0,  # Not provided by CCXT
+                'takerBuyBaseAssetVolume': 0.0,  # Not provided by CCXT
+                'takerBuyQuoteAssetVolume': 0.0,  # Not provided by CCXT
+                'ignore': 0.0
+            } for candle in ohlcv]
+            
+        except ccxt.RateLimitExceeded as e:
+            logger.warning(f"Rate limit exceeded while fetching historical data: {e}")
+            self._handle_rate_limit_error()
+            raise
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while fetching historical data: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while fetching historical data: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error fetching historical data for {symbol}: {e}")
+            raise
+
+    def _get_interval_milliseconds(self, interval: str) -> int:
+        """Convert interval string to milliseconds."""
+        unit = interval[-1]
+        value = int(interval[:-1])
+        
+        if unit == 'm':
+            return value * 60 * 1000
+        elif unit == 'h':
+            return value * 60 * 60 * 1000
+        elif unit == 'd':
+            return value * 24 * 60 * 60 * 1000
+        elif unit == 'w':
+            return value * 7 * 24 * 60 * 60 * 1000
+        elif unit == 'M':
+            return value * 30 * 24 * 60 * 60 * 1000
+        else:
+            raise ValueError(f"Invalid interval unit: {unit}")
+
     def _should_rotate_proxy(self) -> bool:
         metrics = self.proxy_metrics[self.proxy_port]
         if metrics.total_requests < 10:
@@ -952,7 +1119,7 @@ class ExchangeClient:
             raise
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)
     async def get_account(self) -> Dict:
         """Get account information including balances."""
         try:
@@ -989,7 +1156,7 @@ class ExchangeClient:
             raise
             
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)
     async def get_position(self, symbol: str) -> Dict:
         """Get current position for a symbol."""
         try:
@@ -1031,7 +1198,7 @@ class ExchangeClient:
             return {}
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)
     async def get_open_positions(self) -> List[Dict]:
         """Get all open positions."""
         try:
@@ -1075,7 +1242,7 @@ class ExchangeClient:
             return []
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)
     async def place_order(self, symbol: str, side: str, order_type: str, 
                          quantity: float, price: Optional[float] = None,
                          stop_price: Optional[float] = None,
@@ -1126,7 +1293,7 @@ class ExchangeClient:
             raise
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)
     async def close_position(
             self,
             symbol: str,
@@ -1159,7 +1326,7 @@ class ExchangeClient:
             raise
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)
     async def get_recent_trades(
             self,
             symbol: str,
@@ -1247,7 +1414,7 @@ class ExchangeClient:
             return False
 
     @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=10, period=1.0)
+    @rate_limit(limit=3, period=1.0)
     async def get_klines(
             self,
             symbol: str,
