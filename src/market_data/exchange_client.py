@@ -1315,8 +1315,8 @@ class ExchangeClient:
         try:
             if not self.client:
                 self._init_client()
-            # Use fetch_time() to check connection
-            await self.client.fetch_time()
+            # Use asyncio.to_thread for the synchronous fetch_time call
+            await asyncio.to_thread(self.client.fetch_time)
             return True
         except Exception as e:
             logger.error(f"Exchange API connection check failed: {e}")
