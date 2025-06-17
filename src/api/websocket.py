@@ -13,12 +13,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Hardcoded API key for now
-API_KEY = 'crypto_trading_bot_api_key_2024'
-logger.info(f"Using hardcoded API_KEY: {API_KEY}")
-logger.info(f"API_KEY type: {type(API_KEY)}")
-logger.info(f"API_KEY length: {len(API_KEY)}")
-
 # Initialize connection manager
 manager = ConnectionManager()
 
@@ -35,6 +29,10 @@ async def initialize_components():
 asyncio.create_task(initialize_components())
 
 router = APIRouter()
+
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    logger.warning("API_KEY environment variable is not set! WebSocket authentication will fail.")
 
 @router.websocket("/ws/signals")
 async def websocket_endpoint(websocket: WebSocket, api_key: str = Query(None)):
