@@ -140,7 +140,7 @@ class TradingBot:
         try:
             # Get account info using CCXT's fetch_balance
             account_info = await asyncio.to_thread(
-                self.exchange_client.client.fetch_balance
+                self.exchange_client.ccxt_client.fetch_balance
             )
             
             if not account_info or 'total' not in account_info:

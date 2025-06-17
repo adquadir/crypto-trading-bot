@@ -1166,9 +1166,12 @@ class ExchangeClient:
             limit: int = 100) -> List[Dict]:
         """Get recent trades for a symbol."""
         try:
-            # Get recent trades from exchange
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Get recent trades using CCXT
             trades = await asyncio.to_thread(
-                self.client.fetch_trades,
+                self.ccxt_client.fetch_trades,
                 symbol=symbol,
                 limit=limit
             )
@@ -1183,13 +1186,19 @@ class ExchangeClient:
                     'id': trade.get('id'),
                     'price': float(trade.get('price', 0)),
                     'qty': float(trade.get('amount', 0)),
-                    'time': trade.get('timestamp', 0),
+                    'time': trade.get('timestamp'),
                     'isBuyerMaker': trade.get('side') == 'sell',
-                    'isBestMatch': True
+                    'isBestMatch': True  # CCXT doesn't provide this info
                 })
                 
             return formatted_trades
             
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while fetching trades: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while fetching trades: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error getting recent trades for {symbol}: {e}")
             return []

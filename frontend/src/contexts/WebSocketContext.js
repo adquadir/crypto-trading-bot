@@ -3,8 +3,8 @@ import config, { getWsBaseUrl } from '../config';
 
 const WebSocketContext = createContext(null);
 
-// Hardcoded API key to match backend
-const API_KEY = 'crypto_trading_bot_api_key_2024'.trim();
+// Use API_KEY in the WebSocket URL construction and authentication logic
+const API_KEY = process.env.REACT_APP_API_KEY;
 
 export const WebSocketProvider = ({ children }) => {
   const [ws, setWs] = useState(null);

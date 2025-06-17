@@ -243,6 +243,14 @@ The application logs are stored in the `logs/` directory:
 - API key is passed as a query parameter in the WebSocket URL
 - Invalid or missing API keys result in connection rejection
 
+## Environment Variables
+
+### Backend
+- **API_KEY**: The API key used for WebSocket authentication. Loaded via `os.getenv("API_KEY")`. If not set, a warning is logged.
+
+### Frontend
+- **REACT_APP_API_KEY**: The API key used for WebSocket authentication in the frontend. Set via `process.env.REACT_APP_API_KEY`.
+
 ## Contributing
 
 1. Fork the repository
