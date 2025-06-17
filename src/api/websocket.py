@@ -6,8 +6,8 @@ import os
 import logging
 from dotenv import load_dotenv
 from src.market_data.exchange_client import ExchangeClient
-from src.market_data.opportunity_analyzer import OpportunityAnalyzer
-from src.api.websocket_client import WebsocketClient
+from src.opportunity.opportunity_manager import OpportunityManager
+from src.market_data.websocket_client import MarketDataWebSocket
 from src.api.connection_manager import ConnectionManager
 
 load_dotenv()
@@ -53,8 +53,8 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # Initialize components
         exchange_client = ExchangeClient()
-        opportunity_analyzer = OpportunityAnalyzer()
-        websocket_client = WebsocketClient()
+        opportunity_manager = OpportunityManager(exchange_client)
+        market_data_ws = MarketDataWebSocket()
         connection_manager = ConnectionManager()
 
         await manager.connect(websocket)
@@ -62,7 +62,7 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             while True:
                 # Send formatted opportunities to the client
-                opportunities = await opportunity_analyzer.get_opportunities()
+                opportunities = await opportunity_manager.get_opportunities()
                 if opportunities:
                     formatted_opportunities = [
                         {
