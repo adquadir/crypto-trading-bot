@@ -293,21 +293,11 @@ class ExchangeClient:
             self.proxies = None
 
     def _init_client(self):
-        """Initialize the Binance client with API credentials."""
+        """Initialize the exchange client with proxy configuration."""
         try:
-            api_key = os.getenv('BINANCE_API_KEY')
-            api_secret = os.getenv('BINANCE_API_SECRET')
-            
-            if not api_key or not api_secret:
-                raise ValueError("BINANCE_API_KEY and BINANCE_API_SECRET must be set")
-            
-            # Initialize CCXT client with rate limiting
-            self.ccxt_client = ccxt.binance({
-                'apiKey': api_key,
-                'secret': api_secret,
+            # Initialize CCXT client with rate limiting enabled
+            self.client = ccxt.binance({
                 'enableRateLimit': True,
-                'rateLimit': 200,  # 200ms between requests (5 requests per second)
-                'timeout': 30000,  # 30 second timeout
                 'options': {
                     'defaultType': 'future',
                     'adjustForTimeDifference': True,
@@ -315,13 +305,26 @@ class ExchangeClient:
                 }
             })
             
-            # Initialize python-binance client for websocket
-            self.client = Client(api_key, api_secret)
+            # Set API credentials if available
+            api_key = os.getenv('BINANCE_API_KEY')
+            api_secret = os.getenv('BINANCE_API_SECRET')
+            if api_key and api_secret:
+                self.client.apiKey = api_key
+                self.client.secret = api_secret
             
+            # Configure proxy if available
+            if self.proxies:
+                self.client.proxies = self.proxies
+            
+            # Set testnet if enabled
+            if self.testnet:
+                self.client.set_sandbox_mode(True)
+            
+            self.initialized = True
             logger.info("Exchange client initialized successfully")
-            
         except Exception as e:
             logger.error(f"Error initializing exchange client: {e}")
+            self.initialized = False
             raise
 
     def _handle_rate_limit_error(self):
@@ -352,48 +355,32 @@ class ExchangeClient:
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
     async def get_ticker_24h(self, symbol: str) -> Dict:
-        """Get 24hr ticker price change statistics."""
+        """Get 24-hour ticker price change statistics."""
         try:
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
-            # Get ticker using CCXT
-            ticker = await asyncio.to_thread(
-                self.ccxt_client.fetch_ticker,
-                symbol=symbol
-            )
+            # Use CCXT's fetch_ticker method
+            ticker = await self.client.fetch_ticker(symbol)
             
-            # Reset rate limit backoff on successful request
-            self.rate_limit_errors = 0
-            self.rate_limit_backoff = 1.0
-            
-            # Format response to match Binance structure exactly
+            # Format the response to match the expected structure
             return {
                 'symbol': symbol,
-                'priceChange': float(ticker.get('change', 0)),
-                'priceChangePercent': float(ticker.get('percentage', 0)),
-                'lastPrice': float(ticker.get('last', 0)),
-                'highPrice': float(ticker.get('high', 0)),
-                'lowPrice': float(ticker.get('low', 0)),
-                'volume': float(ticker.get('baseVolume', 0)),
-                'quoteVolume': float(ticker.get('quoteVolume', 0)),
-                'openPrice': float(ticker.get('open', 0)),
-                'prevClosePrice': float(ticker.get('previousClose', 0)),
-                'count': int(ticker.get('numberOfTrades', 0))
+                'priceChange': float(ticker['percentage']),
+                'priceChangePercent': float(ticker['percentage']),
+                'weightedAvgPrice': float(ticker['vwap']),
+                'lastPrice': float(ticker['last']),
+                'lastQty': float(ticker['lastSize']),
+                'openPrice': float(ticker['open']),
+                'highPrice': float(ticker['high']),
+                'lowPrice': float(ticker['low']),
+                'volume': float(ticker['baseVolume']),
+                'quoteVolume': float(ticker['quoteVolume']),
+                'openTime': ticker['timestamp'],
+                'closeTime': ticker['timestamp'],
+                'firstId': ticker.get('firstId', 0),
+                'lastId': ticker.get('lastId', 0),
+                'count': ticker.get('count', 0)
             }
-            
-        except ccxt.RateLimitExceeded as e:
-            logger.warning(f"Rate limit exceeded while fetching ticker: {e}")
-            self._handle_rate_limit_error()
-            raise
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching ticker: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching ticker: {e}")
-            raise
         except Exception as e:
-            logger.error(f"Unexpected error fetching ticker for {symbol}: {e}")
+            logger.error(f"Error fetching 24h ticker for {symbol}: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
@@ -401,40 +388,17 @@ class ExchangeClient:
     async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
         """Get order book for a symbol."""
         try:
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
-            # Get orderbook using CCXT
-            orderbook = await asyncio.to_thread(
-                self.ccxt_client.fetch_order_book,
-                symbol=symbol,
-                limit=limit
-            )
+            # Use CCXT's fetch_order_book method
+            orderbook = await self.client.fetch_order_book(symbol, limit)
             
-            # Reset rate limit backoff on successful request
-            self.rate_limit_errors = 0
-            self.rate_limit_backoff = 1.0
-            
-            # Format response to match Binance structure exactly
+            # Format the response to match the expected structure
             return {
-                'symbol': symbol,
-                'bids': [[float(price), float(amount)] for price, amount in orderbook.get('bids', [])],
-                'asks': [[float(price), float(amount)] for price, amount in orderbook.get('asks', [])],
-                'lastUpdateId': orderbook.get('timestamp', 0)
+                'lastUpdateId': orderbook.get('timestamp', 0),
+                'bids': [[float(price), float(amount)] for price, amount in orderbook['bids']],
+                'asks': [[float(price), float(amount)] for price, amount in orderbook['asks']]
             }
-            
-        except ccxt.RateLimitExceeded as e:
-            logger.warning(f"Rate limit exceeded while fetching orderbook: {e}")
-            self._handle_rate_limit_error()
-            raise
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching orderbook: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching orderbook: {e}")
-            raise
         except Exception as e:
-            logger.error(f"Unexpected error fetching orderbook for {symbol}: {e}")
+            logger.error(f"Error fetching orderbook for {symbol}: {e}")
             raise
 
     @retry_with_backoff(max_retries=3)
@@ -1327,56 +1291,32 @@ class ExchangeClient:
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=3, period=1.0)
-    async def get_recent_trades(
-            self,
-            symbol: str,
-            limit: int = 100) -> List[Dict]:
+    async def get_recent_trades(self, symbol: str, limit: int = 100) -> List[Dict]:
         """Get recent trades for a symbol."""
         try:
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
-            # Get recent trades using CCXT
-            trades = await asyncio.to_thread(
-                self.ccxt_client.fetch_trades,
-                symbol=symbol,
-                limit=limit
-            )
+            # Use CCXT's fetch_trades method
+            trades = await self.client.fetch_trades(symbol, limit=limit)
             
-            if not trades:
-                return []
-                
-            # Format trade data
-            formatted_trades = []
-            for trade in trades:
-                formatted_trades.append({
-                    'id': trade.get('id'),
-                    'price': float(trade.get('price', 0)),
-                    'qty': float(trade.get('amount', 0)),
-                    'time': trade.get('timestamp'),
-                    'isBuyerMaker': trade.get('side') == 'sell',
-                    'isBestMatch': True  # CCXT doesn't provide this info
-                })
-                
-            return formatted_trades
-            
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching trades: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching trades: {e}")
-            raise
+            # Format the response to match the expected structure
+            return [{
+                'id': trade['id'],
+                'price': float(trade['price']),
+                'qty': float(trade['amount']),
+                'time': trade['timestamp'],
+                'isBuyerMaker': trade['side'] == 'sell',
+                'isBestMatch': True  # CCXT doesn't provide this info
+            } for trade in trades]
         except Exception as e:
-            logger.error(f"Error getting recent trades for {symbol}: {e}")
-            return []
+            logger.error(f"Error fetching recent trades for {symbol}: {e}")
+            raise
 
     async def check_connection(self) -> bool:
         """Check if the exchange connection is working."""
         try:
             if not self.client:
                 self._init_client()
-            # Use asyncio.to_thread to run the synchronous ping method
-            await asyncio.to_thread(self.client.ping)
+            # Use fetch_time() to check connection
+            await self.client.fetch_time()
             return True
         except Exception as e:
             logger.error(f"Exchange API connection check failed: {e}")
@@ -1422,9 +1362,6 @@ class ExchangeClient:
             limit: int = 100) -> List[Dict]:
         """Get kline/candlestick data for a symbol."""
         try:
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
             # Convert Binance interval to CCXT timeframe
             timeframe_map = {
                 '1m': '1m',
@@ -1446,12 +1383,7 @@ class ExchangeClient:
             timeframe = timeframe_map.get(interval, '1m')
             
             # Get OHLCV data using CCXT
-            ohlcv = await asyncio.to_thread(
-                self.ccxt_client.fetch_ohlcv,
-                symbol=symbol,
-                timeframe=timeframe,
-                limit=limit
-            )
+            ohlcv = await self.client.fetch_ohlcv(symbol, timeframe, limit=limit)
             
             # Convert CCXT OHLCV format to Binance klines format
             klines = []
