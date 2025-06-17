@@ -286,15 +286,33 @@ class ExchangeClient:
     def _init_client(self):
         """Initialize the Binance client with proxy configuration."""
         try:
+            # Initialize Binance client
             self.client = Client(
                 api_key=os.getenv('BINANCE_API_KEY'),
                 api_secret=os.getenv('BINANCE_API_SECRET'),
                 testnet=self.testnet,
                 requests_params={
                     'proxies': self.proxies} if self.proxies else None)
-            logger.info("Binance client initialized successfully")
+            
+            # Initialize CCXT client
+            self.ccxt_client = ccxt.binance({
+                'apiKey': os.getenv('BINANCE_API_KEY'),
+                'secret': os.getenv('BINANCE_API_SECRET'),
+                'enableRateLimit': True,
+                'options': {
+                    'defaultType': 'future',
+                    'adjustForTimeDifference': True,
+                    'testnet': self.testnet
+                }
+            })
+            
+            # Configure proxy for CCXT client if available
+            if self.proxies:
+                self.ccxt_client.proxies = self.proxies
+                
+            logger.info("Binance and CCXT clients initialized successfully")
         except Exception as e:
-            logger.error(f"Error initializing Binance client: {e}")
+            logger.error(f"Error initializing exchange clients: {e}")
             raise
 
     async def test_proxy_connection(self):
@@ -939,29 +957,26 @@ class ExchangeClient:
         """Get account information including balances."""
         try:
             logger.debug("Fetching account information")
-            if not self.client:
-                raise ConnectionError("Exchange client not initialized")
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
                 
-            account = await asyncio.to_thread(
-                self.client.futures_account
+            # Get account info using CCXT's fetch_balance
+            account_info = await asyncio.to_thread(
+                self.ccxt_client.fetch_balance
             )
             
-            if not account:
+            if not account_info:
                 raise ValueError("Empty account response received")
                 
-            required_fields = [
-                'totalWalletBalance',
-                'availableBalance',
-                'totalUnrealizedProfit']
-            missing_fields = [
-                field for field in required_fields if field not in account]
-            if missing_fields:
-                raise ValueError(
-                    f"Missing required account fields: {missing_fields}")
-                
-            logger.debug(
-                f"Account information retrieved: {
-                    account.get('totalWalletBalance')} total balance")
+            # Convert CCXT balance format to expected format
+            account = {
+                'totalWalletBalance': float(account_info.get('total', {}).get('USDT', 0)),
+                'availableBalance': float(account_info.get('free', {}).get('USDT', 0)),
+                'totalUnrealizedProfit': float(account_info.get('total', {}).get('USDT', 0)) - 
+                                       float(account_info.get('free', {}).get('USDT', 0))
+            }
+            
+            logger.debug(f"Account information retrieved: {account.get('totalWalletBalance')} total balance")
             return account
         except ccxt.NetworkError as e:
             logger.error(f"Network error while fetching account: {e}")
@@ -978,15 +993,20 @@ class ExchangeClient:
     async def get_position(self, symbol: str) -> Dict:
         """Get current position for a symbol."""
         try:
-            # Get position information from exchange
-            position = await asyncio.to_thread(
-                self.client.fetch_position,
-                symbol=symbol
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Get position information using CCXT
+            positions = await asyncio.to_thread(
+                self.ccxt_client.fetch_positions,
+                [symbol]
             )
             
-            if not position:
+            if not positions or len(positions) == 0:
                 return {}
                 
+            position = positions[0]
+            
             # Format position data
             return {
                 'symbol': symbol,
@@ -1000,6 +1020,12 @@ class ExchangeClient:
                 'updateTime': position.get('timestamp', 0)
             }
             
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while fetching position: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while fetching position: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error getting position for {symbol}: {e}")
             return {}
@@ -1009,9 +1035,12 @@ class ExchangeClient:
     async def get_open_positions(self) -> List[Dict]:
         """Get all open positions."""
         try:
-            # Get all positions from exchange
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Get all positions using CCXT
             positions = await asyncio.to_thread(
-                self.client.fetch_positions
+                self.ccxt_client.fetch_positions
             )
             
             if not positions:
@@ -1035,6 +1064,12 @@ class ExchangeClient:
                     
             return open_positions
             
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while fetching positions: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while fetching positions: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error getting open positions: {e}")
             return []
@@ -1047,6 +1082,9 @@ class ExchangeClient:
                          reduce_only: bool = False) -> Dict:
         """Place an order on the exchange."""
         try:
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
             # Validate inputs
             if not symbol or not side or not order_type or not quantity:
                 raise ValueError("Missing required order parameters")
@@ -1068,15 +1106,21 @@ class ExchangeClient:
             if stop_price:
                 params['stopPrice'] = stop_price
                 
-            # Place order
+            # Place order using CCXT
             order = await asyncio.to_thread(
-                self.client.create_order,
+                self.ccxt_client.create_order,
                 **params
             )
             
             logger.info(f"Order placed: {order}")
             return order
             
+        except ccxt.NetworkError as e:
+            logger.error(f"Network error while placing order: {e}")
+            raise
+        except ccxt.ExchangeError as e:
+            logger.error(f"Exchange error while placing order: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error placing order for {symbol}: {e}")
             raise
@@ -1202,15 +1246,51 @@ class ExchangeClient:
             limit: int = 100) -> List[Dict]:
         """Get kline/candlestick data for a symbol."""
         try:
-            if self.testnet:
-                return await self.futures_client.klines(
-                    symbol=symbol,
-                    interval=interval,
-                    limit=limit)
-            return await self.client.klines(
+            if not self.ccxt_client:
+                raise ConnectionError("CCXT client not initialized")
+                
+            # Convert Binance interval to CCXT timeframe
+            timeframe_map = {
+                '1m': '1m',
+                '3m': '3m',
+                '5m': '5m',
+                '15m': '15m',
+                '30m': '30m',
+                '1h': '1h',
+                '2h': '2h',
+                '4h': '4h',
+                '6h': '6h',
+                '8h': '8h',
+                '12h': '12h',
+                '1d': '1d',
+                '3d': '3d',
+                '1w': '1w',
+                '1M': '1M'
+            }
+            timeframe = timeframe_map.get(interval, '1m')
+            
+            # Get OHLCV data using CCXT
+            ohlcv = await asyncio.to_thread(
+                self.ccxt_client.fetch_ohlcv,
                 symbol=symbol,
-                interval=interval,
-                limit=limit)
+                timeframe=timeframe,
+                limit=limit
+            )
+            
+            # Convert CCXT OHLCV format to Binance klines format
+            klines = []
+            for candle in ohlcv:
+                kline = {
+                    'timestamp': int(candle[0]),  # timestamp in milliseconds
+                    'open': float(candle[1]),
+                    'high': float(candle[2]),
+                    'low': float(candle[3]),
+                    'close': float(candle[4]),
+                    'volume': float(candle[5])
+                }
+                klines.append(kline)
+                
+            return klines
         except Exception as e:
             logger.error(f"Error getting klines for {symbol}: {e}")
             raise

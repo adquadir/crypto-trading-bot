@@ -591,7 +591,7 @@ class SymbolDiscovery:
         except Exception as e:
             logger.error(f"Error getting market data for {symbol}: {str(e)}")
             return None
-
+                
     async def discover_symbols(self) -> List[str]:
         """Fetch available futures trading pairs based on configuration mode."""
         try:
@@ -707,7 +707,7 @@ class SymbolDiscovery:
     f"Falling back to {
         len(symbols)} static symbols due to error")
             return symbols
-
+            
     def _calculate_spread(self, orderbook: Dict) -> float:
         """Calculate the spread between best bid and ask."""
         try:
@@ -717,7 +717,7 @@ class SymbolDiscovery:
         except (KeyError, IndexError, ValueError) as e:
             logger.error(f"Error calculating spread: {e}")
             return float('inf')
-
+            
     def _apply_advanced_filters(self, market_data: Dict) -> bool:
         """Apply advanced filters to market data."""
         try:
@@ -755,12 +755,12 @@ class SymbolDiscovery:
                     market_data = await self.get_market_data(symbol)
                     if not market_data:
                         continue
-                        
+                    
                     # Generate signals
                     signals = await self.signal_generator.generate_signals(symbol, market_data)
                     if not signals:
                         continue
-                        
+                    
                     # Convert signals to opportunities
                     for signal in signals:
                         opportunity = TradingOpportunity(
@@ -784,11 +784,10 @@ class SymbolDiscovery:
                             data_freshness=signal.get('data_freshness', {})
                         )
                         opportunities.append(opportunity)
-                        
                 except Exception as e:
                     logger.error(f"Error processing {symbol}: {e}")
                     continue
-                    
+            
             logger.info(f"Found {len(opportunities)} opportunities out of {len(symbols)} symbols")
             return opportunities
             

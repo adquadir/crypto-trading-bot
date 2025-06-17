@@ -72,4 +72,4 @@ if __name__ == "__main__":
         logger.info("Received keyboard interrupt. Shutting down...")
     except Exception as e:
         logger.error(f"Error running bot: {e}")
-        raise 
+        raise

@@ -47,17 +47,17 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str = Query(None)):
         logger.info(f"Expected API key: '{API_KEY}'")
         logger.info(f"Expected API key type: {type(API_KEY)}")
         logger.info(f"Expected API key length: {len(API_KEY)}")
-        
+
         if not api_key:
             logger.warning("No API key provided")
             await websocket.close(code=4003, reason="No API key provided")
             return
-            
+
         # Trim whitespace and newlines from received API key
         api_key = api_key.strip()
         logger.info(f"Trimmed API key: '{api_key}'")
         logger.info(f"Trimmed API key length: {len(api_key)}")
-        
+
         if api_key != API_KEY:
             logger.warning(f"API key mismatch. Received: '{api_key}', Expected: '{API_KEY}'")
             logger.warning(f"API key comparison result: {api_key == API_KEY}")
@@ -70,7 +70,7 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str = Query(None)):
             while True:
                 # Get latest opportunities
                 opportunities = await symbol_discovery.scan_opportunities()
-                
+
                 # Format opportunities for WebSocket
                 formatted_opportunities = []
                 for opp in opportunities:
@@ -95,14 +95,14 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str = Query(None)):
                         "data_freshness": opp.data_freshness
                     }
                     formatted_opportunities.append(formatted_opp)
-                
+
                 # Send opportunities to client
                 await websocket.send_json({
                     "type": "opportunities",
                     "data": formatted_opportunities,
                     "timestamp": datetime.utcnow().isoformat()
                 })
-                
+
                 # Wait before sending next update
                 await asyncio.sleep(1)
         except WebSocketDisconnect:
@@ -116,4 +116,4 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str = Query(None)):
         try:
             await websocket.close()
         except:
-            pass 
+            pass

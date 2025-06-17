@@ -41,6 +41,7 @@ class SignalGenerator:
         self.candle_detector = CandleClusterDetector()
         self.signal_tracker = SignalTracker()
         self.confidence_calibrator = ConfidenceCalibrator()
+        self.regime_history = {}  # Initialize regime history dictionary
         
     async def initialize(self):
         """Async initialization hook for compatibility with bot startup."""

@@ -159,11 +159,11 @@ class MarketDataWebSocket:
             try:
                 for ws in self.connections.values():
                     if ws.sock and ws.sock.connected:
-                    # Send ping message
+                        # Send ping message
                         ws.sock.send("ping")
-                    logger.debug("WebSocket heartbeat ping sent")
-                else:
-                    logger.warning("WebSocket connection not open, skipping heartbeat")
+                        logger.debug("WebSocket heartbeat ping sent")
+                    else:
+                        logger.warning("WebSocket connection not open, skipping heartbeat")
             except Exception as e:
                 logger.error(f"Error in WebSocket heartbeat: {e}")
                 # If we can't send a heartbeat, the connection might be dead
@@ -171,7 +171,7 @@ class MarketDataWebSocket:
                 break
             
             # Wait before next heartbeat
-            await asyncio.sleep(30)  # Send heartbeat every 30 seconds 
+            await asyncio.sleep(30)  # Send heartbeat every 30 seconds
 
     async def initialize(self, symbols: Optional[List[str]] = None) -> None:
         """Initialize the WebSocket client with optional symbols."""
