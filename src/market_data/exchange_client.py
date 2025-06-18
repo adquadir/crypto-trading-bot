@@ -23,6 +23,8 @@ import ccxt
 from urllib.parse import urlparse
 import pandas as pd
 from src.utils.config import load_config
+import hmac
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -164,65 +166,38 @@ class ExchangeClient:
     
     def __init__(self, config: Optional[Dict] = None):
         self.config = config if config is not None else load_config()
-        self.client = None
-        self.futures_client = None
         self.initialized = False
         self.retry_delay = 1.0
         self.max_retries = 3
-        self.base_url = os.getenv('BINANCE_API_URL', 'https://api.binance.com')
-        self.ws_url = os.getenv(
-            'BINANCE_WS_URL',
-            'wss://fstream.binance.com/ws/stream')
+        self.base_url = "https://fapi.binance.com"  # Binance Futures API
+        self.ws_url = "wss://fstream.binance.com/ws"
         self.testnet = os.getenv('USE_TESTNET', 'false').lower() == 'true'
         
         # Initialize proxy configuration
         self.proxy_host = os.getenv('PROXY_HOST', '')
-        # Always a string, never a coroutine
         self.proxy_port = str(os.getenv('PROXY_PORT', ''))
         self.proxy_user = os.getenv('PROXY_USER', '')
         self.proxy_pass = os.getenv('PROXY_PASS', '')
-        self.proxy_auth = None
-        if self.proxy_user and self.proxy_pass:
-            self.proxy_auth = BasicAuth(self.proxy_user, self.proxy_pass)
-            
-        # Initialize proxy configuration from environment variables
-        use_proxy = os.getenv('USE_PROXY', 'false').lower() == 'true'
-        if use_proxy:
+        
+        # Set up proxy URL for aiohttp
+        self.proxy_url = None
+        if self.config.get('USE_PROXY', False):
             if self.proxy_host and self.proxy_port:
-                proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
-                if self.proxy_auth:
-                    proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
-                
-                self.proxy_config = {
-                    'http': proxy_url,
-                    'https': proxy_url
-                }
-                self.proxies = self.proxy_config
+                self.proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+                if self.proxy_user and self.proxy_pass:
+                    self.proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
                 logger.info(f"Proxy configured: {self.proxy_host}:{self.proxy_port}")
-            else:
-                logger.warning("Proxy enabled but host or port not configured")
-                self.proxies = None
-        else:
-            self.proxies = None
+                logger.info(f"Full proxy URL: {self.proxy_url}")
+        
+        # API credentials
+        self.api_key = os.getenv('BINANCE_API_KEY')
+        self.api_secret = os.getenv('BINANCE_API_SECRET')
         
         # Initialize WebSocket tracking
-        self.ws_last_message = {}
-        self.order_books = {}
-        self.last_trade_price = {}
-        self.symbols = set()
-        self.ws_clients = {}  # Initialize ws_clients as an empty dict
-        
-        # Initialize cache manager
-        self.cache = CacheManager(
-            cache_dir=os.getenv('CACHE_DIR', 'cache'),
-            ttl=int(os.getenv('CACHE_TTL', '60'))
-        )
-        
-        # Initialize the client with proxy configuration
-        self._init_client()
-        
-        # Initialize WebSocket manager
-        self._init_ws_manager()
+        self.ws_connections = {}
+        self.ws_manager = None
+        self.cache_manager = CacheManager()
+        self.proxy_metrics = ProxyMetrics()
         
         self.logger = logging.getLogger(__name__)
         self.scalping_mode = self.config.get('scalping_mode', False)
@@ -255,6 +230,150 @@ class ExchangeClient:
         self.rate_limit_backoff = 1.0  # Initial backoff in seconds
         self.max_rate_limit_backoff = 60.0  # Maximum backoff in seconds
 
+    async def _make_request(self, method: str, endpoint: str, params: Dict = None, signed: bool = False) -> Dict:
+        """Make an HTTP request to the exchange API."""
+        try:
+            url = f"{self.base_url}{endpoint}"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            if signed:
+                if not self.api_key or not self.api_secret:
+                    raise ValueError("API key and secret required for signed requests")
+                headers['X-MBX-APIKEY'] = self.api_key
+                params['timestamp'] = int(time.time() * 1000)
+                params['signature'] = self._generate_signature(params)
+            
+            # Format proxy URL with authentication
+            proxy_url = None
+            if self.proxy_host and self.proxy_port:
+                proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+                if self.proxy_user and self.proxy_pass:
+                    proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+            
+            async with aiohttp.ClientSession() as session:
+                if method.upper() == 'GET':
+                    async with session.get(url, params=params, headers=headers, proxy=proxy_url, timeout=10) as resp:
+                        if resp.status != 200:
+                            error_text = await resp.text()
+                            logger.error(f"API request failed: {resp.status} {error_text}")
+                            raise Exception(f"API request failed: {resp.status} {error_text}")
+                        return await resp.json()
+                elif method.upper() == 'POST':
+                    async with session.post(url, json=params, headers=headers, proxy=proxy_url, timeout=10) as resp:
+                        if resp.status != 200:
+                            error_text = await resp.text()
+                            logger.error(f"API request failed: {resp.status} {error_text}")
+                            raise Exception(f"API request failed: {resp.status} {error_text}")
+                        return await resp.json()
+                else:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
+                    
+        except Exception as e:
+            logger.error(f"Error making API request: {e}")
+            raise
+
+    async def get_all_symbols(self):
+        """Get all available trading symbols from the exchange using aiohttp."""
+        try:
+            data = await self._make_request('GET', '/fapi/v1/exchangeInfo')
+            symbols = [s['symbol'] for s in data['symbols'] 
+                      if s['contractType'] == 'PERPETUAL' and s['status'] == 'TRADING']
+            logger.info(f"Retrieved {len(symbols)} trading symbols: {symbols[:10]} ...")
+            return symbols
+        except Exception as e:
+            logger.error(f"Error getting symbols: {e}")
+            return []
+
+    async def get_ticker_24h(self, symbol: str) -> Dict:
+        """Get 24-hour ticker data for a symbol."""
+        try:
+            params = {'symbol': symbol}
+            return await self._make_request('GET', '/fapi/v1/ticker/24hr', params)
+        except Exception as e:
+            logger.error(f"Error getting 24h ticker for {symbol}: {e}")
+            raise
+
+    async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
+        """Get orderbook data for a symbol."""
+        try:
+            params = {'symbol': symbol, 'limit': limit}
+            return await self._make_request('GET', '/fapi/v1/depth', params)
+        except Exception as e:
+            logger.error(f"Error getting orderbook for {symbol}: {e}")
+            raise
+
+    async def get_funding_rate(self, symbol: str) -> Dict:
+        """Get current funding rate for a symbol."""
+        try:
+            params = {'symbol': symbol}
+            return await self._make_request('GET', '/fapi/v1/premiumIndex', params)
+        except Exception as e:
+            logger.error(f"Error getting funding rate for {symbol}: {e}")
+            raise
+
+    async def get_open_interest(self, symbol: str) -> Dict:
+        """Get open interest for a symbol."""
+        try:
+            params = {'symbol': symbol}
+            return await self._make_request('GET', '/fapi/v1/openInterest', params)
+        except Exception as e:
+            logger.error(f"Error getting open interest for {symbol}: {e}")
+            raise
+
+    async def get_klines(self, symbol: str, interval: str = '1m', limit: int = 100) -> List[Dict]:
+        """Get kline/candlestick data for a symbol."""
+        try:
+            params = {
+                'symbol': symbol,
+                'interval': interval,
+                'limit': limit
+            }
+            return await self._make_request('GET', '/fapi/v1/klines', params)
+        except Exception as e:
+            logger.error(f"Error getting klines for {symbol}: {e}")
+            raise
+
+    async def get_account(self) -> Dict:
+        """Get account information."""
+        try:
+            return await self._make_request('GET', '/fapi/v2/account', signed=True)
+        except Exception as e:
+            logger.error(f"Error getting account info: {e}")
+            raise
+
+    async def get_position(self, symbol: str) -> Dict:
+        """Get position information for a symbol."""
+        try:
+            params = {'symbol': symbol}
+            return await self._make_request('GET', '/fapi/v2/positionRisk', params, signed=True)
+        except Exception as e:
+            logger.error(f"Error getting position for {symbol}: {e}")
+            raise
+
+    async def place_order(self, symbol: str, side: str, order_type: str, 
+                         quantity: float, price: Optional[float] = None,
+                         stop_price: Optional[float] = None,
+                         reduce_only: bool = False) -> Dict:
+        """Place an order."""
+        try:
+            params = {
+                'symbol': symbol,
+                'side': side,
+                'type': order_type,
+                'quantity': quantity,
+                'reduceOnly': reduce_only
+            }
+            if price:
+                params['price'] = price
+            if stop_price:
+                params['stopPrice'] = stop_price
+            return await self._make_request('POST', '/fapi/v1/order', params, signed=True)
+        except Exception as e:
+            logger.error(f"Error placing order for {symbol}: {e}")
+            raise
+
     def _setup_proxy(self):
         """Set up proxy configuration."""
         try:
@@ -277,38 +396,38 @@ class ExchangeClient:
             self.proxies = None
 
     def _init_client(self):
-        """Initialize the exchange client with proxy configuration."""
+        """Initialize the Binance client with proper configuration."""
         try:
-            # Initialize CCXT client with rate limiting enabled
-            self.client = ccxt.binance({
-                'enableRateLimit': True,
-                'options': {
-                    'defaultType': 'future',
-                    'adjustForTimeDifference': True,
-                    'recvWindow': 60000
+            # Initialize Binance client
+            self.client = Client(
+                api_key=os.getenv('BINANCE_API_KEY'),
+                api_secret=os.getenv('BINANCE_API_SECRET'),
+                testnet=self.testnet
+            )
+            
+            # Initialize futures client
+            self.futures_client = Client(
+                api_key=os.getenv('BINANCE_API_KEY'),
+                api_secret=os.getenv('BINANCE_API_SECRET'),
+                testnet=self.testnet
+            )
+            
+            # Set up proxy if enabled
+            if self.proxy_url:
+                self.client.proxies = {
+                    'http': self.proxy_url,
+                    'https': self.proxy_url
                 }
-            })
+                self.futures_client.proxies = {
+                    'http': self.proxy_url,
+                    'https': self.proxy_url
+                }
+                logger.info(f"Proxy configured for Binance clients: {self.proxy_url}")
             
-            # Set API credentials if available
-            api_key = os.getenv('BINANCE_API_KEY')
-            api_secret = os.getenv('BINANCE_API_SECRET')
-            if api_key and api_secret:
-                self.client.apiKey = api_key
-                self.client.secret = api_secret
+            logger.info("Binance clients initialized successfully")
             
-            # Configure proxy if available
-            if self.proxies:
-                self.client.proxies = self.proxies
-            
-            # Set testnet if enabled
-            if self.testnet:
-                self.client.set_sandbox_mode(True)
-            
-            self.initialized = True
-            logger.info("Exchange client initialized successfully")
         except Exception as e:
-            logger.error(f"Error initializing exchange client: {e}")
-            self.initialized = False
+            logger.error(f"Error initializing Binance clients: {e}")
             raise
 
     def _handle_rate_limit_error(self):
@@ -335,134 +454,6 @@ class ExchangeClient:
         
         # Sleep with the calculated backoff
         time.sleep(self.rate_limit_backoff)
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
-    async def get_ticker_24h(self, symbol: str) -> Dict:
-        """Get 24-hour ticker price change statistics."""
-        try:
-            # Use CCXT's fetch_ticker method
-            ticker = await self.client.fetch_ticker(symbol)
-            
-            # Format the response to match the expected structure
-            return {
-                'symbol': symbol,
-                'priceChange': float(ticker['percentage']),
-                'priceChangePercent': float(ticker['percentage']),
-                'weightedAvgPrice': float(ticker['vwap']),
-                'lastPrice': float(ticker['last']),
-                'lastQty': float(ticker['lastSize']),
-                'openPrice': float(ticker['open']),
-                'highPrice': float(ticker['high']),
-                'lowPrice': float(ticker['low']),
-                'volume': float(ticker['baseVolume']),
-                'quoteVolume': float(ticker['quoteVolume']),
-                'openTime': ticker['timestamp'],
-                'closeTime': ticker['timestamp'],
-                'firstId': ticker.get('firstId', 0),
-                'lastId': ticker.get('lastId', 0),
-                'count': ticker.get('count', 0)
-            }
-        except Exception as e:
-            logger.error(f"Error fetching 24h ticker for {symbol}: {e}")
-            raise
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
-    async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
-        """Get order book for a symbol."""
-        try:
-            # Use CCXT's fetch_order_book method
-            orderbook = await self.client.fetch_order_book(symbol, limit)
-            
-            # Format the response to match the expected structure
-            return {
-                'lastUpdateId': orderbook.get('timestamp', 0),
-                'bids': [[float(price), float(amount)] for price, amount in orderbook['bids']],
-                'asks': [[float(price), float(amount)] for price, amount in orderbook['asks']]
-            }
-        except Exception as e:
-            logger.error(f"Error fetching orderbook for {symbol}: {e}")
-            raise
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
-    async def get_funding_rate(self, symbol: str) -> Dict:
-        """Get current funding rate for a symbol."""
-        try:
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
-            # Get funding rate using CCXT
-            funding_rate = await asyncio.to_thread(
-                self.ccxt_client.fetch_funding_rate,
-                symbol=symbol
-            )
-            
-            # Reset rate limit backoff on successful request
-            self.rate_limit_errors = 0
-            self.rate_limit_backoff = 1.0
-            
-            # Format response to match Binance structure exactly
-            return {
-                'symbol': symbol,
-                'fundingRate': float(funding_rate.get('fundingRate', 0)),
-                'fundingTime': int(funding_rate.get('fundingTimestamp', 0)),
-                'fundingRatePrecision': 8
-            }
-            
-        except ccxt.RateLimitExceeded as e:
-            logger.warning(f"Rate limit exceeded while fetching funding rate: {e}")
-            self._handle_rate_limit_error()
-            raise
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching funding rate: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching funding rate: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error fetching funding rate for {symbol}: {e}")
-            raise
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
-    async def get_open_interest(self, symbol: str) -> Dict:
-        """Get open interest for a symbol."""
-        try:
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
-            # Get open interest using CCXT
-            open_interest = await asyncio.to_thread(
-                self.ccxt_client.fetch_open_interest,
-                symbol=symbol
-            )
-            
-            # Reset rate limit backoff on successful request
-            self.rate_limit_errors = 0
-            self.rate_limit_backoff = 1.0
-            
-            # Format response to match Binance structure exactly
-            return {
-                'symbol': symbol,
-                'openInterest': float(open_interest.get('openInterestAmount', 0)),
-                'time': int(open_interest.get('timestamp', 0))
-            }
-            
-        except ccxt.RateLimitExceeded as e:
-            logger.warning(f"Rate limit exceeded while fetching open interest: {e}")
-            self._handle_rate_limit_error()
-            raise
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching open interest: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching open interest: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error fetching open interest for {symbol}: {e}")
-            raise
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
@@ -864,50 +855,60 @@ class ExchangeClient:
             logger.error(f"Error getting market data for {symbol}: {e}")
             return {}
 
-    async def get_all_symbols(self):
-        """Get all available trading symbols from the exchange."""
-        try:
-            if not self.client:
-                raise ConnectionError("Exchange client not initialized")
-
-            # Get exchange info
-            exchange_info = await asyncio.to_thread(
-                self.client.futures_exchange_info
-            )
-
-            if not exchange_info or 'symbols' not in exchange_info:
-                raise ValueError("Invalid exchange info response")
-
-            # Filter for USDT-margined futures
-            symbols = [
-                symbol['symbol'] for symbol in exchange_info['symbols']
-                if symbol['symbol'].endswith('USDT') and
-                symbol['status'] == 'TRADING' and
-                symbol['contractType'] == 'PERPETUAL'
-            ]
-
-            logger.info(
-                f"Retrieved {
-                    len(symbols)} trading symbols from exchange")
-            return symbols
-
-        except Exception as e:
-            logger.error(f"Error getting symbols from exchange: {e}")
-            return []
-
     async def initialize(self):
         """Initialize the exchange client and WebSocket manager."""
         try:
-            if not self.client:
-                self._init_client()
-            if not self.ws_manager:
-                self._init_ws_manager()
-            await self.ws_manager.initialize()
-            logger.info("Exchange client initialized with WebSocket manager")
+            # Get symbols dynamically from exchange using aiohttp
+            symbols = await self.get_all_symbols()
+            if not symbols:
+                logger.warning("No symbols retrieved from exchange, using fallback")
+                symbols = ['BTCUSDT', 'ETHUSDT']  # Fallback to major pairs
+            
+            # Initialize WebSocket manager with symbols
+            self.ws_manager = MarketDataWebSocket(
+                exchange_client=self,
+                symbols=symbols
+            )
+            await self.ws_manager.initialize(symbols)
+            
+            logger.info(f"Exchange client initialized with symbols: {symbols}")
+            
         except Exception as e:
             logger.error(f"Error initializing exchange client: {e}")
             raise
-            
+
+    async def _initialize_exchange(self):
+        """Initialize the exchange client with proper configuration (no public ccxt calls)."""
+        try:
+            # Only initialize ccxt for private endpoints (orders, balances, etc.)
+            exchange_config = {
+                'enableRateLimit': True,
+                'options': {
+                    'defaultType': 'future',  # Use futures market
+                    'adjustForTimeDifference': True,
+                },
+                'headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            }
+            if self.config.get('USE_PROXY', False):
+                proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+                if self.proxy_user and self.proxy_pass:
+                    proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+                exchange_config['proxies'] = {
+                    'http': proxy_url,
+                    'https': proxy_url
+                }
+                exchange_config['proxy'] = proxy_url
+                logger.info(f"Proxy configured for exchange: {self.proxy_host}:{self.proxy_port}")
+                logger.info(f"Full proxy URL: {proxy_url}")
+            logger.info(f"Initializing ccxt for private endpoints only: {exchange_config}")
+            self.exchange = ccxt.binance(exchange_config)
+            logger.info("Exchange client initialized for private endpoints only (no public ccxt calls)")
+        except Exception as e:
+            logger.error(f"Error initializing exchange: {e}")
+            raise
+
     async def stop(self):
         """Stop the exchange client and WebSocket manager."""
         try:
@@ -1043,85 +1044,6 @@ class ExchangeClient:
 
     @retry_with_backoff(max_retries=3)
     @rate_limit(limit=3, period=1.0)
-    async def get_account(self) -> Dict:
-        """Get account information including balances."""
-        try:
-            logger.debug("Fetching account information")
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
-            # Get account info using CCXT's fetch_balance
-            account_info = await asyncio.to_thread(
-                self.ccxt_client.fetch_balance
-            )
-            
-            if not account_info:
-                raise ValueError("Empty account response received")
-                
-            # Convert CCXT balance format to expected format
-            account = {
-                'totalWalletBalance': float(account_info.get('total', {}).get('USDT', 0)),
-                'availableBalance': float(account_info.get('free', {}).get('USDT', 0)),
-                'totalUnrealizedProfit': float(account_info.get('total', {}).get('USDT', 0)) - 
-                                       float(account_info.get('free', {}).get('USDT', 0))
-            }
-            
-            logger.debug(f"Account information retrieved: {account.get('totalWalletBalance')} total balance")
-            return account
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching account: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching account: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error getting account information: {e}")
-            raise
-            
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)
-    async def get_position(self, symbol: str) -> Dict:
-        """Get current position for a symbol."""
-        try:
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
-            # Get position information using CCXT
-            positions = await asyncio.to_thread(
-                self.ccxt_client.fetch_positions,
-                [symbol]
-            )
-            
-            if not positions or len(positions) == 0:
-                return {}
-                
-            position = positions[0]
-            
-            # Format position data
-            return {
-                'symbol': symbol,
-                'positionAmt': float(position.get('contracts', 0)),
-                'entryPrice': float(position.get('entryPrice', 0)),
-                'markPrice': float(position.get('markPrice', 0)),
-                'unRealizedProfit': float(position.get('unrealizedPnl', 0)),
-                'liquidationPrice': float(position.get('liquidationPrice', 0)),
-                'leverage': float(position.get('leverage', 0)),
-                'marginType': position.get('marginMode', 'cross'),
-                'updateTime': position.get('timestamp', 0)
-            }
-            
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching position: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching position: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Error getting position for {symbol}: {e}")
-            return {}
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)
     async def get_open_positions(self) -> List[Dict]:
         """Get all open positions."""
         try:
@@ -1163,111 +1085,6 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error getting open positions: {e}")
             return []
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)
-    async def place_order(self, symbol: str, side: str, order_type: str, 
-                         quantity: float, price: Optional[float] = None,
-                         stop_price: Optional[float] = None,
-                         reduce_only: bool = False) -> Dict:
-        """Place an order on the exchange."""
-        try:
-            if not self.ccxt_client:
-                raise ConnectionError("CCXT client not initialized")
-                
-            # Validate inputs
-            if not symbol or not side or not order_type or not quantity:
-                raise ValueError("Missing required order parameters")
-                
-            # Prepare order parameters
-            params = {
-                'symbol': symbol,
-                'type': order_type,
-                'side': side,
-                'amount': quantity,
-                'reduceOnly': reduce_only
-            }
-            
-            # Add price for limit orders
-            if order_type == 'limit' and price:
-                params['price'] = price
-                
-            # Add stop price for stop orders
-            if stop_price:
-                params['stopPrice'] = stop_price
-                
-            # Place order using CCXT
-            order = await asyncio.to_thread(
-                self.ccxt_client.create_order,
-                **params
-            )
-            
-            logger.info(f"Order placed: {order}")
-            return order
-            
-        except ccxt.NetworkError as e:
-            logger.error(f"Network error while placing order: {e}")
-            raise
-        except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while placing order: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Error placing order for {symbol}: {e}")
-            raise
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)
-    async def close_position(
-            self,
-            symbol: str,
-            reduce_only: bool = True) -> Dict:
-        """Close a position for a symbol."""
-        try:
-            # Get current position
-            position = await self.get_position(symbol)
-            if not position or float(position.get('positionAmt', 0)) == 0:
-                return {'status': 'no_position'}
-                
-            # Determine order side based on position
-            position_amt = float(position.get('positionAmt', 0))
-            side = 'sell' if position_amt > 0 else 'buy'
-            
-            # Place closing order
-            order = await self.place_order(
-                symbol=symbol,
-                side=side,
-                order_type='market',
-                quantity=abs(position_amt),
-                reduce_only=reduce_only
-            )
-            
-            logger.info(f"Position closed for {symbol}: {order}")
-            return order
-            
-        except Exception as e:
-            logger.error(f"Error closing position for {symbol}: {e}")
-            raise
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)
-    async def get_recent_trades(self, symbol: str, limit: int = 100) -> List[Dict]:
-        """Get recent trades for a symbol."""
-        try:
-            # Use CCXT's fetch_trades method
-            trades = await self.client.fetch_trades(symbol, limit=limit)
-            
-            # Format the response to match the expected structure
-            return [{
-                'id': trade['id'],
-                'price': float(trade['price']),
-                'qty': float(trade['amount']),
-                'time': trade['timestamp'],
-                'isBuyerMaker': trade['side'] == 'sell',
-                'isBestMatch': True  # CCXT doesn't provide this info
-            } for trade in trades]
-        except Exception as e:
-            logger.error(f"Error fetching recent trades for {symbol}: {e}")
-            raise
 
     async def check_connection(self) -> bool:
         """Check if the exchange connection is working."""
@@ -1311,56 +1128,6 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error reconnecting to exchange: {e}")
             return False
-
-    @retry_with_backoff(max_retries=3)
-    @rate_limit(limit=3, period=1.0)
-    async def get_klines(
-            self,
-            symbol: str,
-            interval: str = '1m',
-            limit: int = 100) -> List[Dict]:
-        """Get kline/candlestick data for a symbol."""
-        try:
-            # Convert Binance interval to CCXT timeframe
-            timeframe_map = {
-                '1m': '1m',
-                '3m': '3m',
-                '5m': '5m',
-                '15m': '15m',
-                '30m': '30m',
-                '1h': '1h',
-                '2h': '2h',
-                '4h': '4h',
-                '6h': '6h',
-                '8h': '8h',
-                '12h': '12h',
-                '1d': '1d',
-                '3d': '3d',
-                '1w': '1w',
-                '1M': '1M'
-            }
-            timeframe = timeframe_map.get(interval, '1m')
-            
-            # Get OHLCV data using CCXT
-            ohlcv = await self.client.fetch_ohlcv(symbol, timeframe, limit=limit)
-            
-            # Convert CCXT OHLCV format to Binance klines format
-            klines = []
-            for candle in ohlcv:
-                kline = {
-                    'timestamp': int(candle[0]),  # timestamp in milliseconds
-                    'open': float(candle[1]),
-                    'high': float(candle[2]),
-                    'low': float(candle[3]),
-                    'close': float(candle[4]),
-                    'volume': float(candle[5])
-                }
-                klines.append(kline)
-                
-            return klines
-        except Exception as e:
-            logger.error(f"Error getting klines for {symbol}: {e}")
-            raise
 
     async def get_ohlcv(self, symbol: str, timeframe: str = '1m', limit: int = 100) -> List[Dict]:
         """Alias for get_klines to maintain compatibility with other parts of the codebase."""

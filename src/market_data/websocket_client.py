@@ -44,10 +44,12 @@ class MarketDataWebSocket:
             'password': os.getenv('PROXY_PASS')
         }
         self.threads = []
+        self.ws_clients = {}  # Fix: add this line to avoid AttributeError
 
     def _get_ws_url(self, symbol):
+        """Get the correct WebSocket URL for Binance Futures."""
         # Binance Futures WebSocket URL format for single-symbol streams
-        return f"{self.ws_url}/{symbol.lower()}@trade"
+        return f"wss://fstream.binance.com/ws/{symbol.lower()}@trade"
 
     def _on_message(self, ws, message):
         try:
@@ -84,30 +86,57 @@ class MarketDataWebSocket:
             symbols_list = list(self.symbols) if isinstance(self.symbols, set) else self.symbols
             
             # Create headers with API key if available
-            headers = {}
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
             api_key = os.getenv('BINANCE_API_KEY')
             if api_key:
                 headers['X-MBX-APIKEY'] = api_key
             
-            # Add user agent
-            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            # Configure proxy
+            proxy_config = {}
+            if self.proxy['host'] and self.proxy['port']:
+                proxy_url = f"http://{self.proxy['host']}:{self.proxy['port']}"
+                if self.proxy['username'] and self.proxy['password']:
+                    proxy_url = f"http://{self.proxy['username']}:{self.proxy['password']}@{self.proxy['host']}:{self.proxy['port']}"
+                proxy_config = {
+                    'http_proxy_host': self.proxy['host'],
+                    'http_proxy_port': int(self.proxy['port']),
+                    'proxy_type': 'http'
+                }
+                if self.proxy['username'] and self.proxy['password']:
+                    proxy_config['http_proxy_auth'] = (self.proxy['username'], self.proxy['password'])
+                logger.info(f"WebSocket proxy configured: {self.proxy['host']}:{self.proxy['port']}")
             
-            # Create WebSocket connection with headers
-            self.connection = websocket.WebSocketApp(
-                self._get_ws_url(symbols_list[0]),  # Use first symbol for now
-                header=headers,
-                on_message=self._on_message,
-                on_error=self._on_error,
-                on_close=self._on_close,
-                on_open=self._on_open
-            )
+            # Connect to WebSocket for each symbol
+            for symbol in symbols_list:
+                ws_url = self._get_ws_url(symbol)
+                ws = websocket.WebSocketApp(
+                    ws_url,
+                    header=headers,
+                    on_message=self._on_message,
+                    on_error=self._on_error,
+                    on_close=self._on_close,
+                    on_open=self._on_open
+                )
+                
+                # Set proxy configuration
+                if proxy_config:
+                    ws.proxy_type = proxy_config['proxy_type']
+                    ws.http_proxy_host = proxy_config['http_proxy_host']
+                    ws.http_proxy_port = proxy_config['http_proxy_port']
+                    if 'http_proxy_auth' in proxy_config:
+                        ws.http_proxy_auth = proxy_config['http_proxy_auth']
+                
+                # Start WebSocket connection in a separate thread
+                thread = threading.Thread(target=ws.run_forever)
+                thread.daemon = True
+                thread.start()
+                self.threads.append(thread)
+                self.connections[symbol] = ws
+                logger.info(f"WebSocket connection started for {symbol}")
             
-            # Start WebSocket connection in a separate thread
-            self.ws_thread = threading.Thread(target=self.connection.run_forever)
-            self.ws_thread.daemon = True
-            self.ws_thread.start()
-            
-            logger.info(f"WebSocket connection started for {symbols_list[0]}")
+            self.running = True
             
         except Exception as e:
             logger.error(f"Error connecting to WebSocket: {e}")
@@ -173,29 +202,33 @@ class MarketDataWebSocket:
             # Wait before next heartbeat
             await asyncio.sleep(30)  # Send heartbeat every 30 seconds
 
-    async def initialize(self, symbols: Optional[List[str]] = None) -> None:
-        """Initialize the WebSocket client with optional symbols."""
-        try:
-            # Update symbols if provided
-            if symbols is not None:
-                self.symbols = symbols
-            # Initialize cache and timestamps
-            self.cache = {}
-            self.cache_timestamps = {}
-            self.data_cache = {}
-            self.callbacks = {
-                'kline': [],
-                'trade': [],
-                'depth': []
-            }
-            # Connect to WebSocket
-            self.connect()
-            # Start the WebSocket client in a background task
-            asyncio.create_task(self._monitor_websocket_heartbeat())
-            self.logger.info(f"WebSocket client initialized with {len(self.symbols)} symbols")
-        except Exception as e:
-            self.logger.error(f"Error initializing WebSocket client: {e}")
-            raise 
+    async def initialize(self, symbols: List[str] = None):
+        """Initialize WebSocket connections for the given symbols."""
+        if not symbols:
+            symbols = self.symbols
+        if not symbols:
+            logger.warning("No symbols provided for WebSocket connection")
+            return
+            
+        self.symbols = symbols
+        
+        # Configure proxy for WebSocket
+        proxy_url = None
+        if self.exchange_client.config.get('USE_PROXY', False):
+            proxy_host = self.exchange_client.config.get('PROXY_HOST')
+            proxy_port = self.exchange_client.config.get('PROXY_PORT')
+            if proxy_host and proxy_port:
+                proxy_url = f"http://{proxy_host}:{proxy_port}"
+                if self.exchange_client.proxy_user and self.exchange_client.proxy_pass:
+                    proxy_url = f"http://{self.exchange_client.proxy_user}:{self.exchange_client.proxy_pass}@{proxy_host}:{proxy_port}"
+                logger.info(f"WebSocket proxy configured: {proxy_host}:{proxy_port}")
+        
+        # Set up WebSocket connections with proxy
+        for symbol in symbols:
+            await self._setup_symbol_websocket(symbol, proxy_url)
+            
+        # Start heartbeat monitoring
+        asyncio.create_task(self._monitor_websocket_heartbeat())
 
     def check_connection(self) -> bool:
         """Check if the WebSocket connection is healthy."""
@@ -322,3 +355,27 @@ class MarketDataWebSocket:
         # If WebSocket is already connected, reconnect with new symbols
         if self.is_connected():
             self.connect() 
+
+    async def _setup_symbol_websocket(self, symbol: str, proxy_url: Optional[str] = None) -> None:
+        """Set up WebSocket connection for a symbol."""
+        try:
+            # Create WebSocket client for the symbol
+            ws_client = MarketDataWebSocket(
+                exchange_client=self.exchange_client,
+                symbols=[symbol],
+                cache_ttl=5
+            )
+            
+            # Configure proxy if available
+            if proxy_url:
+                ws_client.proxy = proxy_url
+            
+            # Connect to WebSocket (not async)
+            ws_client.connect()
+            
+            # Store the client
+            self.ws_clients[symbol] = ws_client
+            logger.info(f"WebSocket client started for {symbol}")
+        except Exception as e:
+            logger.error(f"Error setting up WebSocket for {symbol}: {e}")
+            raise 

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from typing import Dict, List, Optional
+import aiohttp
 
 from dotenv import load_dotenv
 
@@ -20,54 +21,60 @@ logger = logging.getLogger(__name__)
 
 async def test_connection():
     """Test exchange connection and data processing."""
-    load_dotenv()
-    
-    # Initialize exchange client with config
-    exchange_config = {
-        'api_key': os.getenv('BINANCE_API_KEY'),
-        'api_secret': os.getenv('BINANCE_API_SECRET'),
-        'base_url': 'https://api.binance.com',
-        'ws_url': 'wss://stream.binance.com:9443/ws/stream',
-        'testnet': os.getenv('USE_TESTNET', 'False').lower() == 'true',
-        'proxy': {
-            'host': os.getenv('PROXY_HOST'),
-            'port': os.getenv('PROXY_PORT'),
-            'username': os.getenv('PROXY_USER'),
-            'password': os.getenv('PROXY_PASS')
-        },
-        'proxy_ports': os.getenv('PROXY_LIST', '10001,10002,10003').split(','),
-        'failover_ports': os.getenv('FAILOVER_PORTS', '10001,10002,10003').split(','),
-        'symbols': os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
-    }
-    exchange_client = ExchangeClient(config=exchange_config)
-    processor = MarketDataProcessor()
-    
     try:
         logger.info("=== Starting Connection Test ===")
+        load_dotenv()
         
-        # Test initialization
-        await exchange_client.initialize()
-        await exchange_client.test_proxy_connection()
+        # Get proxy configuration
+        proxy_host = os.getenv('PROXY_HOST')
+        proxy_port = os.getenv('PROXY_PORT')
+        proxy_user = os.getenv('PROXY_USER')
+        proxy_pass = os.getenv('PROXY_PASS')
         
-        # Test data fetching
-        symbol = "BTCUSDT"
-        data = await exchange_client.get_historical_data(symbol, "1m", 200)
-        logger.info(f"Received {len(data) if data else 0} data points")
+        # Format proxy URL
+        proxy_url = None
+        if proxy_host and proxy_port:
+            proxy_url = f"http://{proxy_host}:{proxy_port}"
+            if proxy_user and proxy_pass:
+                proxy_url = f"http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
+            logger.info(f"Using proxy: {proxy_url}")
         
-        if data:
-            # Test processing
-            success = processor.update_ohlcv(symbol, data)
-            logger.info(f"Data processing: {'SUCCESS' if success else 'FAILED'}")
+        # Test HTTP connection
+        async with aiohttp.ClientSession() as session:
+            # Test futures API
+            futures_url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+            try:
+                async with session.get(futures_url, proxy=proxy_url, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        symbols = [s['symbol'] for s in data['symbols'] 
+                                 if s['contractType'] == 'PERPETUAL' and s['status'] == 'TRADING']
+                        logger.info(f"Futures API test successful. Retrieved {len(symbols)} symbols")
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Futures API test failed: {response.status} {error_text}")
+            except Exception as e:
+                logger.error(f"Futures API test failed: {e}")
             
-            if success:
-                market_state = processor.get_market_state(symbol)
-                logger.info(f"Market state: {market_state}")
+            # Test spot API
+            spot_url = "https://api.binance.com/api/v3/exchangeInfo"
+            try:
+                async with session.get(spot_url, proxy=proxy_url, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        symbols = [s['symbol'] for s in data['symbols'] if s['status'] == 'TRADING']
+                        logger.info(f"Spot API test successful. Retrieved {len(symbols)} symbols")
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Spot API test failed: {response.status} {error_text}")
+            except Exception as e:
+                logger.error(f"Spot API test failed: {e}")
+        
+        logger.info("=== Test Complete ===")
         
     except Exception as e:
-        logger.error(f"Test failed: {str(e)}")
-    finally:
-        await exchange_client.close()
-        logger.info("=== Test Complete ===")
+        logger.error(f"Test failed: {e}")
+        raise
 
 
 if __name__ == "__main__":
