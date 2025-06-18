@@ -122,9 +122,7 @@ def retry_with_backoff(max_retries: int = 3, base_delay: float = 1.0):
                     last_exception = e
                     if attempt < max_retries - 1:
                         delay = base_delay * (2 ** attempt)
-                        logger.warning(
-                            f"Error in {
-                                func.__name__}, retrying in {delay}s: {e}")
+                        logger.warning(f"Error in {func.__name__}, retrying in {delay}s: {e}")
                         await asyncio.sleep(delay)
                     else:
                         raise
@@ -593,19 +591,11 @@ class ExchangeClient:
     async def _rotate_proxy(self):
         best_port = await self._find_best_proxy()
         if best_port != self.proxy_port:
-            logger.info(
-                f"Rotating proxy from {
-                    self.proxy_port} to {best_port}")
-            self.proxy_port = str(best_port)
-            if not isinstance(
-                    self.proxy_port,
-                    str) or not self.proxy_port.isdigit():
-                logger.error(
-                    f"Proxy port is not a valid string: {
-                        self.proxy_port}")
-                raise ValueError(
-                    f"Proxy port is not a valid string: {
-                        self.proxy_port}")
+            logger.info(f"Rotating proxy from {self.proxy_port} to {best_port}")
+            self.proxy_port = best_port
+            if not isinstance(self.proxy_port, str) or not self.proxy_port.isdigit():
+                logger.error(f"Proxy port is not a valid string: {self.proxy_port}")
+                raise ValueError(f"Proxy port is not a valid string: {self.proxy_port}")
             self.proxy_config["port"] = str(best_port)
             self._setup_proxy()
             self._init_client()
@@ -619,8 +609,7 @@ class ExchangeClient:
                 del self.ws_clients[symbol]
                 await self._initialize_websocket(symbol)
             except Exception as e:
-                logger.error(
-                    f"Error reinitializing websocket for {symbol}: {e}")
+                logger.error(f"Error reinitializing websocket for {symbol}: {e}")
 
     async def _initialize_websocket(self, symbol: str) -> None:
         try:
@@ -645,9 +634,7 @@ class ExchangeClient:
             logger.info(f"WebSocket initialized for {symbol}")
             
         except Exception as e:
-            logger.error(
-                f"Error initializing WebSocket for {symbol}: {
-                    str(e)}")
+            logger.error(f"Error initializing WebSocket for {symbol}: {str(e)}")
             raise
 
     async def _update_funding_rates(self):
@@ -835,8 +822,7 @@ class ExchangeClient:
             
         except Exception as e:
             logger.error(
-                f"Error getting data freshness for {symbol}: {
-                    str(e)}")
+                f"Error getting data freshness for {symbol}: {str(e)}")
             return {}
             
     def _update_data_freshness(self, symbol: str, data_type: str) -> None:
@@ -854,8 +840,7 @@ class ExchangeClient:
             
         except Exception as e:
             logger.error(
-                f"Error updating data freshness for {symbol} {data_type}: {
-                    str(e)}")
+                f"Error updating data freshness for {symbol} {data_type}: {str(e)}")
             
     def _get_cached_data(self, key: str) -> Optional[Dict]:
         """Get data from cache."""

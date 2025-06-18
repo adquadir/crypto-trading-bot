@@ -253,10 +253,7 @@ class SignalGenerator:
             }
 
             # Log freshness metrics
-            logger.info(
-                f"Data freshness for {symbol}: "
-                f"{json.dumps({k: f'{v:.1f}s' for k, v in freshness_metrics.items()})}"
-            )
+            logger.info(f"Data freshness for {symbol}: {json.dumps({k: f'{v:.1f}s' for k, v in freshness_metrics.items()})}")
 
             # Check if any critical data is too stale
             max_freshness = {
@@ -272,8 +269,7 @@ class SignalGenerator:
             if stale_data:
                 self.signal_tracker.log_rejection(
                     symbol,
-                    f"Stale data detected: "
-                    f"{json.dumps({k: f'{v:.1f}s' for k, v in stale_data.items()})}",
+                    f"Stale data detected: {json.dumps({k: f'{v:.1f}s' for k, v in stale_data.items()})}",
                     market_data,
                 )
                 return None
