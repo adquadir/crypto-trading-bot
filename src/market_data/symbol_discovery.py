@@ -455,16 +455,11 @@ class SymbolDiscovery:
         
         # Load configuration from environment
         self.min_volume_24h = float(os.getenv('MIN_24H_VOLUME', '1000000'))
-        self.min_volume_24h = max(
-    self.min_volume_24h,
-     1.0)  # Ensure non-zero minimum
+        self.min_volume_24h = max(self.min_volume_24h, 1.0)  # Ensure non-zero minimum
         if float(os.getenv('MIN_24H_VOLUME', '1000000')) <= 0:
-            logger.debug(
-    f"MIN_24H_VOLUME was <= 0, using minimum threshold of {
-        self.min_volume_24h}")
+            logger.debug(f"MIN_24H_VOLUME was <= 0, using minimum threshold of {self.min_volume_24h}")
             
-        # Minimum confidence for accepting a signal (default 0.4, can be set at
-        # runtime or via API)
+        # Minimum confidence for accepting a signal (default 0.4, can be set at runtime or via API)
         self.min_confidence = float(os.getenv('MIN_CONFIDENCE', '0.4'))
         self.min_risk_reward = float(os.getenv('MIN_RISK_REWARD', '1.5'))
         self.max_leverage = float(os.getenv('MAX_LEVERAGE', '20.0'))
@@ -477,8 +472,7 @@ class SymbolDiscovery:
         self.max_volatility = float(os.getenv('MAX_VOLATILITY', '0.05'))
         self.min_funding_rate = float(os.getenv('MIN_FUNDING_RATE', '-0.0001'))
         self.max_funding_rate = float(os.getenv('MAX_FUNDING_RATE', '0.0001'))
-        self.min_open_interest = float(
-            os.getenv('MIN_OPEN_INTEREST', '100000'))
+        self.min_open_interest = float(os.getenv('MIN_OPEN_INTEREST', '100000'))
         self.max_symbols = int(os.getenv('MAX_SYMBOLS', '50'))
         
         # Log the actual values being used
