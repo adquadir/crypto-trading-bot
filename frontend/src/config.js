@@ -15,20 +15,13 @@ const getApiBaseUrl = () => {
 };
 
 export const getWsBaseUrl = () => {
-    const hostname = window.location.hostname;
     const isDevelopment = process.env.NODE_ENV === 'development';
-    const apiKey = process.env.REACT_APP_API_KEY;
-    
-    if (!apiKey) {
-        console.error('API key not configured in environment variables');
-        return null;
-    }
+    const hostname = window.location.hostname;
     
     if (isDevelopment || hostname === 'localhost' || hostname === '127.0.0.1') {
-        return `ws://localhost:8000?api_key=${apiKey}`;
+        return 'ws://localhost:8000';
     }
-    // For production, use the same protocol as the current page
-    return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${hostname}?api_key=${apiKey}`;
+    return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${hostname}`;
 };
 
 const config = {
@@ -40,7 +33,7 @@ const config = {
         STRATEGIES: '/api/v1/trading/strategies',
         SETTINGS: '/api/v1/trading/settings',
         SIGNALS: '/api/v1/trading/signals',
-        WS_SIGNALS: '/ws',
+        WS_SIGNALS: '/ws/signals',
         OPPORTUNITIES: '/api/v1/trading/opportunities',
         OPPORTUNITY_STATS: '/api/v1/trading/opportunities/stats',
         SYMBOL_OPPORTUNITY: (symbol) => `/api/v1/trading/opportunities/${symbol}`
