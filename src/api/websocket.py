@@ -8,6 +8,8 @@ from src.market_data.exchange_client import ExchangeClient
 from src.opportunity.opportunity_manager import OpportunityManager
 from src.market_data.websocket_client import MarketDataWebSocket
 from src.api.connection_manager import ConnectionManager
+from src.strategy.strategy_manager import StrategyManager
+from src.risk.risk_manager import RiskManager
 from urllib.parse import parse_qs
 
 load_dotenv()
@@ -66,7 +68,9 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # Initialize components
         exchange_client = ExchangeClient()
-        opportunity_manager = OpportunityManager(exchange_client)
+        strategy_manager = StrategyManager(exchange_client)
+        risk_manager = RiskManager(exchange_client)
+        opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager)
         market_data_ws = MarketDataWebSocket()
         connection_manager = ConnectionManager()
 
