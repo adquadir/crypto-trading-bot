@@ -193,6 +193,11 @@ class ExchangeClient:
         self.api_key = os.getenv('BINANCE_API_KEY')
         self.api_secret = os.getenv('BINANCE_API_SECRET')
         
+        # Initialize clients
+        self.client = None
+        self.futures_client = None
+        self.exchange = None
+        
         # Initialize WebSocket tracking
         self.ws_connections = {}
         self.ws_manager = None
@@ -220,15 +225,112 @@ class ExchangeClient:
         # Initialize data structures
         self.open_interest_history = {}
         self.history_length = 24
-
-        self.ccxt_client = None
-        self.proxy_port = None
-        self.proxy_metrics = {}
+        self.last_trade_price = {}
+        self.volatility_metrics = {}
+        self.funding_rates = {}
+        self.data_freshness = {}
         self.last_proxy_rotation = 0
         self.rate_limit_errors = 0
         self.last_rate_limit_error = 0
         self.rate_limit_backoff = 1.0  # Initial backoff in seconds
         self.max_rate_limit_backoff = 60.0  # Maximum backoff in seconds
+
+    async def _init_client(self):
+        """Initialize the Binance client with proper configuration."""
+        try:
+            # Initialize Binance client
+            self.client = Client(
+                api_key=self.api_key,
+                api_secret=self.api_secret,
+                testnet=self.testnet
+            )
+            
+            # Initialize futures client
+            self.futures_client = Client(
+                api_key=self.api_key,
+                api_secret=self.api_secret,
+                testnet=self.testnet
+            )
+            
+            # Set up proxy if enabled
+            if self.proxy_url:
+                self.client.proxies = {
+                    'http': self.proxy_url,
+                    'https': self.proxy_url
+                }
+                self.futures_client.proxies = {
+                    'http': self.proxy_url,
+                    'https': self.proxy_url
+                }
+                logger.info(f"Proxy configured for Binance clients: {self.proxy_url}")
+            
+            # Initialize ccxt for private endpoints
+            await self._initialize_exchange()
+            
+            logger.info("Binance clients initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Error initializing Binance clients: {e}")
+            raise
+
+    async def initialize(self):
+        """Initialize the exchange client."""
+        try:
+            # Initialize Binance clients first
+            await self._init_client()
+            
+            # Initialize WebSocket connections
+            symbols = self.config.get('symbols', ['BTCUSDT'])
+            self.ws_manager = MarketDataWebSocket(self, symbols)
+            await self.ws_manager.initialize()
+            
+            # Start health check loop
+            asyncio.create_task(self._health_check_loop())
+            
+            self.initialized = True
+            logger.info(f"Exchange client initialized with symbols: {symbols}")
+            
+        except Exception as e:
+            logger.error(f"Error initializing exchange client: {e}")
+            raise
+
+    async def reconnect(self) -> bool:
+        """Reconnect to the exchange."""
+        try:
+            logger.info("Attempting to reconnect to exchange...")
+            
+            # Close existing connections
+            await self.close()
+            
+            # Reinitialize clients
+            await self._init_client()
+            
+            # Reinitialize WebSocket connections
+            if self.ws_manager:
+                await self.ws_manager.initialize()
+            
+            self.initialized = True
+            logger.info("Successfully reconnected to exchange")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error reconnecting to exchange: {e}")
+            return False
+
+    async def check_connection(self) -> bool:
+        """Check if the exchange connection is healthy."""
+        try:
+            if not self.client or not self.futures_client:
+                logger.error("Exchange API connection check failed: Clients not initialized")
+                return False
+                
+            # Test connection using a simple API call
+            await self._make_request('GET', '/fapi/v1/ping')
+            return True
+            
+        except Exception as e:
+            logger.error(f"Exchange API connection check failed: {e}")
+            return False
 
     async def _make_request(self, method: str, endpoint: str, params: Dict = None, signed: bool = False) -> Dict:
         """Make an HTTP request to the exchange API."""
@@ -394,41 +496,6 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error setting up proxy: {e}")
             self.proxies = None
-
-    def _init_client(self):
-        """Initialize the Binance client with proper configuration."""
-        try:
-            # Initialize Binance client
-            self.client = Client(
-                api_key=os.getenv('BINANCE_API_KEY'),
-                api_secret=os.getenv('BINANCE_API_SECRET'),
-                testnet=self.testnet
-            )
-            
-            # Initialize futures client
-            self.futures_client = Client(
-                api_key=os.getenv('BINANCE_API_KEY'),
-                api_secret=os.getenv('BINANCE_API_SECRET'),
-                testnet=self.testnet
-            )
-            
-            # Set up proxy if enabled
-            if self.proxy_url:
-                self.client.proxies = {
-                    'http': self.proxy_url,
-                    'https': self.proxy_url
-                }
-                self.futures_client.proxies = {
-                    'http': self.proxy_url,
-                    'https': self.proxy_url
-                }
-                logger.info(f"Proxy configured for Binance clients: {self.proxy_url}")
-            
-            logger.info("Binance clients initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Error initializing Binance clients: {e}")
-            raise
 
     def _handle_rate_limit_error(self):
         """Handle rate limit errors with exponential backoff."""
@@ -855,28 +922,6 @@ class ExchangeClient:
             logger.error(f"Error getting market data for {symbol}: {e}")
             return {}
 
-    async def initialize(self):
-        """Initialize the exchange client and WebSocket manager."""
-        try:
-            # Get symbols dynamically from exchange using aiohttp
-            symbols = await self.get_all_symbols()
-            if not symbols:
-                logger.warning("No symbols retrieved from exchange, using fallback")
-                symbols = ['BTCUSDT', 'ETHUSDT']  # Fallback to major pairs
-            
-            # Initialize WebSocket manager with symbols
-            self.ws_manager = MarketDataWebSocket(
-                exchange_client=self,
-                symbols=symbols
-            )
-            await self.ws_manager.initialize(symbols)
-            
-            logger.info(f"Exchange client initialized with symbols: {symbols}")
-            
-        except Exception as e:
-            logger.error(f"Error initializing exchange client: {e}")
-            raise
-
     async def _initialize_exchange(self):
         """Initialize the exchange client with proper configuration (no public ccxt calls)."""
         try:
@@ -1085,49 +1130,6 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error getting open positions: {e}")
             return []
-
-    async def check_connection(self) -> bool:
-        """Check if the exchange connection is working."""
-        try:
-            if not self.client:
-                self._init_client()
-            # Use asyncio.to_thread for the synchronous fetch_time call
-            await asyncio.to_thread(self.client.fetch_time)
-            return True
-        except Exception as e:
-            logger.error(f"Exchange API connection check failed: {e}")
-            return False
-
-    async def reconnect(self) -> bool:
-        """Attempt to reconnect to the exchange."""
-        try:
-            logger.info("Attempting to reconnect to exchange...")
-            
-            # Close existing connections
-            if self.ws_manager:
-                await self.ws_manager.close()
-                
-            # Reinitialize client
-            self._init_client()
-            
-            # Test connection
-            if not await self.check_connection():
-                logger.error("Failed to reconnect to exchange")
-                return False
-                
-            # Reinitialize WebSocket manager
-            self._init_ws_manager()
-            
-            # Reconnect WebSocket
-            if self.ws_manager:
-                self.ws_manager.connect()
-                
-            logger.info("Successfully reconnected to exchange")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error reconnecting to exchange: {e}")
-            return False
 
     async def get_ohlcv(self, symbol: str, timeframe: str = '1m', limit: int = 100) -> List[Dict]:
         """Alias for get_klines to maintain compatibility with other parts of the codebase."""
