@@ -3,11 +3,12 @@ from pathlib import Path
 import os
 import logging
 from typing import Dict, Any
+import re
 
 logger = logging.getLogger(__name__)
 
 def load_config(config_path: str = "config/config.yaml"):
-    """Loads configuration from a YAML file."""
+    """Loads configuration from a YAML file with environment variable substitution."""
     config_file = Path(config_path)
     if not config_file.exists():
         logger.error(f"Configuration file not found at {config_file}")
@@ -15,15 +16,39 @@ def load_config(config_path: str = "config/config.yaml"):
 
     try:
         with open(config_file, 'r') as f:
-            config = yaml.safe_load(f)
-            logger.info(f"Configuration loaded from {config_file}")
-            return config
+            config_content = f.read()
+            
+        # Substitute environment variables
+        config_content = _substitute_env_vars(config_content)
+        
+        config = yaml.safe_load(config_content)
+        logger.info(f"Configuration loaded from {config_file}")
+        return config
     except yaml.YAMLError as e:
         logger.error(f"Error parsing configuration file {config_file}: {e}")
         raise ValueError(f"Error parsing configuration file {config_file}: {e}")
     except Exception as e:
         logger.error(f"An unexpected error occurred while loading configuration from {config_file}: {e}")
-        raise 
+        raise
+
+def _substitute_env_vars(content: str) -> str:
+    """Substitute environment variables in the format ${VAR} or ${VAR:-default}."""
+    def replace_var(match):
+        var_expr = match.group(1)
+        if ':-' in var_expr:
+            var_name, default_value = var_expr.split(':-', 1)
+            return os.getenv(var_name, default_value)
+        else:
+            var_name = var_expr
+            value = os.getenv(var_name)
+            if value is None:
+                logger.warning(f"Environment variable {var_name} not found, using empty string")
+                return ""
+            return value
+    
+    # Pattern to match ${VAR} or ${VAR:-default}
+    pattern = r'\$\{([^}]+)\}'
+    return re.sub(pattern, replace_var, content)
 
 def validate_config(config: Dict[str, Any]) -> bool:
     """Validate the configuration dictionary."""

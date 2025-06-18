@@ -14,14 +14,9 @@ const getApiBaseUrl = () => {
     return `http://${hostname}:8000`; // Or window.location.origin if backend is on same port
 };
 
+// WebSocket functionality disabled
 export const getWsBaseUrl = () => {
-    const isDevelopment = process.env.NODE_ENV === 'development';
-    const hostname = window.location.hostname;
-    
-    if (isDevelopment || hostname === 'localhost' || hostname === '127.0.0.1') {
-        return 'ws://localhost:8000';
-    }
-    return `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${hostname}`;
+    return null;
 };
 
 const config = {
@@ -32,14 +27,15 @@ const config = {
         POSITIONS: '/api/v1/trading/positions',
         STRATEGIES: '/api/v1/trading/strategies',
         SETTINGS: '/api/v1/trading/settings',
-        SIGNALS: '/api/v1/trading/signals',
+        SIGNALS: '/api/v1/trading/opportunities',  // Use opportunities as signals
         WS_SIGNALS: '/ws/signals',
         OPPORTUNITIES: '/api/v1/trading/opportunities',
         OPPORTUNITY_STATS: '/api/v1/trading/opportunities/stats',
-        SYMBOL_OPPORTUNITY: (symbol) => `/api/v1/trading/opportunities/${symbol}`
+        SYMBOL_OPPORTUNITY: (symbol) => `/api/v1/trading/opportunities/${symbol}`,
+        EXECUTE_MANUAL_TRADE: '/api/v1/trading/execute_manual_trade'
     },
-    // API endpoints
-    API_URL: process.env.REACT_APP_API_URL || 'ws://localhost:8000',
+    // API endpoints - WebSocket disabled
+    API_URL: process.env.REACT_APP_API_URL || null,
     API_KEY: process.env.REACT_APP_API_KEY,
     RECONNECT_INTERVAL: 5000,
     MAX_RECONNECT_ATTEMPTS: 5,

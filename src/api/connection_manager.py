@@ -8,7 +8,7 @@ class ConnectionManager:
         self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
-        await websocket.accept()
+        # Don't accept here - it should already be accepted in the endpoint
         self.active_connections.append(websocket)
         logger.info(f"WebSocket connected: {websocket.client}")
 

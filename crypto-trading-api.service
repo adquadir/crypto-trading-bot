@@ -5,8 +5,8 @@ After=network.target
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/crypto-trading-bot
+EnvironmentFile=/home/ubuntu/crypto-trading-bot/.env
 Environment=PYTHONPATH=/home/ubuntu/crypto-trading-bot
-Environment=API_KEY=crypto_trading_bot_api_key_2024
 ExecStart=/home/ubuntu/crypto-trading-bot/venv/bin/python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 Restart=always
 RestartSec=10

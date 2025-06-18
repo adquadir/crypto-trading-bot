@@ -56,7 +56,7 @@ import {
   Legend
 } from 'chart.js';
 import config from '../config';
-import { useWebSocket } from '../contexts/WebSocketContext';
+// import { useWebSocket } from '../contexts/WebSocketContext';  // Disabled WebSocket
 
 // Register ChartJS components
 ChartJS.register(
@@ -250,72 +250,26 @@ const Opportunities = () => {
     field: 'confidence_score',
     direction: 'desc'
   });
-  const [wsConnected, setWsConnected] = useState(false);
-  const wsRef = useRef(null);
-
-  const attachHandlers = (socket) => {
-    socket.onopen = () => {
-      console.log('WebSocket connected');
-      setWsConnected(true);
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'opportunities') {
-          setOpportunities(data.data);
-        }
-      } catch (err) {
-        console.error('Error parsing WebSocket message:', err);
-      }
-    };
-
-    socket.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setWsConnected(false);
-    };
-
-    socket.onclose = () => {
-      console.log('WebSocket disconnected');
-      setWsConnected(false);
-      // Attempt to reconnect after a delay
-      setTimeout(() => {
-        connectWebSocket();
-      }, 1000);
-    };
-  };
-
-  const connectWebSocket = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log('WebSocket already connected');
-      return;
-    }
-
-    const newWs = new WebSocket(`${config.WS_BASE_URL}${config.ENDPOINTS.WS_SIGNALS}?api_key=${process.env.REACT_APP_API_KEY}`);
-    attachHandlers(newWs);
-    wsRef.current = newWs;
-  };
+  // Removed WebSocket code - using HTTP polling instead
 
   useEffect(() => {
-    connectWebSocket();
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
+    fetchOpportunities();
+    const interval = setInterval(fetchOpportunities, 10000); // Poll every 10 seconds
+    return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (wsConnected) {
-      console.log('WebSocket connected, ready to receive data');
-    }
-  }, [wsConnected]);
 
   const fetchOpportunities = async () => {
     try {
       setLoading(true);
       const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.OPPORTUNITIES}`);
-      setOpportunities(response.data.data);
+      
+      // Convert opportunities object to array if needed
+      const opportunitiesData = response.data.data || {};
+      const opportunitiesArray = Array.isArray(opportunitiesData) 
+        ? opportunitiesData 
+        : Object.values(opportunitiesData);
+      
+      setOpportunities(opportunitiesArray);
       setError(null);
     } catch (err) {
       setError('Failed to fetch opportunities');

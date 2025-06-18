@@ -2,7 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { WebSocketProvider } from './contexts/WebSocketContext';
+// import { WebSocketProvider } from './contexts/WebSocketContext';  // Disabled WebSocket
 import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import Signals from './pages/Signals';
@@ -37,17 +37,15 @@ function App() {
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <WebSocketProvider>
-        <Router>
-          <Navbar />
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/signals" element={<Signals />} />
-            <Route path="/opportunities" element={<Opportunities />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </Router>
-      </WebSocketProvider>
+      <Router>
+        <Navbar />
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/signals" element={<Signals />} />
+          <Route path="/opportunities" element={<Opportunities />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </Router>
     </ThemeProvider>
   );
 }

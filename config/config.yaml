@@ -97,6 +97,7 @@ logging:
   file: "logs/trading_bot.log"
 
 proxy:
+  USE_PROXY: ${USE_PROXY}
   host: ${PROXY_HOST}
   port: ${PROXY_PORT}
   username: ${PROXY_USER}

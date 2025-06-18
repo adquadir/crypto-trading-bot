@@ -181,13 +181,23 @@ class ExchangeClient:
         
         # Set up proxy URL for aiohttp
         self.proxy_url = None
-        if self.config.get('USE_PROXY', False):
+        # Check for proxy configuration in the proxy section or from environment
+        use_proxy = (
+            self.config.get('proxy', {}).get('USE_PROXY', False) or 
+            os.getenv('USE_PROXY', 'false').lower() == 'true'
+        )
+        
+        if use_proxy:
             if self.proxy_host and self.proxy_port:
                 self.proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
                 if self.proxy_user and self.proxy_pass:
                     self.proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
                 logger.info(f"Proxy configured: {self.proxy_host}:{self.proxy_port}")
                 logger.info(f"Full proxy URL: {self.proxy_url}")
+            else:
+                logger.warning("USE_PROXY is enabled but proxy host or port not configured")
+        else:
+            logger.info("Proxy not enabled")
         
         # API credentials
         self.api_key = os.getenv('BINANCE_API_KEY')
@@ -238,31 +248,30 @@ class ExchangeClient:
     async def _init_client(self):
         """Initialize the Binance client with proper configuration."""
         try:
-            # Initialize Binance client
-            self.client = Client(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                testnet=self.testnet
-            )
-            
-            # Initialize futures client
-            self.futures_client = Client(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                testnet=self.testnet
-            )
-            
-            # Set up proxy if enabled
+            # Prepare requests parameters for proxy configuration
+            requests_params = {}
             if self.proxy_url:
-                self.client.proxies = {
-                    'http': self.proxy_url,
-                    'https': self.proxy_url
-                }
-                self.futures_client.proxies = {
+                requests_params['proxies'] = {
                     'http': self.proxy_url,
                     'https': self.proxy_url
                 }
                 logger.info(f"Proxy configured for Binance clients: {self.proxy_url}")
+            
+            # Initialize Binance client with proxy configuration
+            self.client = Client(
+                api_key=self.api_key,
+                api_secret=self.api_secret,
+                testnet=self.testnet,
+                requests_params=requests_params
+            )
+            
+            # Initialize futures client with proxy configuration
+            self.futures_client = Client(
+                api_key=self.api_key,
+                api_secret=self.api_secret,
+                testnet=self.testnet,
+                requests_params=requests_params
+            )
             
             # Initialize ccxt for private endpoints
             await self._initialize_exchange()
@@ -903,18 +912,39 @@ class ExchangeClient:
             # Get 24h ticker
             ticker = await self.get_ticker_24h(symbol)
             
-            # Get recent trades
-            trades = await self.get_recent_trades(symbol)
+            # Get klines for volatility calculation
+            klines = await self.get_klines(symbol, '1m', 20)
             
-            # Get klines
-            klines = await self.get_historical_data(symbol)
+            # Calculate basic metrics from available data
+            price = float(ticker.get('lastPrice', 0)) if ticker else 0
+            volume = float(ticker.get('volume', 0)) if ticker else 0
+            
+            # Calculate volatility from recent klines
+            volatility = 0.0
+            if klines and len(klines) >= 2:
+                closes = [float(k[4]) for k in klines]  # Close prices
+                if len(closes) >= 2:
+                    returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+                    volatility = sum(abs(r) for r in returns) / len(returns) if returns else 0.0
+            
+            # Calculate spread from orderbook
+            spread = 0.0
+            if orderbook and orderbook.get('bids') and orderbook.get('asks'):
+                best_bid = float(orderbook['bids'][0][0]) if orderbook['bids'] else 0
+                best_ask = float(orderbook['asks'][0][0]) if orderbook['asks'] else 0
+                if best_bid > 0 and best_ask > 0:
+                    spread = (best_ask - best_bid) / best_ask * 100  # Spread as percentage
             
             # Combine all data
             market_data = {
+                'symbol': symbol,
+                'price': price,
+                'volume': volume,
+                'volatility': volatility,
+                'spread': spread,
                 'orderbook': orderbook,
                 'ticker': ticker,
-                'trades': trades,
-                'klines': klines.to_dict() if not klines.empty else {}
+                'klines': klines
             }
             
             return market_data
@@ -936,7 +966,13 @@ class ExchangeClient:
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                 }
             }
-            if self.config.get('USE_PROXY', False):
+            # Check for proxy configuration in the proxy section or from environment
+            use_proxy = (
+                self.config.get('proxy', {}).get('USE_PROXY', False) or 
+                os.getenv('USE_PROXY', 'false').lower() == 'true'
+            )
+            
+            if use_proxy:
                 proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
                 if self.proxy_user and self.proxy_pass:
                     proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"

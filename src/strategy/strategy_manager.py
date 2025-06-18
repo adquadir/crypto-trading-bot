@@ -17,13 +17,13 @@ class StrategyManager:
         self.exchange_client = exchange_client
         self.strategy_config = StrategyConfig()
         self.active_strategies: Dict[str, Any] = {}
-        self.strategy_profiles = self.strategy_config.load_strategy_profiles()
+        self.strategy_profiles = self.strategy_config.profiles
         
     async def initialize(self):
         """Async initialization hook for compatibility with bot startup."""
         try:
-            # Activate default strategies
-            default_strategies = ['scalping', 'swing']
+            # Activate default strategies that exist in the profiles
+            default_strategies = ['scalping', 'default']  # Use strategies that actually exist
             for strategy_name in default_strategies:
                 if self.activate_strategy(strategy_name):
                     logger.info(f"Activated strategy: {strategy_name}")

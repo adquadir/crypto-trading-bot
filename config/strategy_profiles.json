@@ -32,22 +32,5 @@
             "min_volatility": 0.3,
             "max_volatility": 2.0
         }
-    },
-    "swing": {
-        "name": "swing",
-        "description": "Swing trading strategy for medium-term positions",
-        "parameters": {
-            "entry_threshold": 0.05,
-            "exit_threshold": 0.03,
-            "stop_loss": 0.08,
-            "take_profit": 0.15,
-            "max_position_size": 0.2,
-            "leverage": 1.0,
-            "min_volume": 2000000.0,
-            "min_market_cap": 200000000.0,
-            "max_spread": 1.0,
-            "min_volatility": 1.0,
-            "max_volatility": 10.0
-        }
     }
 } 

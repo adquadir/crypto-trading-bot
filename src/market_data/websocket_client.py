@@ -65,13 +65,11 @@ class MarketDataWebSocket:
         try:
             ws_url = self._get_ws_url(symbol)
             
-            # Configure proxy
-            proxy_url = None
+            # Note: websockets library doesn't support proxy directly
+            # For WebSocket proxy support, we would need to use a different library or approach
             if self.proxy['host'] and self.proxy['port']:
-                proxy_url = f"http://{self.proxy['host']}:{self.proxy['port']}"
-                if self.proxy['username'] and self.proxy['password']:
-                    proxy_url = f"http://{self.proxy['username']}:{self.proxy['password']}@{self.proxy['host']}:{self.proxy['port']}"
                 logger.info(f"WebSocket proxy configured: {self.proxy['host']}:{self.proxy['port']}")
+                logger.warning("WebSocket proxy support requires additional configuration - continuing without proxy for WebSockets")
             
             # Create headers
             headers = {
@@ -81,11 +79,10 @@ class MarketDataWebSocket:
             if api_key:
                 headers['X-MBX-APIKEY'] = api_key
             
-            # Connect to WebSocket
+            # Connect to WebSocket without proxy (for now)
             async with websockets.connect(
                 ws_url,
-                extra_headers=headers,
-                proxy=proxy_url
+                extra_headers=headers
             ) as websocket:
                 self.connections[symbol] = websocket
                 logger.info(f"WebSocket connection established for {symbol}")
@@ -117,9 +114,11 @@ class MarketDataWebSocket:
                 
             self.running = True
             
-            # Connect to each symbol in parallel
-            tasks = [self._connect_symbol(symbol) for symbol in self.symbols]
-            await asyncio.gather(*tasks)
+            # Start WebSocket connections as background tasks instead of waiting for them
+            for symbol in self.symbols:
+                task = asyncio.create_task(self._connect_symbol(symbol))
+                # Don't await the task as it's an infinite loop
+                logger.info(f"Started WebSocket connection task for {symbol}")
             
             logger.info(f"WebSocket connections initialized for symbols: {self.symbols}")
             
