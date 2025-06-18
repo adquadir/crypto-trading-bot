@@ -19,7 +19,7 @@ trading:
   max_spread: ${MAX_SPREAD}
   min_volatility: ${MIN_VOLATILITY}
   max_volatility: ${MAX_VOLATILITY}
-  scalping_mode: false
+  scalping_mode: true
   risk_per_trade: ${RISK_PER_TRADE}
 
 strategy:

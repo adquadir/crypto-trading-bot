@@ -191,21 +191,14 @@ class ExchangeClient:
             if self.proxy_host and self.proxy_port:
                 proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
                 if self.proxy_auth:
-                    proxy_url = f"http://{
-                        self.proxy_user}:{
-                        self.proxy_pass}@{
-                        self.proxy_host}:{
-                        self.proxy_port}"
+                    proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
                 
                 self.proxy_config = {
                     'http': proxy_url,
                     'https': proxy_url
                 }
                 self.proxies = self.proxy_config
-                logger.info(
-                    f"Proxy configured: {
-                        self.proxy_host}:{
-                        self.proxy_port}")
+                logger.info(f"Proxy configured: {self.proxy_host}:{self.proxy_port}")
             else:
                 logger.warning("Proxy enabled but host or port not configured")
                 self.proxies = None
@@ -268,21 +261,14 @@ class ExchangeClient:
             if self.proxy_host and self.proxy_port:
                 proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
                 if self.proxy_auth:
-                    proxy_url = f"http://{
-                        self.proxy_user}:{
-                        self.proxy_pass}@{
-                        self.proxy_host}:{
-                        self.proxy_port}"
+                    proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
                 
                 self.proxy_config = {
                     'http': proxy_url,
                     'https': proxy_url
                 }
                 self.proxies = self.proxy_config
-                logger.info(
-                    f"Proxy configured: {
-                        self.proxy_host}:{
-                        self.proxy_port}")
+                logger.info(f"Proxy configured: {self.proxy_host}:{self.proxy_port}")
             else:
                 logger.warning("Proxy enabled but host or port not configured")
                 self.proxies = None
@@ -950,12 +936,8 @@ class ExchangeClient:
             # Test proxy connection
             proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
             if self.proxy_auth:
-                proxy_url = f"http://{
-                    self.proxy_user}:{
-                    self.proxy_pass}@{
-                    self.proxy_host}:{
-                    self.proxy_port}"
-                
+                proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/v3/time",
@@ -966,9 +948,7 @@ class ExchangeClient:
                         logger.info("Proxy health check passed")
                         return True
                     else:
-                        logger.warning(
-                            f"Proxy health check failed: {
-                                response.status}")
+                        logger.warning(f"Proxy health check failed: {response.status}")
                         return False
                         
         except Exception as e:
@@ -1000,12 +980,8 @@ class ExchangeClient:
             # Test proxy connection
             proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
             if self.proxy_auth:
-                proxy_url = f"http://{
-                    self.proxy_user}:{
-                    self.proxy_pass}@{
-                    self.proxy_host}:{
-                    self.proxy_port}"
-                
+                proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.base_url}/api/v3/time",
@@ -1016,9 +992,7 @@ class ExchangeClient:
                         logger.info("Proxy connection test successful")
                         return True
                     else:
-                        logger.warning(
-                            f"Proxy connection test failed: {
-                                response.status}")
+                        logger.warning(f"Proxy connection test failed: {response.status}")
                         return False
                         
         except Exception as e:

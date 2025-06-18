@@ -491,12 +491,7 @@ class SymbolDiscovery:
         logger.info(f"max_funding_rate: {self.max_funding_rate}")
         logger.info(f"min_open_interest: {self.min_open_interest}")
         logger.info(f"max_symbols: {self.max_symbols}")
-        logger.info(f"cache_ttl: {self.cache_ttl} seconds")
-        logger.info(
-    f"scalping_mode: {
-        self.config.get(
-            'scalping_mode',
-             False)}")
+        logger.info(f"scalping_mode: {self.config.get('scalping_mode', False)}")
         
         # Cache configuration
         self.cache_dir = Path('cache/signals')
