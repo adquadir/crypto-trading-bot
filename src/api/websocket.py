@@ -68,9 +68,13 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # Initialize components
         exchange_client = ExchangeClient()
+        await exchange_client.initialize()  # Initialize exchange client
+        
         strategy_manager = StrategyManager(exchange_client)
         risk_manager = RiskManager(exchange_client)
         opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager)
+        await opportunity_manager.initialize()  # Initialize opportunity manager
+        
         market_data_ws = MarketDataWebSocket()
         connection_manager = ConnectionManager()
 
@@ -78,19 +82,22 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info("WebSocket connection established")
         try:
             while True:
-                # Send formatted opportunities to the client
-                opportunities = await opportunity_manager.get_opportunities()
+                # Scan and get formatted opportunities to the client
+                await opportunity_manager.scan_opportunities()
+                opportunities = opportunity_manager.get_opportunities()
                 if opportunities:
                     formatted_opportunities = [
                         {
-                            'symbol': opp['symbol'],
-                            'side': opp['side'],
-                            'entry_price': opp['entry_price'],
-                            'stop_loss': opp['stop_loss'],
-                            'take_profit': opp['take_profit'],
-                            'confidence': opp['confidence']
+                            'symbol': opp.get('symbol'),
+                            'strategy': opp.get('strategy'),
+                            'timestamp': opp.get('timestamp'),
+                            'price': opp.get('price'),
+                            'volume': opp.get('volume'),
+                            'volatility': opp.get('volatility'),
+                            'spread': opp.get('spread'),
+                            'score': opp.get('score')
                         }
-                        for opp in opportunities
+                        for opp in opportunities.values()
                     ]
                     await websocket.send_json(formatted_opportunities)
                 await asyncio.sleep(1)  # Send updates every second

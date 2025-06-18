@@ -12,16 +12,25 @@ logger = logging.getLogger(__name__)
 class StrategyManager:
     """Manages trading strategies and their configurations."""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, exchange_client: Any):
         """Initialize the strategy manager."""
-        self.config = config
+        self.exchange_client = exchange_client
         self.strategy_config = StrategyConfig()
         self.active_strategies: Dict[str, Any] = {}
         self.strategy_profiles = self.strategy_config.load_strategy_profiles()
         
     async def initialize(self):
         """Async initialization hook for compatibility with bot startup."""
-        pass
+        try:
+            # Activate default strategies
+            default_strategies = ['scalping', 'swing']
+            for strategy_name in default_strategies:
+                if self.activate_strategy(strategy_name):
+                    logger.info(f"Activated strategy: {strategy_name}")
+                else:
+                    logger.warning(f"Failed to activate strategy: {strategy_name}")
+        except Exception as e:
+            logger.error(f"Error initializing strategy manager: {e}")
         
     def get_strategy_profile(self, strategy_name: str) -> Optional[Dict[str, Any]]:
         """Get a strategy profile by name."""
