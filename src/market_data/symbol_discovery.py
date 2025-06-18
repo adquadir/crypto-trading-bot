@@ -591,10 +591,9 @@ class SymbolDiscovery:
             if discovery_mode == 'static':
                 # Use symbols from configuration
                 symbols = os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
-                logger.info(
-    f"Using {
-        len(symbols)} static symbols from configuration: {
-            ', '.join(symbols)}")
+                logger.info(f"Retrieved {len(symbols)} trading symbols from exchange")
+                logger.info(f"Using {len(symbols)} static symbols from configuration: {', '.join(symbols)}")
+                logger.info(f"Found {len(symbols)} symbols matching criteria")
                 return symbols
             else:
                 # Dynamic discovery from exchange
@@ -609,11 +608,8 @@ class SymbolDiscovery:
                             f"Number of symbols in response: {len(exchange_info['symbols'])}")
                         if exchange_info['symbols']:
                             sample_symbol = exchange_info['symbols'][0]
-                            logger.debug(
-    f"Sample symbol structure: {
-        sample_symbol.keys()}")
-                            logger.debug(
-    f"Sample symbol data: {sample_symbol}")
+                            logger.debug(f"Sample symbol structure: {sample_symbol.keys()}")
+                            logger.debug(f"Sample symbol data: {sample_symbol}")
                 except Exception as e:
                     logger.error(f"Failed to fetch exchange info: {e}")
                     raise
@@ -622,79 +618,55 @@ class SymbolDiscovery:
                 for symbol in exchange_info.get('symbols', []):
                     try:
                         # Add debug logging for symbol filtering
-                        logger.debug(
-    f"Processing symbol: {
-        symbol.get('symbol')} - Status: {
-            symbol.get('status')} - ContractType: {
-                symbol.get('contractType')}")
+                        logger.debug(f"Processing symbol: {symbol.get('symbol')} - Status: {symbol.get('status')} - ContractType: {symbol.get('contractType')}")
                         if (symbol.get('status') == 'TRADING' and
                             symbol.get('contractType') == 'PERPETUAL' and
                             symbol.get('symbol', '').endswith('USDT')):
                             futures_symbols.append(symbol['symbol'])
-                            logger.debug(
-    f"Added symbol {
-        symbol['symbol']} to futures symbols")
+                            logger.debug(f"Added symbol {symbol['symbol']} to futures symbols")
                     except Exception as e:
-                        logger.warning(
-    f"Error processing symbol {
-        symbol.get(
-            'symbol',
-             'UNKNOWN')}: {e}")
+                        logger.warning(f"Error processing symbol {symbol.get('symbol', 'UNKNOWN')}: {e}")
                         continue
 
-                logger.debug(
-    f"Initial perpetual trading symbols found: {
-        len(futures_symbols)}")
+                logger.debug(f"Initial perpetual trading symbols found: {len(futures_symbols)}")
                 if futures_symbols:
-                    logger.debug(
-                        f"First 5 symbols: {', '.join(futures_symbols[:5])}")
+                    logger.debug(f"First 5 symbols: {', '.join(futures_symbols[:5])}")
                 
                 # Limit the number of symbols to process
                 MAX_SYMBOLS = 20  # Process only top 20 symbols
                 if len(futures_symbols) > MAX_SYMBOLS:
-                    logger.info(
-    f"Limiting symbol processing to top {MAX_SYMBOLS} symbols")
+                    logger.info(f"Limiting symbol processing to top {MAX_SYMBOLS} symbols")
                     futures_symbols = futures_symbols[:MAX_SYMBOLS]
                 
                 # Apply filters
                 filtered_symbols = []
                 for symbol in futures_symbols:
-                    logger.debug(
-    f"Processing symbol for advanced filtering: {symbol}")
+                    logger.debug(f"Processing symbol for advanced filtering: {symbol}")
                     try:
                         market_data = await self.get_market_data(symbol)
                         if market_data:
                             logger.debug(f"Market data fetched for {symbol}")
                             if self._apply_advanced_filters(market_data):
-                                logger.debug(
-    f"Symbol {symbol} passed advanced filters")
+                                logger.debug(f"Symbol {symbol} passed advanced filters")
                                 filtered_symbols.append(symbol)
                             else:
-                                logger.debug(
-    f"Symbol {symbol} failed advanced filters")
+                                logger.debug(f"Symbol {symbol} failed advanced filters")
                         else:
-                            logger.debug(
-    f"Failed to fetch market data for {symbol}")
+                            logger.debug(f"Failed to fetch market data for {symbol}")
                     except Exception as e:
                         logger.error(f"Error processing {symbol}: {e}")
                         continue
                 
-                logger.info(
-    f"Discovered {
-        len(filtered_symbols)} trading pairs after filtering")
+                logger.info(f"Discovered {len(filtered_symbols)} trading pairs after filtering")
                 if filtered_symbols:
-                    logger.debug(
-    f"Filtered symbols: {
-        ', '.join(filtered_symbols)}")
-                return filtered_symbols
+                    logger.debug(f"Filtered symbols: {', '.join(filtered_symbols)}")
+                    return filtered_symbols
                 
         except Exception as e:
             logger.error(f"Error discovering symbols: {e}")
             # Fallback to static symbols on error
             symbols = os.getenv('TRADING_SYMBOLS', 'BTCUSDT').split(',')
-            logger.warning(
-    f"Falling back to {
-        len(symbols)} static symbols due to error")
+            logger.warning(f"Falling back to {len(symbols)} static symbols due to error")
             return symbols
             
     def _calculate_spread(self, orderbook: Dict) -> float:
