@@ -120,12 +120,12 @@ A sophisticated cryptocurrency trading bot with a modern web interface for monit
 ## Quick Start
 
 ### 1. Installation
-```bash
+   ```bash
 git clone https://github.com/yourusername/crypto-trading-bot.git
 cd crypto-trading-bot
 
 # Backend dependencies
-pip install -r requirements.txt
+   pip install -r requirements.txt
 
 # Frontend dependencies
 cd frontend && npm install

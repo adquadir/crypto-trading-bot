@@ -50,27 +50,15 @@ kill_port() {
 fix_python_imports() {
   echo "🔧 Fixing Python import conflicts..."
   
-  # Fix the name conflict between routes.py file and routes/ directory
-  # Rename routes.py to base_routes.py to avoid confusion
-  if [ -f "$PROJECT_ROOT/src/api/routes.py" ]; then
-    echo "📁 Renaming routes.py to base_routes.py to avoid import conflicts..."
-    mv "$PROJECT_ROOT/src/api/routes.py" "$PROJECT_ROOT/src/api/base_routes.py"
-  fi
+  # The import conflicts have been resolved in the repo by renaming routes/ to trading/
+  # Just need to fix any old import statements that might exist
+  echo "🔄 Fixing imports in main.py..."
   
-  echo "🔄 Fixing imports in main.py and api/main.py..."
-  
-  # Fix bot main.py to import from renamed file
-  sed -i 's|from src.api import routes|from src.api.base_routes import router as api_router|g' "$PROJECT_ROOT/src/main.py"
-  sed -i 's|from src.api.routes import router as api_router|from src.api.base_routes import router as api_router|g' "$PROJECT_ROOT/src/main.py"
+  # Fix bot main.py imports
+  sed -i 's|from src.api import routes|from src.api.routes import router as api_router|g' "$PROJECT_ROOT/src/main.py"
   sed -i 's|router = routes.router|router = api_router|g' "$PROJECT_ROOT/src/main.py"
   
-  # Fix API main.py to import from renamed file
-  sed -i 's|from src.api.routes import router as base_router, set_components|from src.api.base_routes import router as base_router, set_components|g' "$PROJECT_ROOT/src/api/main.py"
-  
-  # Make sure the routes directory has proper __init__.py
-  if [ ! -f "$PROJECT_ROOT/src/api/routes/__init__.py" ]; then
-    echo "# Trading routes package" > "$PROJECT_ROOT/src/api/routes/__init__.py"
-  fi
+  echo "✅ Import conflicts resolved"
 }
 
 # --------------------------
