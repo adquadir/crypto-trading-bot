@@ -25,7 +25,9 @@ import {
   ListItemText,
   Badge,
   Switch,
-  FormControlLabel
+  FormControlLabel,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
@@ -36,6 +38,9 @@ import SignalChart from '../components/SignalChart';
 import DataFreshnessPanel from '../components/DataFreshnessPanel';
 
 const Signals = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -368,17 +373,32 @@ const Signals = () => {
     } = signal;
 
     return (
-      <Card key={symbol} sx={{ height: '100%' }}>
+      <Card 
+        key={symbol} 
+        sx={{ 
+          height: '100%',
+          maxWidth: '100%',
+          overflow: 'hidden'
+        }}
+      >
         <CardHeader
           title={
-            <Box display="flex" alignItems="center" gap={1}>
-              <Typography variant="h6" component="span">
+            <Box display="flex" alignItems="center" gap={1} sx={{ flexWrap: 'wrap' }}>
+              <Typography 
+                variant="h6" 
+                component="span"
+                sx={{ 
+                  fontSize: { xs: '1rem', sm: '1.25rem' },
+                  fontWeight: 'bold'
+                }}
+              >
                 {symbol}
               </Typography>
               <Chip
                 label={signal_type}
                 color={signal_type === 'LONG' ? 'success' : 'error'}
                 size="small"
+                sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
               />
               {signal.is_stable_signal && (
                 <Chip
@@ -386,6 +406,7 @@ const Signals = () => {
                   color="info"
                   size="small"
                   variant="outlined"
+                  sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}
                 />
               )}
               {signal.invalidation_reason && (
@@ -394,73 +415,176 @@ const Signals = () => {
                   color="warning"
                   size="small"
                   variant="outlined"
+                  sx={{ fontSize: { xs: '0.6rem', sm: '0.7rem' } }}
                 />
               )}
             </Box>
           }
           subheader={
             <Box>
-              <Typography variant="body2" color="text.secondary">
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}
+              >
                 {strategy} • {regime}
               </Typography>
               {signal.invalidation_reason && (
-                <Typography variant="caption" color="warning.main" sx={{ fontStyle: 'italic' }}>
+                <Typography 
+                  variant="caption" 
+                  color="warning.main" 
+                  sx={{ 
+                    fontStyle: 'italic',
+                    fontSize: { xs: '0.65rem', sm: '0.75rem' }
+                  }}
+                >
                   ⚠️ {signal.invalidation_reason}
                 </Typography>
               )}
               {signal.signal_timestamp && (
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                <Typography 
+                  variant="caption" 
+                  color="text.secondary" 
+                  sx={{ 
+                    display: 'block',
+                    fontSize: { xs: '0.65rem', sm: '0.75rem' }
+                  }}
+                >
                   Signal age: {Math.round((Date.now() - signal.signal_timestamp) / 1000 / 60)}m
                 </Typography>
               )}
             </Box>
           }
+          sx={{ 
+            pb: { xs: 1, sm: 2 },
+            '& .MuiCardHeader-content': {
+              overflow: 'hidden'
+            }
+          }}
         />
-        <CardContent>
-          <Grid container spacing={2} mb={2}>
+        <CardContent sx={{ pt: 0, px: { xs: 1.5, sm: 2 }, pb: { xs: 1.5, sm: 2 } }}>
+          <Grid container spacing={{ xs: 1, sm: 2 }} mb={{ xs: 1.5, sm: 2 }}>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Entry Price
                 </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: { xs: '0.8rem', sm: '1rem' }
+                  }}
+                >
                   {formatPrice(entry_price)}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Stop Loss
                 </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: { xs: '0.8rem', sm: '1rem' }
+                  }}
+                >
                   {formatPrice(stop_loss)}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Take Profit
                 </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: { xs: '0.8rem', sm: '1rem' }
+                  }}
+                >
                   {formatPrice(take_profit)}
                 </Typography>
               </Box>
             </Grid>
           </Grid>
 
-          <Grid container spacing={2} mb={2}>
+          <Grid container spacing={{ xs: 1, sm: 2 }} mb={{ xs: 1.5, sm: 2 }}>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Confidence
                 </Typography>
                 <Typography 
                   variant="h6" 
                   sx={{ 
                     fontWeight: 'bold', 
-                    fontSize: '1rem',
+                    fontSize: { xs: '0.8rem', sm: '1rem' },
                     color: confidence > 0.7 ? 'success.main' : confidence > 0.5 ? 'warning.main' : 'error.main'
                   }}
                 >
@@ -469,15 +593,30 @@ const Signals = () => {
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Risk/Reward
                 </Typography>
                 <Typography 
                   variant="h6" 
                   sx={{ 
                     fontWeight: 'bold', 
-                    fontSize: '1rem',
+                    fontSize: { xs: '0.8rem', sm: '1rem' },
                     color: signal.risk_reward > 2 ? 'success.main' : 'inherit'
                   }}
                 >
@@ -486,11 +625,32 @@ const Signals = () => {
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Leverage
                 </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: { xs: '0.8rem', sm: '1rem' }
+                  }}
+                >
                   {signal.recommended_leverage?.toFixed(1) || '1.0'}x
                 </Typography>
               </Box>
@@ -502,9 +662,9 @@ const Signals = () => {
             sx={{ 
               backgroundColor: 'primary.main', 
               color: 'primary.contrastText', 
-              p: 2.5, 
+              p: { xs: 1.5, sm: 2.5 }, 
               borderRadius: 2, 
-              mb: 2,
+              mb: { xs: 1.5, sm: 2 },
               border: '1px solid',
               borderColor: 'primary.dark',
               boxShadow: 2
@@ -513,22 +673,27 @@ const Signals = () => {
             <Typography 
               variant="h6" 
               sx={{ 
-                mb: 2, 
+                mb: { xs: 1.5, sm: 2 }, 
                 textAlign: 'center',
                 fontWeight: 'bold',
-                fontSize: '1.1rem'
+                fontSize: { xs: '0.9rem', sm: '1.1rem' }
               }}
             >
               💰 $100 Investment with {signal.recommended_leverage?.toFixed(1) || '1.0'}x Leverage
             </Typography>
-            <Grid container spacing={2} sx={{ textAlign: 'center' }}>
+            <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ textAlign: 'center' }}>
               <Grid item xs={4}>
-                <Box sx={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Box sx={{ 
+                  minHeight: { xs: '50px', sm: '60px' }, 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  justifyContent: 'center' 
+                }}>
                   <Typography 
                     variant="body2" 
                     sx={{ 
                       opacity: 0.9, 
-                      fontSize: '0.75rem',
+                      fontSize: { xs: '0.6rem', sm: '0.75rem' },
                       textTransform: 'uppercase',
                       letterSpacing: '0.5px',
                       mb: 0.5
@@ -540,7 +705,7 @@ const Signals = () => {
                     variant="h5" 
                     sx={{ 
                       fontWeight: 'bold',
-                      fontSize: '1.25rem',
+                      fontSize: { xs: '1rem', sm: '1.25rem' },
                       lineHeight: 1.2
                     }}
                   >
@@ -549,12 +714,17 @@ const Signals = () => {
                 </Box>
               </Grid>
               <Grid item xs={4}>
-                <Box sx={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Box sx={{ 
+                  minHeight: { xs: '50px', sm: '60px' }, 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  justifyContent: 'center' 
+                }}>
                   <Typography 
                     variant="body2" 
                     sx={{ 
                       opacity: 0.9, 
-                      fontSize: '0.75rem',
+                      fontSize: { xs: '0.6rem', sm: '0.75rem' },
                       textTransform: 'uppercase',
                       letterSpacing: '0.5px',
                       mb: 0.5
@@ -567,7 +737,7 @@ const Signals = () => {
                     sx={{ 
                       color: 'success.light',
                       fontWeight: 'bold',
-                      fontSize: '1.25rem',
+                      fontSize: { xs: '1rem', sm: '1.25rem' },
                       lineHeight: 1.2
                     }}
                   >
@@ -576,12 +746,17 @@ const Signals = () => {
                 </Box>
               </Grid>
               <Grid item xs={4}>
-                <Box sx={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Box sx={{ 
+                  minHeight: { xs: '50px', sm: '60px' }, 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  justifyContent: 'center' 
+                }}>
                   <Typography 
                     variant="body2" 
                     sx={{ 
                       opacity: 0.9, 
-                      fontSize: '0.75rem',
+                      fontSize: { xs: '0.6rem', sm: '0.75rem' },
                       textTransform: 'uppercase',
                       letterSpacing: '0.5px',
                       mb: 0.5
@@ -594,7 +769,7 @@ const Signals = () => {
                     sx={{ 
                       color: 'success.light',
                       fontWeight: 'bold',
-                      fontSize: '1.25rem',
+                      fontSize: { xs: '1rem', sm: '1.25rem' },
                       lineHeight: 1.2
                     }}
                   >
@@ -605,73 +780,201 @@ const Signals = () => {
             </Grid>
           </Box>
 
-          <Grid container spacing={2} mb={2}>
+          <Grid container spacing={{ xs: 1, sm: 2 }} mb={{ xs: 1.5, sm: 2 }}>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Position Size
                 </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: { xs: '0.8rem', sm: '1rem' }
+                  }}
+                >
                   {formatPrice(signal.notional_value)}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Expected Profit
                 </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem', color: 'success.main' }}>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: { xs: '0.8rem', sm: '1rem' }, 
+                    color: 'success.main' 
+                  }}
+                >
                   {formatPrice(signal.expected_profit)}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '40px', sm: '50px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.6rem', sm: '0.75rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Expected Return
                 </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem', color: 'success.main' }}>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: { xs: '0.8rem', sm: '1rem' }, 
+                    color: 'success.main' 
+                  }}
+                >
                   {signal.expected_return ? (signal.expected_return * 100).toFixed(1) + '%' : 'N/A'}
                 </Typography>
               </Box>
             </Grid>
           </Grid>
 
-          <Grid container spacing={2} mb={2}>
+          <Grid container spacing={{ xs: 1, sm: 2 }} mb={{ xs: 1.5, sm: 2 }}>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '45px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '35px', sm: '45px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.55rem', sm: '0.7rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Volume
                 </Typography>
-                <Typography variant="body1" sx={{ fontWeight: 'medium', fontSize: '0.9rem' }}>
+                <Typography 
+                  variant="body1" 
+                  sx={{ 
+                    fontWeight: 'medium', 
+                    fontSize: { xs: '0.75rem', sm: '0.9rem' }
+                  }}
+                >
                   {signal.volume ? (signal.volume / 1000000).toFixed(2) + 'M' : 'N/A'}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '45px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '35px', sm: '45px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.55rem', sm: '0.7rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Volatility
                 </Typography>
-                <Typography variant="body1" sx={{ fontWeight: 'medium', fontSize: '0.9rem' }}>
+                <Typography 
+                  variant="body1" 
+                  sx={{ 
+                    fontWeight: 'medium', 
+                    fontSize: { xs: '0.75rem', sm: '0.9rem' }
+                  }}
+                >
                   {signal.volatility ? (signal.volatility * 100).toFixed(3) + '%' : 'N/A'}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box sx={{ textAlign: 'center', minHeight: '45px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+              <Box sx={{ 
+                textAlign: 'center', 
+                minHeight: { xs: '35px', sm: '45px' }, 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
+                <Typography 
+                  color="textSecondary" 
+                  variant="body2" 
+                  sx={{ 
+                    fontSize: { xs: '0.55rem', sm: '0.7rem' }, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.5px', 
+                    mb: 0.5 
+                  }}
+                >
                   Spread
                 </Typography>
-                <Typography variant="body1" sx={{ fontWeight: 'medium', fontSize: '0.9rem' }}>
+                <Typography 
+                  variant="body1" 
+                  sx={{ 
+                    fontWeight: 'medium', 
+                    fontSize: { xs: '0.75rem', sm: '0.9rem' }
+                  }}
+                >
                   {signal.spread ? (signal.spread * 100).toFixed(3) + '%' : 'N/A'}
                 </Typography>
               </Box>
             </Grid>
           </Grid>
 
-          <Divider sx={{ my: 2 }} />
+          <Divider sx={{ my: { xs: 1.5, sm: 2 } }} />
           
           <Box 
             display="flex" 
@@ -679,14 +982,14 @@ const Signals = () => {
             alignItems="center"
             sx={{ 
               flexDirection: { xs: 'column', sm: 'row' },
-              gap: { xs: 2, sm: 0 }
+              gap: { xs: 1.5, sm: 0 }
             }}
           >
             <Typography 
               variant="caption" 
               color="text.secondary"
               sx={{ 
-                fontSize: '0.75rem',
+                fontSize: { xs: '0.65rem', sm: '0.75rem' },
                 textAlign: { xs: 'center', sm: 'left' }
               }}
             >
@@ -695,15 +998,16 @@ const Signals = () => {
             <Button
               variant="contained"
               color={signal_type === 'LONG' ? 'success' : 'error'}
-              size="medium"
+              size={isMobile ? 'small' : 'medium'}
               startIcon={signal_type === 'LONG' ? <TrendingUpIcon /> : <TrendingDownIcon />}
               onClick={() => executeManualTrade(signal)}
               sx={{ 
                 fontWeight: 'bold',
-                px: 3,
-                py: 1,
+                px: { xs: 2, sm: 3 },
+                py: { xs: 0.5, sm: 1 },
                 borderRadius: 2,
                 boxShadow: 2,
+                fontSize: { xs: '0.75rem', sm: '0.875rem' },
                 '&:hover': {
                   boxShadow: 3
                 }
@@ -726,33 +1030,73 @@ const Signals = () => {
   }
 
   return (
-    <Box p={3}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">
+    <Box sx={{ 
+      p: { xs: 1, sm: 2, md: 3 },
+      maxWidth: '100vw',
+      overflow: 'hidden'
+    }}>
+      <Box 
+        display="flex" 
+        justifyContent="space-between" 
+        alignItems="center" 
+        mb={{ xs: 2, sm: 3 }}
+        sx={{
+          flexDirection: { xs: 'column', sm: 'row' },
+          gap: { xs: 1, sm: 0 }
+        }}
+      >
+        <Typography 
+          variant="h4" 
+          sx={{ 
+            fontSize: { xs: '1.5rem', sm: '2rem', md: '2.125rem' },
+            mb: { xs: 1, sm: 0 }
+          }}
+        >
           Trading Signals
         </Typography>
-        <Box display="flex" alignItems="center" gap={2}>
+        <Box 
+          display="flex" 
+          alignItems="center" 
+          gap={{ xs: 1, sm: 2 }}
+          sx={{
+            flexDirection: { xs: 'column', sm: 'row' },
+            width: { xs: '100%', sm: 'auto' }
+          }}
+        >
           {/* Trading Mode Selector */}
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>Trading Mode</InputLabel>
+          <FormControl 
+            size="small" 
+            sx={{ 
+              minWidth: { xs: '100%', sm: 140 },
+              maxWidth: { xs: '100%', sm: 200 }
+            }}
+          >
+            <InputLabel sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
+              Trading Mode
+            </InputLabel>
             <Select
               value={tradingMode}
               label="Trading Mode"
               onChange={(e) => changeTradingMode(e.target.value)}
               disabled={loading}
+              sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}
             >
               <MenuItem value="stable">
                 <Box>
-                  <Typography variant="body2" fontWeight="bold">Stable</Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                    Stable
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                     Conservative ATR-based
                   </Typography>
                 </Box>
               </MenuItem>
               <MenuItem value="swing_trading">
                 <Box>
-                  <Typography variant="body2" fontWeight="bold">Swing Trading</Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                    Swing Trading
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                     Multi-strategy + Structure
                   </Typography>
                 </Box>
@@ -766,37 +1110,68 @@ const Signals = () => {
                 checked={autoTradingEnabled}
                 onChange={toggleAutoTrading}
                 color="success"
+                size={isMobile ? 'small' : 'medium'}
               />
             }
             label={
               <Box display="flex" alignItems="center" gap={1}>
-                <Typography variant="body2">
+                <Typography variant="body2" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                   Auto-Trading
                 </Typography>
                 <Chip
                   label={autoTradingEnabled ? 'ON' : 'OFF'}
                   color={autoTradingEnabled ? 'success' : 'default'}
                   size="small"
+                  sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
                 />
             </Box>
             }
+            sx={{ 
+              m: 0,
+              width: { xs: '100%', sm: 'auto' },
+              justifyContent: { xs: 'center', sm: 'flex-start' }
+            }}
           />
-          <Chip
-            label={`Status: ${loading && signals.length === 0 ? 'LOADING' : signals.length > 0 ? 'ACTIVE' : 'NO DATA'}`}
-            color={loading && signals.length === 0 ? 'warning' : signals.length > 0 ? 'success' : 'default'}
-          />
-          <Tooltip title="Refresh signals">
-            <IconButton onClick={fetchSignals} disabled={loading}>
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
+          
+          <Box 
+            display="flex" 
+            alignItems="center" 
+            gap={1}
+            sx={{ 
+              width: { xs: '100%', sm: 'auto' },
+              justifyContent: { xs: 'center', sm: 'flex-start' }
+            }}
+          >
+            <Chip
+              label={`Status: ${loading && signals.length === 0 ? 'LOADING' : signals.length > 0 ? 'ACTIVE' : 'NO DATA'}`}
+              color={loading && signals.length === 0 ? 'warning' : signals.length > 0 ? 'success' : 'default'}
+              size="small"
+              sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
+            />
+            <Tooltip title="Refresh signals">
+              <IconButton 
+                onClick={fetchSignals} 
+                disabled={loading}
+                size="small"
+                sx={{ p: { xs: 0.5, sm: 1 } }}
+              >
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
         </Box>
       </Box>
 
       {/* Trading Mode Info */}
       <Alert 
         severity={tradingMode === 'swing_trading' ? 'warning' : 'info'} 
-        sx={{ mb: 2 }}
+        sx={{ 
+          mb: 2,
+          fontSize: { xs: '0.75rem', sm: '0.875rem' },
+          '& .MuiAlert-message': {
+            fontSize: { xs: '0.75rem', sm: '0.875rem' }
+          }
+        }}
         icon={tradingMode === 'swing_trading' ? '🎯' : '🛡️'}
       >
         <strong>{tradingMode === 'swing_trading' ? 'SWING TRADING MODE' : 'STABLE MODE'}</strong> - {
@@ -808,7 +1183,16 @@ const Signals = () => {
 
       {/* Auto-trading status alert */}
       {autoTradingEnabled && (
-        <Alert severity="info" sx={{ mb: 2 }}>
+        <Alert 
+          severity="info" 
+          sx={{ 
+            mb: 2,
+            fontSize: { xs: '0.75rem', sm: '0.875rem' },
+            '& .MuiAlert-message': {
+              fontSize: { xs: '0.75rem', sm: '0.875rem' }
+            }
+          }}
+        >
           🤖 <strong>Auto-Trading is ENABLED</strong> - The bot will automatically execute trades based on signals. 
           You can still manually execute individual trades using the buttons below.
         </Alert>
@@ -817,9 +1201,14 @@ const Signals = () => {
       {error && (
         <Snackbar 
           open={!!error} 
-          autoHideDuration={error.includes('🔄') || error.includes('⏳') ? null : 6000} // Don't auto-hide progress messages
+          autoHideDuration={error.includes('🔄') || error.includes('⏳') ? null : 6000}
           onClose={() => setError(null)}
           anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+          sx={{
+            '& .MuiSnackbarContent-root': {
+              maxWidth: { xs: '90vw', sm: 'none' }
+            }
+          }}
         >
           <Alert 
             severity={
@@ -830,19 +1219,30 @@ const Signals = () => {
             onClose={() => setError(null)}
             action={
               !error.includes('✅') && !error.includes('🔄') && !error.includes('⏳') && (
-              <Button color="inherit" size="small" onClick={fetchSignals}>
+              <Button 
+                color="inherit" 
+                size="small" 
+                onClick={fetchSignals}
+                sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}
+              >
                 Retry
               </Button>
               )
             }
+            sx={{
+              fontSize: { xs: '0.75rem', sm: '0.875rem' },
+              '& .MuiAlert-message': {
+                fontSize: { xs: '0.75rem', sm: '0.875rem' }
+              }
+            }}
           >
             {error}
           </Alert>
         </Snackbar>
       )}
 
-      <Box mb={3}>
-        <Grid container spacing={2}>
+      <Box mb={{ xs: 2, sm: 3 }}>
+        <Grid container spacing={{ xs: 1, sm: 2 }}>
           <Grid item xs={12} md={4}>
             <TextField
               fullWidth
@@ -851,15 +1251,27 @@ const Signals = () => {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Search by symbol or strategy..."
+              size="small"
+              sx={{
+                '& .MuiInputBase-input': {
+                  fontSize: { xs: '0.8rem', sm: '0.875rem' }
+                },
+                '& .MuiInputLabel-root': {
+                  fontSize: { xs: '0.8rem', sm: '0.875rem' }
+                }
+              }}
             />
           </Grid>
           <Grid item xs={12} md={4}>
-            <FormControl fullWidth>
-              <InputLabel>Sort by</InputLabel>
+            <FormControl fullWidth size="small">
+              <InputLabel sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
+                Sort by
+              </InputLabel>
               <Select
                 value={sortBy}
                 label="Sort by"
                 onChange={(e) => handleSort(e.target.value)}
+                sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}
               >
                 <MenuItem value="timestamp">Time</MenuItem>
                 <MenuItem value="confidence">Confidence</MenuItem>
@@ -871,12 +1283,20 @@ const Signals = () => {
       </Box>
 
       {lastUpdated && (
-        <Typography variant="caption" color="textSecondary" sx={{ mb: 2, display: 'block' }}>
+        <Typography 
+          variant="caption" 
+          color="textSecondary" 
+          sx={{ 
+            mb: 2, 
+            display: 'block',
+            fontSize: { xs: '0.7rem', sm: '0.75rem' }
+          }}
+        >
           Last updated: {lastUpdated.toLocaleTimeString()}
         </Typography>
       )}
 
-      <Box mb={3}>
+      <Box mb={{ xs: 2, sm: 3 }}>
         <DataFreshnessPanel 
           lastUpdated={lastUpdated}
           signalsCount={signals.length}
@@ -886,17 +1306,30 @@ const Signals = () => {
 
       {/* Scan Progress Indicator */}
       {scanProgress && scanProgress.in_progress && (
-        <Box mb={3}>
-          <Paper sx={{ p: 2, bgcolor: 'info.light', borderLeft: '4px solid', borderColor: 'info.main' }}>
-            <Grid container spacing={2} alignItems="center">
+        <Box mb={{ xs: 2, sm: 3 }}>
+          <Paper sx={{ 
+            p: { xs: 1.5, sm: 2 }, 
+            bgcolor: 'info.light', 
+            borderLeft: '4px solid', 
+            borderColor: 'info.main' 
+          }}>
+            <Grid container spacing={{ xs: 1, sm: 2 }} alignItems="center">
               <Grid item>
-                <CircularProgress size={24} />
+                <CircularProgress size={{ xs: 20, sm: 24 }} />
               </Grid>
               <Grid item xs>
-                <Typography variant="body1" fontWeight="bold">
+                <Typography 
+                  variant="body1" 
+                  fontWeight="bold"
+                  sx={{ fontSize: { xs: '0.8rem', sm: '1rem' } }}
+                >
                   Scan in Progress
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography 
+                  variant="body2" 
+                  color="text.secondary"
+                  sx={{ fontSize: { xs: '0.7rem', sm: '0.875rem' } }}
+                >
                   {scanProgress.opportunities_found > 0 
                     ? `Found ${scanProgress.opportunities_found} opportunities so far...`
                     : 'Scanning markets for trading opportunities...'
@@ -907,7 +1340,8 @@ const Signals = () => {
                 <Chip 
                   label={scanStatus === 'scanning' ? 'Starting...' : 'Processing'} 
                   color="info" 
-                  size="small" 
+                  size="small"
+                  sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
                 />
               </Grid>
             </Grid>
@@ -915,18 +1349,25 @@ const Signals = () => {
         </Box>
       )}
 
-      <Grid container spacing={3}>
+      <Grid container spacing={{ xs: 2, sm: 3 }}>
           <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
+          <Paper sx={{ p: { xs: 1.5, sm: 2 } }}>
+            <Typography 
+              variant="h6" 
+              gutterBottom
+              sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}
+            >
               Trading Opportunities ({signals.length} found)
             </Typography>
             {signals.length === 0 ? (
-              <Typography color="textSecondary">
+              <Typography 
+                color="textSecondary"
+                sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}
+              >
                 No trading opportunities available
               </Typography>
             ) : (
-              <Grid container spacing={2}>
+              <Grid container spacing={{ xs: 1.5, sm: 2 }}>
                 {filteredAndSortedSignals.map((signal, index) => (
                   <Grid item xs={12} md={6} key={`${signal.symbol}-${index}`}>
                     <SignalCard signal={signal} />
