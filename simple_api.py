@@ -5,10 +5,11 @@ import asyncio
 import sys
 import os
 import time
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 # Add src to path
 sys.path.append('src')
@@ -29,6 +30,16 @@ opportunity_manager = None
 _background_scan_task = None
 _last_scan_start = 0
 _scan_in_progress = False
+_trading_mode = "stable"  # Default mode: "stable", "swing_trading"
+
+class ManualTradeRequest(BaseModel):
+    symbol: str
+    signal_type: str  # 'LONG' or 'SHORT'
+    entry_price: float
+    stop_loss: float
+    take_profit: float
+    confidence: float
+    strategy: str = "manual"
 
 app = FastAPI(title="Crypto Trading Bot API")
 
@@ -43,13 +54,18 @@ app.add_middleware(
 
 async def _background_scan_opportunities():
     """Background task to scan opportunities incrementally."""
-    global _scan_in_progress
+    global _scan_in_progress, _trading_mode
     
     try:
-        print("🚀 Background incremental scan started")
+        print(f"🚀 Background incremental scan started (mode: {_trading_mode})")
         _scan_in_progress = True
-        await opportunity_manager.scan_opportunities_incremental()
-        print("✅ Background incremental scan completed")
+        
+        if _trading_mode == "swing_trading":
+            await opportunity_manager.scan_opportunities_incremental_swing()
+        else:
+            await opportunity_manager.scan_opportunities_incremental()
+            
+        print(f"✅ Background incremental scan completed (mode: {_trading_mode})")
     except Exception as e:
         print(f"❌ Background scan failed: {e}")
     finally:
@@ -136,7 +152,7 @@ async def test_connection():
 @app.get("/api/v1/trading/opportunities")
 async def get_opportunities():
     """Get current trading opportunities with incremental results."""
-    global _background_scan_task, _last_scan_start, _scan_in_progress
+    global _background_scan_task, _last_scan_start, _scan_in_progress, _trading_mode
     
     if not opportunity_manager:
         return {
@@ -156,7 +172,7 @@ async def get_opportunities():
         )
         
         if should_start_new_scan:
-            print("🔄 Starting background opportunity scan...")
+            print(f"🔄 Starting background opportunity scan (mode: {_trading_mode})...")
             _last_scan_start = current_time
             _scan_in_progress = True
             
@@ -169,18 +185,19 @@ async def get_opportunities():
         # Determine status based on scan state
         if not _scan_in_progress:
             status = "complete"
-            message = f"Found {len(opportunities)} opportunities"
+            message = f"Found {len(opportunities)} opportunities using {_trading_mode} mode"
         elif len(opportunities) == 0:
             status = "scanning"
-            message = "Scanning for opportunities... Please wait"
+            message = f"Scanning for opportunities using {_trading_mode} mode... Please wait"
         else:
             status = "partial"
-            message = f"Scan in progress - showing {len(opportunities)} opportunities found so far"
+            message = f"Scan in progress ({_trading_mode} mode) - showing {len(opportunities)} opportunities found so far"
         
         return {
             "status": status,
             "data": opportunities,
             "message": message,
+            "trading_mode": _trading_mode,
             "scan_progress": {
                 "in_progress": _scan_in_progress,
                 "last_scan_start": _last_scan_start,
@@ -192,7 +209,8 @@ async def get_opportunities():
         return {
             "status": "error",
             "data": [],
-            "message": f"Error getting opportunities: {str(e)}"
+            "message": f"Error getting opportunities: {str(e)}",
+            "trading_mode": _trading_mode
         }
 
 @app.post("/api/v1/trading/scan")
@@ -233,6 +251,103 @@ async def manual_scan():
             "status": "error",
             "message": f"Scan failed: {str(e)}"
         }
+
+@app.get("/api/v1/trading/mode")
+async def get_trading_mode():
+    """Get current trading mode."""
+    global _trading_mode
+    return {
+        "status": "success",
+        "trading_mode": _trading_mode,
+        "available_modes": ["stable", "swing_trading"],
+        "mode_descriptions": {
+            "stable": "Conservative signals with ATR-based TP/SL and signal persistence",
+            "swing_trading": "Advanced multi-strategy voting with structure-based TP/SL for 5-10% moves"
+        }
+    }
+
+@app.post("/api/v1/trading/mode/{mode}")
+async def set_trading_mode(mode: str):
+    """Set trading mode and trigger new scan."""
+    global _trading_mode, _background_scan_task, _last_scan_start, _scan_in_progress
+    
+    if mode not in ["stable", "swing_trading"]:
+        return {
+            "status": "error",
+            "message": f"Invalid mode '{mode}'. Available modes: stable, swing_trading"
+        }
+    
+    if not opportunity_manager:
+        return {
+            "status": "error",
+            "message": "Opportunity manager not initialized"
+        }
+    
+    try:
+        old_mode = _trading_mode
+        _trading_mode = mode
+        
+        # Clear existing opportunities when switching modes
+        opportunity_manager.opportunities.clear()
+        
+        print(f"🔄 Trading mode changed from '{old_mode}' to '{mode}' - starting new scan...")
+        _last_scan_start = time.time()
+        _scan_in_progress = True
+        
+        # Start new scan with new mode
+        _background_scan_task = asyncio.create_task(_background_scan_opportunities())
+        
+        return {
+            "status": "success",
+            "message": f"Trading mode changed to '{mode}' and new scan started",
+            "old_mode": old_mode,
+            "new_mode": mode,
+            "scan_progress": {
+                "in_progress": _scan_in_progress,
+                "last_scan_start": _last_scan_start
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to change trading mode: {str(e)}"
+        }
+
+@app.post("/api/v1/trading/execute_manual_trade")
+async def execute_manual_trade(trade_request: ManualTradeRequest):
+    """Execute a manual trade based on signal data."""
+    try:
+        print(f"Manual trade request received: {trade_request.dict()}")
+        
+        # For now, just log the trade request since actual trading is disabled
+        # In the future, this would interface with the trading engine
+        
+        trade_data = {
+            "symbol": trade_request.symbol,
+            "signal_type": trade_request.signal_type,
+            "entry_price": trade_request.entry_price,
+            "stop_loss": trade_request.stop_loss,
+            "take_profit": trade_request.take_profit,
+            "confidence": trade_request.confidence,
+            "strategy": trade_request.strategy,
+            "status": "simulated",  # For now, all trades are simulated
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        }
+        
+        print(f"Manual trade simulated: {trade_data}")
+        
+        return {
+            "status": "success",
+            "message": f"Manual trade for {trade_request.symbol} has been simulated (actual trading disabled)",
+            "trade": trade_data
+        }
+        
+    except Exception as e:
+        print(f"Error executing manual trade: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error executing manual trade: {str(e)}"
+        )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 

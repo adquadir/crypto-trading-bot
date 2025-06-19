@@ -47,6 +47,8 @@ const Signals = () => {
   const [autoTradingEnabled, setAutoTradingEnabled] = useState(false);
   const [scanProgress, setScanProgress] = useState(null);
   const [scanStatus, setScanStatus] = useState('idle');
+  const [tradingMode, setTradingMode] = useState('stable');
+  const [modeDescriptions, setModeDescriptions] = useState({});
   const maxRetries = 3;
 
   const handleError = (error) => {
@@ -81,7 +83,11 @@ const Signals = () => {
 
   const fetchSignals = async () => {
     try {
-      setLoading(true);
+      // Only show loading state if we have no signals yet (initial load)
+      if (signals.length === 0) {
+        setLoading(true);
+      }
+      
       const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.SIGNALS}`, {
         timeout: 10000, // Increased timeout for background processing
         headers: {
@@ -89,77 +95,79 @@ const Signals = () => {
           'Content-Type': 'application/json'
         }
       });
-      
-      // Handle new response format with status and progress
-      const responseData = response.data;
-      const status = responseData.status || 'success';
-      const scanProgressData = responseData.scan_progress || null;
-      
-      // Update scan status and progress
-      setScanStatus(status);
-      setScanProgress(scanProgressData);
-      
-      // Convert opportunities object to signals array
-      const opportunitiesData = responseData.data || {};
-      const processedSignals = Object.values(opportunitiesData).map(opportunity => ({
-        symbol: opportunity.symbol,
-        signal_type: opportunity.direction || 'LONG',
-        entry_price: opportunity.entry_price || opportunity.price,
-        stop_loss: opportunity.stop_loss || opportunity.price * 0.98,
-        take_profit: opportunity.take_profit || opportunity.price * 1.04,
-        confidence: opportunity.confidence || Math.min(opportunity.score / 2, 1),
-        strategy: opportunity.strategy || opportunity.setup_type,
-        timestamp: new Date((opportunity.timestamp || Date.now()) * 1000).toISOString(),
-        regime: opportunity.market_regime || opportunity.regime || 'TRENDING',
-        price: opportunity.entry_price || opportunity.price,
-        volume: opportunity.volume,
-        volatility: opportunity.volatility,
-        spread: opportunity.spread,
-        score: opportunity.score,
+
+      if (response.data) {
+        const data = response.data;
         
-        // Institutional-grade fields
-        risk_reward: opportunity.risk_reward || 1.5,
-        recommended_leverage: opportunity.recommended_leverage || 1.0,
-        position_size: opportunity.position_size || 0,
-        notional_value: opportunity.notional_value || 0,
-        expected_profit: opportunity.expected_profit || 0,
-        expected_return: opportunity.expected_return || 0,
-        analysis_type: opportunity.analysis_type || 'basic',
-        trend_alignment: opportunity.trend_alignment || 0,
-        liquidity_score: opportunity.liquidity_score || 0,
+        // Parse the correct response format - API returns { status, data: [...] }
+        const newSignals = Array.isArray(data.data) ? data.data.map(signal => ({
+          symbol: signal.symbol,
+          signal_type: signal.direction || 'LONG',
+          entry_price: signal.entry_price || signal.entry,
+          stop_loss: signal.stop_loss,
+          take_profit: signal.take_profit,
+          confidence: signal.confidence || signal.confidence_score,
+          strategy: signal.strategy || signal.strategy_type,
+          timestamp: new Date((signal.timestamp || Date.now())).toISOString(),
+          regime: signal.market_regime || signal.regime || 'TRENDING',
+          price: signal.entry_price || signal.entry,
+          volume: signal.volume_24h || signal.volume,
+          volatility: signal.volatility,
+          spread: signal.spread,
+          score: signal.score,
+          
+          // Institutional-grade fields
+          risk_reward: signal.risk_reward || 1.5,
+          recommended_leverage: signal.recommended_leverage || signal.leverage || 1.0,
+          position_size: signal.position_size || 0,
+          notional_value: signal.notional_value || 0,
+          expected_profit: signal.expected_profit || 0,
+          expected_return: signal.expected_return || 0,
+          
+          // $100 investment specific fields
+          investment_amount_100: signal.investment_amount_100 || 100,
+          position_size_100: signal.position_size_100 || 0,
+          max_position_with_leverage_100: signal.max_position_with_leverage_100 || 0,
+          expected_profit_100: signal.expected_profit_100 || 0,
+          expected_return_100: signal.expected_return_100 || 0,
+          
+          indicators: {
+            macd: { value: 0, signal: 0 },
+            rsi: 50,
+            bb: { upper: 0, middle: 0, lower: 0 }
+          },
+          is_stable_signal: signal.is_stable_signal || false,
+          invalidation_reason: signal.invalidation_reason || null,
+          signal_timestamp: signal.signal_timestamp || null
+        })) : [];
         
-        // $100 investment specific fields
-        investment_amount_100: opportunity.investment_amount_100 || 100,
-        position_size_100: opportunity.position_size_100 || 0,
-        max_position_with_leverage_100: opportunity.max_position_with_leverage_100 || 0,
-        expected_profit_100: opportunity.expected_profit_100 || 0,
-        expected_return_100: opportunity.expected_return_100 || 0,
+        // Only update state if data has actually changed to prevent unnecessary re-renders
+        const newSignalsJson = JSON.stringify(newSignals);
+        const currentSignalsJson = JSON.stringify(signals);
         
-        indicators: {
-          macd: { value: 0, signal: 0 },
-          rsi: 50,
-          bb: { upper: 0, middle: 0, lower: 0 }
-        },
-        is_stable_signal: opportunity.is_stable_signal || false,
-        invalidation_reason: opportunity.invalidation_reason || null,
-        signal_timestamp: opportunity.signal_timestamp || null
-      }));
-      
-      setSignals(processedSignals);
-      setError(null);
-      setRetryCount(0);
-      setLastUpdated(new Date());
-      
-      // Show status message based on scan state
-      if (status === 'scanning') {
-        setError(`🔄 ${responseData.message || 'Scanning for opportunities...'}`);
-      } else if (status === 'partial') {
-        setError(`⏳ ${responseData.message || 'Scan in progress - showing partial results'}`);
-      } else if (status === 'complete') {
-        // Clear any previous status messages on completion
+        if (newSignalsJson !== currentSignalsJson) {
+          setSignals(newSignals);
+        }
+        
+        // Handle scan status properly
+        const currentStatus = data.status || 'complete';
+        setScanStatus(currentStatus);
+        
+        // Create scan progress based on status
+        const progressData = currentStatus === 'partial' || currentStatus === 'scanning' ? {
+          in_progress: true,
+          opportunities_found: newSignals.length
+        } : null;
+        
+        // Only update scan progress if it has changed
+        if (JSON.stringify(progressData) !== JSON.stringify(scanProgress)) {
+          setScanProgress(progressData);
+        }
+        
+        setLastUpdated(new Date());
         setError(null);
+        setRetryCount(0);
       }
-      
     } catch (err) {
       handleError(err);
       if (retryCount < maxRetries) {
@@ -224,31 +232,66 @@ const Signals = () => {
     }
   };
 
+  const fetchTradingMode = async () => {
+    try {
+      const response = await axios.get(`${config.API_BASE_URL}/api/v1/trading/mode`);
+      if (response.data.status === 'success') {
+        setTradingMode(response.data.trading_mode);
+        setModeDescriptions(response.data.mode_descriptions);
+      }
+    } catch (err) {
+      console.error('Error fetching trading mode:', err);
+    }
+  };
+
+  const changeTradingMode = async (newMode) => {
+    try {
+      setError(`🔄 Switching to ${newMode} mode...`);
+      
+      const response = await axios.post(`${config.API_BASE_URL}/api/v1/trading/mode/${newMode}`);
+      
+      if (response.data.status === 'success') {
+        setTradingMode(newMode);
+        setError(`✅ Switched to ${newMode} mode - ${response.data.message}`);
+        setTimeout(() => setError(null), 5000);
+        
+        // Refresh signals after mode change
+        setTimeout(() => {
+          fetchSignals();
+        }, 1000);
+      }
+    } catch (err) {
+      console.error('Error changing trading mode:', err);
+      setError(`❌ Failed to change trading mode: ${err.response?.data?.message || err.message}`);
+    }
+  };
+
   useEffect(() => {
     fetchSignals();
+    fetchTradingMode(); // Fetch current trading mode
     
-    // Use dynamic polling interval based on scan status
-    const getPollingInterval = () => {
-      if (scanProgress && scanProgress.in_progress) {
-        return 3000; // 3 seconds during active scan
-      }
-      return 10000; // 10 seconds normally
+    // Single interval with dynamic timing
+    let interval;
+    
+    const setupInterval = () => {
+      const getPollingInterval = () => {
+        if (scanProgress && scanProgress.in_progress) {
+          return 3000; // 3 seconds during active scan
+        }
+        return 10000; // 10 seconds normally
+      };
+      
+      interval = setInterval(fetchSignals, getPollingInterval());
     };
     
-    const interval = setInterval(fetchSignals, getPollingInterval());
-    
-    // Update interval when scan status changes
-    const intervalUpdater = setInterval(() => {
-      clearInterval(interval);
-      const newInterval = setInterval(fetchSignals, getPollingInterval());
-      return () => clearInterval(newInterval);
-    }, 1000);
+    setupInterval();
     
     return () => {
-      clearInterval(interval);
-      clearInterval(intervalUpdater);
+      if (interval) {
+        clearInterval(interval);
+      }
     };
-  }, [retryCount, scanProgress?.in_progress]);
+  }, [retryCount]); // Removed scanProgress dependency to prevent constant re-renders
 
   const handleSort = (field) => {
     if (sortBy === field) {
@@ -288,6 +331,25 @@ const Signals = () => {
         return 'warning';
       default:
         return 'default';
+    }
+  };
+
+  // Smart price formatting function - shows appropriate precision based on price value
+  const formatPrice = (price) => {
+    if (!price || isNaN(price)) return 'N/A';
+    
+    if (price >= 1000) {
+      return price.toFixed(2);  // $1000+ -> 2 decimals (e.g., $104,799.85)
+    } else if (price >= 100) {
+      return price.toFixed(3);  // $100-999 -> 3 decimals (e.g., $458.110)
+    } else if (price >= 10) {
+      return price.toFixed(4);  // $10-99 -> 4 decimals (e.g., $85.1300)
+    } else if (price >= 1) {
+      return price.toFixed(5);  // $1-9 -> 5 decimals (e.g., $2.16420)
+    } else if (price >= 0.1) {
+      return price.toFixed(6);  // $0.1-0.99 -> 6 decimals (e.g., $0.274140)
+    } else {
+      return price.toFixed(8);  // <$0.1 -> 8 decimals (e.g., $0.00012345)
     }
   };
 
@@ -362,7 +424,7 @@ const Signals = () => {
                   Entry Price
                 </Typography>
                 <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
-                  ${entry_price?.toFixed(2) || 'N/A'}
+                  {formatPrice(entry_price)}
                 </Typography>
               </Box>
             </Grid>
@@ -372,7 +434,7 @@ const Signals = () => {
                   Stop Loss
                 </Typography>
                 <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
-                  ${stop_loss?.toFixed(2) || 'N/A'}
+                  {formatPrice(stop_loss)}
                 </Typography>
               </Box>
             </Grid>
@@ -382,7 +444,7 @@ const Signals = () => {
                   Take Profit
                 </Typography>
                 <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
-                  ${take_profit?.toFixed(2) || 'N/A'}
+                  {formatPrice(take_profit)}
                 </Typography>
               </Box>
             </Grid>
@@ -482,7 +544,7 @@ const Signals = () => {
                       lineHeight: 1.2
                     }}
                   >
-                    ${signal.max_position_with_leverage_100?.toFixed(0) || 'N/A'}
+                    {formatPrice(signal.max_position_with_leverage_100)}
                   </Typography>
                 </Box>
               </Grid>
@@ -509,7 +571,7 @@ const Signals = () => {
                       lineHeight: 1.2
                     }}
                   >
-                    ${signal.expected_profit_100?.toFixed(2) || 'N/A'}
+                    {formatPrice(signal.expected_profit_100)}
                   </Typography>
                 </Box>
               </Grid>
@@ -550,7 +612,7 @@ const Signals = () => {
                   Position Size
                 </Typography>
                 <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
-                  ${signal.notional_value?.toFixed(0) || 'N/A'}
+                  {formatPrice(signal.notional_value)}
                 </Typography>
               </Box>
             </Grid>
@@ -560,7 +622,7 @@ const Signals = () => {
                   Expected Profit
                 </Typography>
                 <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem', color: 'success.main' }}>
-                  ${signal.expected_profit?.toFixed(0) || 'N/A'}
+                  {formatPrice(signal.expected_profit)}
                 </Typography>
               </Box>
             </Grid>
@@ -670,6 +732,34 @@ const Signals = () => {
           Trading Signals
         </Typography>
         <Box display="flex" alignItems="center" gap={2}>
+          {/* Trading Mode Selector */}
+          <FormControl size="small" sx={{ minWidth: 140 }}>
+            <InputLabel>Trading Mode</InputLabel>
+            <Select
+              value={tradingMode}
+              label="Trading Mode"
+              onChange={(e) => changeTradingMode(e.target.value)}
+              disabled={loading}
+            >
+              <MenuItem value="stable">
+                <Box>
+                  <Typography variant="body2" fontWeight="bold">Stable</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Conservative ATR-based
+                  </Typography>
+                </Box>
+              </MenuItem>
+              <MenuItem value="swing_trading">
+                <Box>
+                  <Typography variant="body2" fontWeight="bold">Swing Trading</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Multi-strategy + Structure
+                  </Typography>
+                </Box>
+              </MenuItem>
+            </Select>
+          </FormControl>
+          
           <FormControlLabel
             control={
               <Switch
@@ -692,8 +782,8 @@ const Signals = () => {
             }
           />
           <Chip
-            label={`Status: ${loading ? 'LOADING' : signals.length > 0 ? 'ACTIVE' : 'NO DATA'}`}
-            color={loading ? 'warning' : signals.length > 0 ? 'success' : 'default'}
+            label={`Status: ${loading && signals.length === 0 ? 'LOADING' : signals.length > 0 ? 'ACTIVE' : 'NO DATA'}`}
+            color={loading && signals.length === 0 ? 'warning' : signals.length > 0 ? 'success' : 'default'}
           />
           <Tooltip title="Refresh signals">
             <IconButton onClick={fetchSignals} disabled={loading}>
@@ -702,6 +792,19 @@ const Signals = () => {
           </Tooltip>
         </Box>
       </Box>
+
+      {/* Trading Mode Info */}
+      <Alert 
+        severity={tradingMode === 'swing_trading' ? 'warning' : 'info'} 
+        sx={{ mb: 2 }}
+        icon={tradingMode === 'swing_trading' ? '🎯' : '🛡️'}
+      >
+        <strong>{tradingMode === 'swing_trading' ? 'SWING TRADING MODE' : 'STABLE MODE'}</strong> - {
+          tradingMode === 'swing_trading' 
+            ? 'Advanced multi-strategy voting with structure-based TP/SL targeting 5-10% moves. Requires 2+ strategy consensus.'
+            : 'Conservative signals with ATR-based TP/SL and signal persistence. Optimized for stability.'
+        }
+      </Alert>
 
       {/* Auto-trading status alert */}
       {autoTradingEnabled && (
