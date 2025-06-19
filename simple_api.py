@@ -396,5 +396,85 @@ async def execute_manual_trade(trade_request: ManualTradeRequest):
             detail=f"Error executing manual trade: {str(e)}"
         )
 
+@app.get("/api/v1/trading/positions")
+async def get_positions():
+    """Get current trading positions."""
+    try:
+        # For now, return simulated positions data
+        # In a real implementation, this would fetch actual positions from the exchange
+        positions = [
+            {
+                "id": "pos_001",
+                "symbol": "BTCUSDT",
+                "side": "LONG",
+                "size": 0.001,
+                "entry_price": 45000.0,
+                "current_price": 45500.0,
+                "unrealized_pnl": 0.5,
+                "unrealized_pnl_percent": 1.11,
+                "margin": 45.0,
+                "leverage": 1.0,
+                "status": "open",
+                "created_at": "2025-01-19T18:00:00Z"
+            }
+        ]
+        
+        return {
+            "status": "success",
+            "data": positions,
+            "message": f"Retrieved {len(positions)} positions (simulated)",
+            "total_positions": len(positions),
+            "total_unrealized_pnl": sum(p["unrealized_pnl"] for p in positions)
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "data": [],
+            "message": f"Error getting positions: {str(e)}"
+        }
+
+@app.get("/api/v1/trading/stats")
+async def get_trading_stats():
+    """Get trading statistics and performance metrics."""
+    try:
+        # For now, return simulated stats data
+        # In a real implementation, this would calculate actual trading statistics
+        current_time = time.time()
+        
+        stats = {
+            "account_balance": 10000.0,
+            "available_balance": 9500.0,
+            "total_unrealized_pnl": 50.0,
+            "total_realized_pnl": 150.0,
+            "total_trades": 25,
+            "winning_trades": 15,
+            "losing_trades": 10,
+            "win_rate": 60.0,
+            "profit_factor": 1.8,
+            "max_drawdown": -2.5,
+            "current_drawdown": -0.5,
+            "daily_pnl": 25.0,
+            "weekly_pnl": 125.0,
+            "monthly_pnl": 450.0,
+            "trading_mode": _trading_mode,
+            "active_signals": len(opportunity_manager.get_opportunities()) if opportunity_manager else 0,
+            "last_updated": current_time
+        }
+        
+        return {
+            "status": "success",
+            "data": stats,
+            "message": "Trading statistics retrieved successfully (simulated)",
+            "timestamp": current_time
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "data": {},
+            "message": f"Error getting trading stats: {str(e)}"
+        }
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 
