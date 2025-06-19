@@ -473,7 +473,7 @@ class SymbolDiscovery:
         self.min_funding_rate = float(os.getenv('MIN_FUNDING_RATE', '-0.0001'))
         self.max_funding_rate = float(os.getenv('MAX_FUNDING_RATE', '0.0001'))
         self.min_open_interest = float(os.getenv('MIN_OPEN_INTEREST', '100000'))
-        self.max_symbols = int(os.getenv('MAX_SYMBOLS', '50'))
+        self.max_symbols = int(os.getenv('MAX_SYMBOLS', '200'))  # Increased from 50 to 200
         
         # Log the actual values being used
         logger.info("SymbolDiscovery filter parameters:")
@@ -632,11 +632,12 @@ class SymbolDiscovery:
                 if futures_symbols:
                     logger.debug(f"First 5 symbols: {', '.join(futures_symbols[:5])}")
                 
-                # Limit the number of symbols to process
-                MAX_SYMBOLS = 20  # Process only top 20 symbols
-                if len(futures_symbols) > MAX_SYMBOLS:
-                    logger.info(f"Limiting symbol processing to top {MAX_SYMBOLS} symbols")
-                    futures_symbols = futures_symbols[:MAX_SYMBOLS]
+                # Use configured max symbols limit (no arbitrary hardcoding)
+                if len(futures_symbols) > self.max_symbols:
+                    logger.info(f"Limiting symbol processing to top {self.max_symbols} symbols (from {len(futures_symbols)} available)")
+                    futures_symbols = futures_symbols[:self.max_symbols]
+                else:
+                    logger.info(f"Processing all {len(futures_symbols)} available futures symbols")
                 
                 # Apply filters
                 filtered_symbols = []

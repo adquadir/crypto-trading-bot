@@ -45,6 +45,8 @@ const Signals = () => {
   const [sortBy, setSortBy] = useState('timestamp');
   const [sortOrder, setSortOrder] = useState('desc');
   const [autoTradingEnabled, setAutoTradingEnabled] = useState(false);
+  const [scanProgress, setScanProgress] = useState(null);
+  const [scanStatus, setScanStatus] = useState('idle');
   const maxRetries = 3;
 
   const handleError = (error) => {
@@ -81,41 +83,76 @@ const Signals = () => {
     try {
       setLoading(true);
       const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.SIGNALS}`, {
-        timeout: 5000,
+        timeout: 10000, // Increased timeout for background processing
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         }
       });
       
+      // Handle new response format with status and progress
+      const responseData = response.data;
+      const status = responseData.status || 'success';
+      const scanProgressData = responseData.scan_progress || null;
+      
+      // Update scan status and progress
+      setScanStatus(status);
+      setScanProgress(scanProgressData);
+      
       // Convert opportunities object to signals array
-      const opportunitiesData = response.data.data || {};
+      const opportunitiesData = responseData.data || {};
       const processedSignals = Object.values(opportunitiesData).map(opportunity => ({
         symbol: opportunity.symbol,
-        signal_type: 'LONG', // Default to LONG for now
-        entry_price: opportunity.price,
-        stop_loss: opportunity.price * 0.98, // 2% stop loss
-        take_profit: opportunity.price * 1.04, // 4% take profit
-        confidence: Math.min(opportunity.score / 2, 1), // Convert score to confidence
-        strategy: opportunity.strategy,
-        timestamp: new Date(opportunity.timestamp * 1000).toISOString(),
-        regime: 'TRENDING', // Default regime
-        price: opportunity.price,
+        signal_type: opportunity.direction || 'LONG',
+        entry_price: opportunity.entry_price || opportunity.price,
+        stop_loss: opportunity.stop_loss || opportunity.price * 0.98,
+        take_profit: opportunity.take_profit || opportunity.price * 1.04,
+        confidence: opportunity.confidence || Math.min(opportunity.score / 2, 1),
+        strategy: opportunity.strategy || opportunity.setup_type,
+        timestamp: new Date((opportunity.timestamp || Date.now()) * 1000).toISOString(),
+        regime: opportunity.market_regime || opportunity.regime || 'TRENDING',
+        price: opportunity.entry_price || opportunity.price,
         volume: opportunity.volume,
         volatility: opportunity.volatility,
         spread: opportunity.spread,
         score: opportunity.score,
+        
+        // Institutional-grade fields
+        risk_reward: opportunity.risk_reward || 1.5,
+        recommended_leverage: opportunity.recommended_leverage || 1.0,
+        position_size: opportunity.position_size || 0,
+        notional_value: opportunity.notional_value || 0,
+        expected_profit: opportunity.expected_profit || 0,
+        expected_return: opportunity.expected_return || 0,
+        analysis_type: opportunity.analysis_type || 'basic',
+        trend_alignment: opportunity.trend_alignment || 0,
+        liquidity_score: opportunity.liquidity_score || 0,
+        
         indicators: {
           macd: { value: 0, signal: 0 },
           rsi: 50,
           bb: { upper: 0, middle: 0, lower: 0 }
-        }
+        },
+        is_stable_signal: opportunity.is_stable_signal || false,
+        invalidation_reason: opportunity.invalidation_reason || null,
+        signal_timestamp: opportunity.signal_timestamp || null
       }));
       
       setSignals(processedSignals);
       setError(null);
       setRetryCount(0);
       setLastUpdated(new Date());
+      
+      // Show status message based on scan state
+      if (status === 'scanning') {
+        setError(`🔄 ${responseData.message || 'Scanning for opportunities...'}`);
+      } else if (status === 'partial') {
+        setError(`⏳ ${responseData.message || 'Scan in progress - showing partial results'}`);
+      } else if (status === 'complete') {
+        // Clear any previous status messages on completion
+        setError(null);
+      }
+      
     } catch (err) {
       handleError(err);
       if (retryCount < maxRetries) {
@@ -155,7 +192,7 @@ const Signals = () => {
         setError(`✅ ${response.data.message}`);
         setTimeout(() => setError(null), 5000);
       }
-    } catch (err) {
+      } catch (err) {
       console.error('Error executing manual trade:', err);
       setError(`❌ Failed to execute trade: ${err.response?.data?.detail || err.message}`);
     }
@@ -173,7 +210,7 @@ const Signals = () => {
       // TODO: In the future, this would call an API endpoint to enable/disable auto-trading
       // await axios.post(`${config.API_BASE_URL}/api/v1/trading/auto_trading`, { enabled: newState });
       
-    } catch (err) {
+      } catch (err) {
       console.error('Error toggling auto-trading:', err);
       setError('❌ Failed to toggle auto-trading');
       setAutoTradingEnabled(!autoTradingEnabled); // Revert on error
@@ -182,9 +219,29 @@ const Signals = () => {
 
   useEffect(() => {
     fetchSignals();
-    const interval = setInterval(fetchSignals, 10000); // Poll every 10 seconds
-    return () => clearInterval(interval);
-  }, [retryCount]);
+    
+    // Use dynamic polling interval based on scan status
+    const getPollingInterval = () => {
+      if (scanProgress && scanProgress.in_progress) {
+        return 3000; // 3 seconds during active scan
+      }
+      return 10000; // 10 seconds normally
+    };
+    
+    const interval = setInterval(fetchSignals, getPollingInterval());
+    
+    // Update interval when scan status changes
+    const intervalUpdater = setInterval(() => {
+      clearInterval(interval);
+      const newInterval = setInterval(fetchSignals, getPollingInterval());
+      return () => clearInterval(newInterval);
+    }, 1000);
+    
+    return () => {
+      clearInterval(interval);
+      clearInterval(intervalUpdater);
+    };
+  }, [retryCount, scanProgress?.in_progress]);
 
   const handleSort = (field) => {
     if (sortBy === field) {
@@ -242,28 +299,65 @@ const Signals = () => {
     } = signal;
 
     return (
-      <Card sx={{ mb: 2 }}>
+      <Card key={symbol} sx={{ height: '100%' }}>
+        <CardHeader
+          title={
+            <Box display="flex" alignItems="center" gap={1}>
+              <Typography variant="h6" component="span">
+                {symbol}
+              </Typography>
+              <Chip
+                label={signal_type}
+                color={signal_type === 'LONG' ? 'success' : 'error'}
+                size="small"
+              />
+              {signal.is_stable_signal && (
+                <Chip
+                  label="STABLE"
+                  color="info"
+                  size="small"
+                  variant="outlined"
+                />
+              )}
+              {signal.invalidation_reason && (
+                <Chip
+                  label="INVALIDATED"
+                  color="warning"
+                  size="small"
+                  variant="outlined"
+                />
+              )}
+            </Box>
+          }
+          subheader={
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                {strategy} • {regime}
+              </Typography>
+              {signal.invalidation_reason && (
+                <Typography variant="caption" color="warning.main" sx={{ fontStyle: 'italic' }}>
+                  ⚠️ {signal.invalidation_reason}
+                </Typography>
+              )}
+              {signal.signal_timestamp && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  Signal age: {Math.round((Date.now() - signal.signal_timestamp) / 1000 / 60)}m
+                </Typography>
+              )}
+            </Box>
+          }
+        />
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography variant="h6" component="h2">
-              {symbol}
+            <Typography color="textSecondary" variant="body2">
+              Entry Price
             </Typography>
-            <Chip
-              label={signal_type}
-              color={signal_type === 'LONG' ? 'success' : 'error'}
-              icon={signal_type === 'LONG' ? <TrendingUpIcon /> : <TrendingDownIcon />}
-            />
+            <Typography variant="body1">
+              ${entry_price?.toFixed(2) || 'N/A'}
+            </Typography>
           </Box>
           
           <Grid container spacing={2} mb={2}>
-            <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Entry Price
-              </Typography>
-              <Typography variant="body1">
-                ${entry_price?.toFixed(2) || 'N/A'}
-              </Typography>
-            </Grid>
             <Grid item xs={4}>
               <Typography color="textSecondary" variant="body2">
                 Stop Loss
@@ -287,24 +381,51 @@ const Signals = () => {
               <Typography color="textSecondary" variant="body2">
                 Confidence
               </Typography>
-              <Typography variant="body1">
-                {confidence?.toFixed(2) || 'N/A'}
+              <Typography variant="body1" color={confidence > 0.7 ? 'success.main' : confidence > 0.5 ? 'warning.main' : 'error.main'}>
+                {confidence?.toFixed(1)}{confidence > 0.7 ? '% 🏛️' : confidence > 0.5 ? '% ⚠️' : '% ❌'} 
               </Typography>
             </Grid>
             <Grid item xs={4}>
               <Typography color="textSecondary" variant="body2">
-                Strategy
+                Risk/Reward
               </Typography>
-              <Typography variant="body1">
-                {strategy || 'N/A'}
+              <Typography variant="body1" color={signal.risk_reward > 2 ? 'success.main' : 'inherit'}>
+                {signal.risk_reward?.toFixed(1) || 'N/A'}:1
               </Typography>
             </Grid>
             <Grid item xs={4}>
               <Typography color="textSecondary" variant="body2">
-                Score
+                Leverage
               </Typography>
               <Typography variant="body1">
-                {signal.score?.toFixed(1) || 'N/A'}
+                {signal.recommended_leverage?.toFixed(1) || '1.0'}x
+              </Typography>
+            </Grid>
+          </Grid>
+
+          <Grid container spacing={2} mb={2}>
+            <Grid item xs={4}>
+              <Typography color="textSecondary" variant="body2">
+                Position Size
+              </Typography>
+              <Typography variant="body1">
+                ${signal.notional_value?.toFixed(0) || 'N/A'}
+              </Typography>
+            </Grid>
+            <Grid item xs={4}>
+              <Typography color="textSecondary" variant="body2">
+                Expected Profit
+              </Typography>
+              <Typography variant="body1" color="success.main">
+                ${signal.expected_profit?.toFixed(0) || 'N/A'}
+              </Typography>
+            </Grid>
+            <Grid item xs={4}>
+              <Typography color="textSecondary" variant="body2">
+                Expected Return
+              </Typography>
+              <Typography variant="body1" color="success.main">
+                {signal.expected_return ? (signal.expected_return * 100).toFixed(1) + '%' : 'N/A'}
               </Typography>
             </Grid>
           </Grid>
@@ -390,7 +511,7 @@ const Signals = () => {
                   color={autoTradingEnabled ? 'success' : 'default'}
                   size="small"
                 />
-              </Box>
+            </Box>
             }
           />
           <Chip
@@ -416,18 +537,22 @@ const Signals = () => {
       {error && (
         <Snackbar 
           open={!!error} 
-          autoHideDuration={6000} 
+          autoHideDuration={error.includes('🔄') || error.includes('⏳') ? null : 6000} // Don't auto-hide progress messages
           onClose={() => setError(null)}
           anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
         >
           <Alert 
-            severity={error.includes('✅') ? 'success' : 'error'} 
+            severity={
+              error.includes('✅') ? 'success' : 
+              error.includes('🔄') || error.includes('⏳') ? 'info' : 
+              'error'
+            } 
             onClose={() => setError(null)}
             action={
-              !error.includes('✅') && (
-                <Button color="inherit" size="small" onClick={fetchSignals}>
-                  Retry
-                </Button>
+              !error.includes('✅') && !error.includes('🔄') && !error.includes('⏳') && (
+              <Button color="inherit" size="small" onClick={fetchSignals}>
+                Retry
+              </Button>
               )
             }
           >
@@ -471,8 +596,47 @@ const Signals = () => {
         </Typography>
       )}
 
+      <Box mb={3}>
+        <DataFreshnessPanel 
+          lastUpdated={lastUpdated}
+          signalsCount={signals.length}
+          onRefresh={fetchSignals}
+        />
+      </Box>
+
+      {/* Scan Progress Indicator */}
+      {scanProgress && scanProgress.in_progress && (
+        <Box mb={3}>
+          <Paper sx={{ p: 2, bgcolor: 'info.light', borderLeft: '4px solid', borderColor: 'info.main' }}>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item>
+                <CircularProgress size={24} />
+              </Grid>
+              <Grid item xs>
+                <Typography variant="body1" fontWeight="bold">
+                  Scan in Progress
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {scanProgress.opportunities_found > 0 
+                    ? `Found ${scanProgress.opportunities_found} opportunities so far...`
+                    : 'Scanning markets for trading opportunities...'
+                  }
+                </Typography>
+              </Grid>
+              <Grid item>
+                <Chip 
+                  label={scanStatus === 'scanning' ? 'Starting...' : 'Processing'} 
+                  color="info" 
+                  size="small" 
+                />
+              </Grid>
+            </Grid>
+          </Paper>
+        </Box>
+      )}
+
       <Grid container spacing={3}>
-        <Grid item xs={12}>
+          <Grid item xs={12}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
               Trading Opportunities ({signals.length} found)
@@ -488,8 +652,8 @@ const Signals = () => {
                     <SignalCard signal={signal} />
                   </Grid>
                 ))}
-              </Grid>
-            )}
+            </Grid>
+        )}
           </Paper>
         </Grid>
       </Grid>

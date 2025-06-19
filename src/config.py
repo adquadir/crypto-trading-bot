@@ -70,7 +70,7 @@ EXCHANGE_CONFIG = {
         'max_funding_rate': float(os.getenv('MAX_FUNDING_RATE', '0.0001')),
         'min_open_interest': float(os.getenv('MIN_OPEN_INTEREST', '1000000')),
         'update_interval': int(os.getenv('SYMBOL_UPDATE_INTERVAL', '3600')),
-        'max_symbols': int(os.getenv('MAX_SYMBOLS', '50')),
+        'max_symbols': int(os.getenv('MAX_SYMBOLS', '200')),
         'fallback_symbols': os.getenv('FALLBACK_SYMBOLS', 'BTCUSDT,ETHUSDT,BNBUSDT').split(','),
         'cache_duration': int(os.getenv('SYMBOL_CACHE_DURATION', '3600')),
         'retry_attempts': int(os.getenv('SYMBOL_RETRY_ATTEMPTS', '3')),

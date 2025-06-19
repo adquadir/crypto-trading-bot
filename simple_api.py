@@ -4,6 +4,7 @@
 import asyncio
 import sys
 import os
+import time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -24,6 +25,11 @@ load_dotenv()
 # Global components
 opportunity_manager = None
 
+# Global variables for background processing
+_background_scan_task = None
+_last_scan_start = 0
+_scan_in_progress = False
+
 app = FastAPI(title="Crypto Trading Bot API")
 
 # Configure CORS
@@ -35,19 +41,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+async def _background_scan_opportunities():
+    """Background task to scan opportunities incrementally."""
+    global _scan_in_progress
+    
+    try:
+        print("🚀 Background incremental scan started")
+        _scan_in_progress = True
+        await opportunity_manager.scan_opportunities_incremental()
+        print("✅ Background incremental scan completed")
+    except Exception as e:
+        print(f"❌ Background scan failed: {e}")
+    finally:
+        _scan_in_progress = False
+
 async def background_refresh():
     """Background task to refresh opportunities periodically."""
+    global _background_scan_task, _last_scan_start, _scan_in_progress
+    
     while True:
         try:
             if opportunity_manager:
-                print("Background: Refreshing opportunities...")
-                await opportunity_manager.scan_opportunities()
-                print("Background: Refresh complete")
+                current_time = time.time()
+                
+                # Check if we need to start a new scan (every 5 minutes or if no scan running)
+                should_start_new_scan = (
+                    not _scan_in_progress or 
+                    (current_time - _last_scan_start) > 300 or  # 5 minutes
+                    (_background_scan_task and _background_scan_task.done())
+                )
+                
+                if should_start_new_scan:
+                    print("🔄 Starting background incremental scan...")
+                    _last_scan_start = current_time
+                    
+                    # Start background scan without waiting
+                    _background_scan_task = asyncio.create_task(_background_scan_opportunities())
+                    
         except Exception as e:
             print(f"Background refresh error: {e}")
         
-        # Wait 60 seconds before next refresh
-        await asyncio.sleep(60)
+        # Wait 30 seconds before checking again
+        await asyncio.sleep(30)
 
 @app.on_event("startup")
 async def startup_event():
@@ -80,22 +115,20 @@ async def startup_event():
     opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager)
     await opportunity_manager.initialize()
     
-    # Do initial scan
-    print("Doing initial opportunity scan...")
-    await opportunity_manager.scan_opportunities()
-    
     # Start background refresh task
     asyncio.create_task(background_refresh())
     
-    print("✓ All components initialized with background refresh")
+    print("✓ All components initialized with incremental background refresh")
 
 @app.get("/")
 async def root():
-    return {"message": "Crypto Trading Bot API is running", "status": "dynamic"}
+    return {"message": "Crypto Trading Bot API is running", "status": "incremental"}
 
 @app.get("/api/v1/trading/opportunities")
 async def get_opportunities():
-    """Get current trading opportunities."""
+    """Get current trading opportunities with incremental results."""
+    global _background_scan_task, _last_scan_start, _scan_in_progress
+    
     if not opportunity_manager:
         return {
             "status": "initializing",
@@ -104,18 +137,48 @@ async def get_opportunities():
         }
     
     try:
-        # Get cached opportunities (fast)
+        current_time = time.time()
+        
+        # Check if we need to start a new scan (every 30 seconds or if no scan running)
+        should_start_new_scan = (
+            not _scan_in_progress or 
+            (current_time - _last_scan_start) > 30 or
+            (_background_scan_task and _background_scan_task.done())
+        )
+        
+        if should_start_new_scan:
+            print("🔄 Starting background opportunity scan...")
+            _last_scan_start = current_time
+            _scan_in_progress = True
+            
+            # Start background scan without waiting
+            _background_scan_task = asyncio.create_task(_background_scan_opportunities())
+        
+        # Always return current opportunities (even if empty or partial)
         opportunities = opportunity_manager.get_opportunities()
         
-        # If no opportunities, do a quick scan
-        if not opportunities:
-            await opportunity_manager.scan_opportunities()
-            opportunities = opportunity_manager.get_opportunities()
+        # Determine status based on scan state
+        if not _scan_in_progress:
+            status = "complete"
+            message = f"Found {len(opportunities)} opportunities"
+        elif len(opportunities) == 0:
+            status = "scanning"
+            message = "Scanning for opportunities... Please wait"
+        else:
+            status = "partial"
+            message = f"Scan in progress - showing {len(opportunities)} opportunities found so far"
         
         return {
-            "status": "success",
-            "data": opportunities
+            "status": status,
+            "data": opportunities,
+            "message": message,
+            "scan_progress": {
+                "in_progress": _scan_in_progress,
+                "last_scan_start": _last_scan_start,
+                "opportunities_found": len(opportunities)
+            }
         }
+        
     except Exception as e:
         return {
             "status": "error",
@@ -126,6 +189,8 @@ async def get_opportunities():
 @app.post("/api/v1/trading/scan")
 async def manual_scan():
     """Manually trigger opportunity scanning."""
+    global _background_scan_task, _last_scan_start, _scan_in_progress
+    
     if not opportunity_manager:
         return {
             "status": "error",
@@ -133,15 +198,28 @@ async def manual_scan():
         }
     
     try:
-        await opportunity_manager.scan_opportunities()
+        print("🔄 Manual scan triggered...")
+        _last_scan_start = time.time()
+        _scan_in_progress = True
+        
+        # Start incremental scan
+        _background_scan_task = asyncio.create_task(_background_scan_opportunities())
+        
+        # Return immediately with current opportunities
         opportunities = opportunity_manager.get_opportunities()
         
         return {
-            "status": "success",
-            "message": f"Scan completed, found {len(opportunities)} opportunities",
-            "data": opportunities
+            "status": "scanning",
+            "message": f"Incremental scan started - showing {len(opportunities)} current opportunities",
+            "data": opportunities,
+            "scan_progress": {
+                "in_progress": _scan_in_progress,
+                "last_scan_start": _last_scan_start,
+                "opportunities_found": len(opportunities)
+            }
         }
     except Exception as e:
+        _scan_in_progress = False
         return {
             "status": "error",
             "message": f"Scan failed: {str(e)}"
