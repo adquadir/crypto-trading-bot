@@ -143,7 +143,7 @@ if [ -d "$VENV_DIR" ]; then
 fi
 
 echo "🆕 Creating new virtual environment..."
-python3 -m venv "$VENV_DIR"
+    python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
 # Install Python packages

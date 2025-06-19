@@ -1003,7 +1003,8 @@ class ExchangeClient:
         # Update the last trade price
         self.last_trade_price[symbol] = float(kline_data['k']['c'])
         logger.debug(
-            f"Updated last trade price for {symbol}: {self.last_trade_price[symbol]}")
+            f"Updated last trade price for {symbol}: {
+                self.last_trade_price[symbol]}")
 
     async def _check_proxy_health(self):
         """Check the health of the current proxy."""

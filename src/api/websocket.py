@@ -87,16 +87,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 # Get opportunities from the initialized manager
                 try:
-                    opportunities = opportunity_manager.get_opportunities()
-                    if opportunities:
+                opportunities = opportunity_manager.get_opportunities()
+                if opportunities:
                         # Handle both dict and list returns
                         if isinstance(opportunities, dict):
                             opportunity_list = list(opportunities.values())
                         else:
                             opportunity_list = opportunities
                             
-                        formatted_opportunities = [
-                            {
+                    formatted_opportunities = [
+                        {
                                 'symbol': opp.get('symbol', 'Unknown'),
                                 'strategy': opp.get('strategy', 'Unknown'),
                                 'timestamp': opp.get('timestamp', ''),
@@ -105,7 +105,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 'volatility': opp.get('volatility', 0),
                                 'spread': opp.get('spread', 0),
                                 'score': opp.get('score', 0)
-                            }
+                        }
                             for opp in opportunity_list
                         ]
                         await websocket.send_json({
@@ -142,6 +142,6 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"Error in WebSocket connection: {e}")
         try:
             if not websocket.client_state.DISCONNECTED:
-                await websocket.close(code=1011, reason="Internal server error")
+            await websocket.close(code=1011, reason="Internal server error")
         except:
             pass

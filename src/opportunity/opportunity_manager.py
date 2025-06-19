@@ -102,7 +102,7 @@ class OpportunityManager:
                     if not market_data:
                         logger.debug(f"No market data for {symbol}")
                         continue
-                        
+                            
                     # Generate dynamic realistic signals based on market data analysis
                     opportunity = self._analyze_market_and_generate_signal(symbol, market_data)
                     if opportunity:
@@ -117,7 +117,7 @@ class OpportunityManager:
                         
         except Exception as e:
             logger.error(f"Error scanning opportunities: {e}")
-
+            
     async def scan_opportunities_incremental(self) -> None:
         """Scan for trading opportunities incrementally, updating results as they're found."""
         try:
