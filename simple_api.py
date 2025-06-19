@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple API server with dynamic opportunity manager."""
+"""Simple API server with mode filtering."""
 
 import asyncio
 import sys
@@ -53,11 +53,11 @@ app.add_middleware(
 )
 
 async def _background_scan_opportunities():
-    """Background task to scan opportunities incrementally."""
+    """Background task to scan opportunities based on current mode."""
     global _scan_in_progress, _trading_mode
     
     try:
-        print(f"🚀 Background incremental scan started (mode: {_trading_mode})")
+        print(f"🚀 Background scan started (mode: {_trading_mode})")
         _scan_in_progress = True
         
         if _trading_mode == "swing_trading":
@@ -65,9 +65,11 @@ async def _background_scan_opportunities():
         else:
             await opportunity_manager.scan_opportunities_incremental()
             
-        print(f"✅ Background incremental scan completed (mode: {_trading_mode})")
+        print(f"✅ Background scan completed (mode: {_trading_mode})")
     except Exception as e:
         print(f"❌ Background scan failed: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         _scan_in_progress = False
 
@@ -88,7 +90,7 @@ async def background_refresh():
                 )
                 
                 if should_start_new_scan:
-                    print("🔄 Starting background incremental scan...")
+                    print(f"🔄 Starting background scan (mode: {_trading_mode})...")
                     _last_scan_start = current_time
                     
                     # Start background scan without waiting
@@ -134,7 +136,7 @@ async def startup_event():
     # Start background refresh task
     asyncio.create_task(background_refresh())
     
-    print("✓ All components initialized with incremental background refresh")
+    print("✓ All components initialized")
 
 @app.get("/")
 async def root():
@@ -151,7 +153,7 @@ async def test_connection():
 
 @app.get("/api/v1/trading/opportunities")
 async def get_opportunities():
-    """Get current trading opportunities with incremental results."""
+    """Get current trading opportunities with mode filtering."""
     global _background_scan_task, _last_scan_start, _scan_in_progress, _trading_mode
     
     if not opportunity_manager:
@@ -172,36 +174,65 @@ async def get_opportunities():
         )
         
         if should_start_new_scan:
-            print(f"🔄 Starting background opportunity scan (mode: {_trading_mode})...")
+            print(f"🔄 Starting scan (mode: {_trading_mode})...")
             _last_scan_start = current_time
             _scan_in_progress = True
             
             # Start background scan without waiting
             _background_scan_task = asyncio.create_task(_background_scan_opportunities())
         
-        # Always return current opportunities (even if empty or partial)
-        opportunities = opportunity_manager.get_opportunities()
+        # Get all opportunities
+        all_opportunities = opportunity_manager.get_opportunities()
+        
+        # Filter opportunities to only show signals that match the current mode
+        filtered_opportunities = []
+        for opp in all_opportunities:
+            # Determine if this is a swing signal or stable signal based on strategy
+            is_swing_signal = (
+                opp.get('strategy') in ['swing_trading', 'swing_basic'] or
+                opp.get('strategy_type') in ['swing_trading', 'swing_basic'] or
+                opp.get('signal_id', '').find('swing') != -1 or
+                opp.get('is_stable_signal', True) == False
+            )
+            
+            # Only include signals that match the current mode
+            if _trading_mode == "swing_trading" and is_swing_signal:
+                # This is a swing signal and we're in swing mode
+                opp['trading_mode'] = 'swing_trading'
+                opp['signal_source'] = 'swing_trading_scan'
+                filtered_opportunities.append(opp)
+            elif _trading_mode == "stable" and not is_swing_signal:
+                # This is a stable signal and we're in stable mode
+                opp['trading_mode'] = 'stable'
+                opp['signal_source'] = 'stable_scan'
+                filtered_opportunities.append(opp)
+            # If signal doesn't match current mode, exclude it
+        
+        all_opportunities = filtered_opportunities
         
         # Determine status based on scan state
         if not _scan_in_progress:
-            status = "complete"
-            message = f"Found {len(opportunities)} opportunities using {_trading_mode} mode"
-        elif len(opportunities) == 0:
+            if len(all_opportunities) > 0:
+                status = "complete"
+                message = f"Found {len(all_opportunities)} {_trading_mode} signals"
+            else:
+                status = "complete"
+                message = f"No {_trading_mode} signals found"
+        elif len(all_opportunities) == 0:
             status = "scanning"
-            message = f"Scanning for opportunities using {_trading_mode} mode... Please wait"
+            message = f"Scanning for {_trading_mode} signals... Please wait"
         else:
             status = "partial"
-            message = f"Scan in progress ({_trading_mode} mode) - showing {len(opportunities)} opportunities found so far"
+            message = f"Scan in progress - showing {len(all_opportunities)} {_trading_mode} signals found so far"
         
         return {
             "status": status,
-            "data": opportunities,
+            "data": all_opportunities,
             "message": message,
             "trading_mode": _trading_mode,
             "scan_progress": {
                 "in_progress": _scan_in_progress,
-                "last_scan_start": _last_scan_start,
-                "opportunities_found": len(opportunities)
+                "opportunities_found": len(all_opportunities)
             }
         }
         
@@ -216,7 +247,7 @@ async def get_opportunities():
 @app.post("/api/v1/trading/scan")
 async def manual_scan():
     """Manually trigger opportunity scanning."""
-    global _background_scan_task, _last_scan_start, _scan_in_progress
+    global _background_scan_task, _last_scan_start, _scan_in_progress, _trading_mode
     
     if not opportunity_manager:
         return {
@@ -225,23 +256,42 @@ async def manual_scan():
         }
     
     try:
-        print("🔄 Manual scan triggered...")
+        print(f"🔄 Manual scan triggered (mode: {_trading_mode})...")
         _last_scan_start = time.time()
         _scan_in_progress = True
         
         # Start incremental scan
         _background_scan_task = asyncio.create_task(_background_scan_opportunities())
         
-        # Return immediately with current opportunities
-        opportunities = opportunity_manager.get_opportunities()
+        # Return immediately with current opportunities that match the mode
+        all_opportunities = opportunity_manager.get_opportunities()
+        opportunities = []
+        for opp in all_opportunities:
+            # Determine if this is a swing signal or stable signal based on strategy
+            is_swing_signal = (
+                opp.get('strategy') in ['swing_trading', 'swing_basic'] or
+                opp.get('strategy_type') in ['swing_trading', 'swing_basic'] or
+                opp.get('signal_id', '').find('swing') != -1 or
+                opp.get('is_stable_signal', True) == False
+            )
+            
+            # Only include signals that match the current mode
+            if _trading_mode == "swing_trading" and is_swing_signal:
+                opp['trading_mode'] = 'swing_trading'
+                opp['signal_source'] = 'swing_trading_scan'
+                opportunities.append(opp)
+            elif _trading_mode == "stable" and not is_swing_signal:
+                opp['trading_mode'] = 'stable'
+                opp['signal_source'] = 'stable_scan'
+                opportunities.append(opp)
         
         return {
             "status": "scanning",
-            "message": f"Incremental scan started - showing {len(opportunities)} current opportunities",
+            "message": f"Manual {_trading_mode} scan started - showing {len(opportunities)} current signals",
             "data": opportunities,
+            "trading_mode": _trading_mode,
             "scan_progress": {
                 "in_progress": _scan_in_progress,
-                "last_scan_start": _last_scan_start,
                 "opportunities_found": len(opportunities)
             }
         }
@@ -319,9 +369,6 @@ async def execute_manual_trade(trade_request: ManualTradeRequest):
     try:
         print(f"Manual trade request received: {trade_request.dict()}")
         
-        # For now, just log the trade request since actual trading is disabled
-        # In the future, this would interface with the trading engine
-        
         trade_data = {
             "symbol": trade_request.symbol,
             "signal_type": trade_request.signal_type,
@@ -330,7 +377,7 @@ async def execute_manual_trade(trade_request: ManualTradeRequest):
             "take_profit": trade_request.take_profit,
             "confidence": trade_request.confidence,
             "strategy": trade_request.strategy,
-            "status": "simulated",  # For now, all trades are simulated
+            "status": "simulated",
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         }
         

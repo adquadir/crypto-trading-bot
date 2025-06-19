@@ -23,7 +23,7 @@ class InstitutionalTradeAnalyzer:
     def __init__(self):
         self.min_confidence_threshold = 0.6  # Lower threshold for more opportunities
         self.max_leverage = 10.0  # Conservative leverage cap
-        self.min_risk_reward = 1.2  # Lower minimum RR ratio
+        self.min_risk_reward = 1.0  # FIXED: More liberal minimum RR ratio
         
     def analyze_trade_opportunity(self, symbol: str, market_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -126,12 +126,12 @@ class InstitutionalTradeAnalyzer:
         # Price action quality
         price_action_quality = self._assess_price_action_quality(prices)
         
-        # Overall tradeability assessment (more liberal)
+        # FIXED: More liberal tradeability assessment - allow structure zones
         is_tradeable = (
-            trend_alignment > 0.4 and
-            price_action_quality > 0.3 and
-            regime['confidence'] > 0.4 and
-            volatility['is_normal']
+            trend_alignment > 0.3 and  # Reduced from 0.4
+            price_action_quality > 0.25 and  # Reduced from 0.3
+            regime['confidence'] > 0.35 and  # Reduced from 0.4
+            (volatility['is_normal'] or volatility['regime'] == 'normal')  # More flexible volatility
         )
         
         return {
@@ -444,50 +444,86 @@ class InstitutionalTradeAnalyzer:
     
     def _identify_trade_setup(self, prices: Dict[str, List[float]], structure: Dict[str, Any],
                             levels: Dict[str, Any], liquidity: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Identify specific trade setup with entry, TP, and SL."""
+        """Identify specific trade setup with entry, TP, and SL - FIXED: More probabilistic approach."""
         
         current_price = structure['current_price']
         
-        # Only trade high-probability setups (more liberal)
-        if structure['trend_alignment'] < 0.4:
+        # FIXED: More liberal threshold - reduced from 0.4 to 0.3
+        if structure['trend_alignment'] < 0.3:
             return None
         
-        # Determine trade direction based on structure
-        if structure['short_trend']['direction'] > 0.002:  # Strong uptrend
+        # FIXED: Use VWAP proxy for additional confirmation
+        closes = prices['closes']
+        vwap_proxy = sum(closes[-21:]) / 21  # Simple moving average as VWAP proxy
+        
+        # FIXED: More probabilistic direction detection - reduced thresholds
+        if structure['short_trend']['direction'] > 0.001:  # Reduced from 0.002
             direction = 'LONG'
             entry_price = current_price
             
-            # Find nearest resistance for TP
+            # FIXED: Enhanced TP logic with volume-weighted zones
             resistance_levels = [r for r in levels['resistance_levels'] if r['price'] > current_price]
             if resistance_levels:
-                take_profit = resistance_levels[0]['price'] * 0.995  # Slightly before resistance
+                # Use highest confidence resistance or create zone
+                best_resistance = max(resistance_levels, key=lambda x: x['confidence'])
+                take_profit = best_resistance['price'] * 0.995
             else:
-                take_profit = current_price * (1 + structure['volatility']['value'] * 3)
+                # FIXED: Volume-weighted range fallback + round number logic
+                volatility_factor = structure['volatility']['value'] * 2.5  # Slightly more aggressive
+                take_profit = current_price * (1 + volatility_factor)
+                
+                # Adjust to nearby round numbers if close
+                round_levels = [current_price * (1 + i*0.01) for i in range(1, 10)]  # 1-10% levels
+                for level in round_levels:
+                    if abs(level - take_profit) / take_profit < 0.2:  # Within 20%
+                        take_profit = level
+                        break
             
-            # Find support for SL or use volatility-based
+            # FIXED: Enhanced SL logic with zone-based approach
             support_levels = [s for s in levels['support_levels'] if s['price'] < current_price]
             if support_levels:
-                stop_loss = support_levels[0]['price'] * 1.005  # Slightly below support
+                # Use support zone instead of exact level
+                best_support = max(support_levels, key=lambda x: x['confidence'])
+                stop_loss = best_support['price'] * 1.01  # Slightly more buffer
             else:
-                stop_loss = current_price * (1 - structure['volatility']['value'] * 2)
+                # FIXED: VWAP-based fallback
+                if current_price > vwap_proxy:
+                    stop_loss = max(vwap_proxy * 0.995, current_price * (1 - structure['volatility']['value'] * 1.8))
+                else:
+                    stop_loss = current_price * (1 - structure['volatility']['value'] * 1.8)
                 
-        elif structure['short_trend']['direction'] < -0.002:  # Strong downtrend
+        elif structure['short_trend']['direction'] < -0.001:  # Reduced from -0.002
             direction = 'SHORT'
             entry_price = current_price
             
-            # Find nearest support for TP
+            # FIXED: Enhanced TP logic for SHORT
             support_levels = [s for s in levels['support_levels'] if s['price'] < current_price]
             if support_levels:
-                take_profit = support_levels[0]['price'] * 1.005  # Slightly above support
+                best_support = max(support_levels, key=lambda x: x['confidence'])
+                take_profit = best_support['price'] * 1.005
             else:
-                take_profit = current_price * (1 - structure['volatility']['value'] * 3)
+                # FIXED: Volume-weighted range fallback
+                volatility_factor = structure['volatility']['value'] * 2.5
+                take_profit = current_price * (1 - volatility_factor)
+                
+                # Round number adjustment
+                round_levels = [current_price * (1 - i*0.01) for i in range(1, 10)]
+                for level in round_levels:
+                    if abs(level - take_profit) / take_profit < 0.2:
+                        take_profit = level
+                        break
             
-            # Find resistance for SL or use volatility-based
+            # FIXED: Enhanced SL logic for SHORT
             resistance_levels = [r for r in levels['resistance_levels'] if r['price'] > current_price]
             if resistance_levels:
-                stop_loss = resistance_levels[0]['price'] * 0.995  # Slightly above resistance
+                best_resistance = max(resistance_levels, key=lambda x: x['confidence'])
+                stop_loss = best_resistance['price'] * 0.99  # More buffer
             else:
-                stop_loss = current_price * (1 + structure['volatility']['value'] * 2)
+                # FIXED: VWAP-based fallback
+                if current_price < vwap_proxy:
+                    stop_loss = min(vwap_proxy * 1.005, current_price * (1 + structure['volatility']['value'] * 1.8))
+                else:
+                    stop_loss = current_price * (1 + structure['volatility']['value'] * 1.8)
         else:
             return None  # No clear direction
         
@@ -496,8 +532,8 @@ class InstitutionalTradeAnalyzer:
         reward = abs(take_profit - entry_price)
         risk_reward = reward / risk if risk > 0 else 0
         
-        # Only proceed if RR is acceptable
-        if risk_reward < self.min_risk_reward:
+        # FIXED: More liberal RR requirement - reduced from 1.2 to 1.0
+        if risk_reward < 1.0:
             return None
         
         # Calculate confidence

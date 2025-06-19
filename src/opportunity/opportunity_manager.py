@@ -237,25 +237,33 @@ class OpportunityManager:
             self.symbols = symbols_to_scan
             logger.info(f"SWING TRADING scan: processing {len(symbols_to_scan)} symbols with multi-strategy voting")
             
-            # Don't clear opportunities - preserve existing valid signals
+            # 🎯 CLEAR ALL SIGNALS for fresh swing trading scan (no stable signal contamination)
             valid_signals = {}
             expired_signals = []
             
-            # Check existing signals for validity (stricter for swing trading)
+            # Only preserve actual swing trading signals, not stable fallbacks
             for symbol, signal in self.opportunities.items():
                 signal_age = current_time - signal.get('signal_timestamp', 0)
-                # Swing trades can last longer - 10 minute lifetime
-                swing_lifetime = 600  # 10 minutes
-                if signal_age < swing_lifetime:
-                    valid_signals[symbol] = signal
-                    logger.debug(f"✓ Keeping valid SWING signal for {symbol} (age: {signal_age:.1f}s)")
+                signal_strategy = signal.get('strategy', '')
+                trading_mode = signal.get('trading_mode', '')
+                
+                # Only preserve actual swing trading signals
+                if trading_mode == 'swing_trading' and signal_strategy == 'swing_trading':
+                    swing_lifetime = 600  # 10 minutes
+                    if signal_age < swing_lifetime:
+                        valid_signals[symbol] = signal
+                        logger.debug(f"✓ Keeping valid SWING signal for {symbol} (age: {signal_age:.1f}s)")
+                    else:
+                        expired_signals.append(symbol)
+                        logger.debug(f"❌ SWING signal expired for {symbol} (age: {signal_age:.1f}s)")
                 else:
+                    # Clear all stable signals when in swing mode
                     expired_signals.append(symbol)
-                    logger.debug(f"❌ SWING signal expired for {symbol} (age: {signal_age:.1f}s)")
+                    logger.debug(f"🧹 Clearing non-swing signal for {symbol} (strategy: {signal_strategy})")
             
-            # Start with valid signals
+            # Start fresh for swing trading
             self.opportunities = valid_signals
-            logger.info(f"SWING MODE: Preserved {len(valid_signals)} valid signals, {len(expired_signals)} expired")
+            logger.info(f"SWING MODE: Preserved {len(valid_signals)} swing signals, cleared {len(expired_signals)} non-swing signals")
             
             # Process symbols one by one with swing trading analysis
             for i, symbol in enumerate(symbols_to_scan):
@@ -281,6 +289,7 @@ class OpportunityManager:
                         opportunity['last_updated'] = current_time
                         opportunity['signal_id'] = f"{symbol}_swing_{int(current_time/300)}"  # Stable ID per 5 minutes
                         opportunity['trading_mode'] = 'swing_trading'
+                        opportunity['is_stable_signal'] = False  # Mark as true swing signal
                         
                         self.opportunities[symbol] = opportunity
                         processed_count += 1
@@ -293,7 +302,24 @@ class OpportunityManager:
                         logger.info(f"🎯 SWING [{processed_count}/{len(symbols_to_scan)}] {symbol}: {opportunity['direction']} "
                                   f"(conf: {opportunity['confidence']:.2f}, votes: {consensus}, RR: {rr_ratio:.1f}:1, strategies: {votes})")
                     else:
-                        logger.debug(f"❌ SWING [{processed_count}/{len(symbols_to_scan)}] No consensus for {symbol}")
+                        # 🎯 FALLBACK: Generate basic swing signal if advanced voting fails
+                        logger.debug(f"⚠️  SWING voting failed for {symbol}, trying basic swing fallback...")
+                        basic_opportunity = self._generate_basic_swing_signal(symbol, market_data, current_time)
+                        if basic_opportunity:
+                            basic_opportunity['signal_timestamp'] = current_time
+                            basic_opportunity['last_updated'] = current_time
+                            basic_opportunity['signal_id'] = f"{symbol}_swing_basic_{int(current_time/300)}"
+                            basic_opportunity['trading_mode'] = 'swing_trading'
+                            basic_opportunity['is_stable_signal'] = False  # Mark as swing signal
+                            
+                            self.opportunities[symbol] = basic_opportunity
+                            processed_count += 1
+                            
+                            logger.info(f"🎯 SWING BASIC [{processed_count}/{len(symbols_to_scan)}] {symbol}: {basic_opportunity['direction']} "
+                                      f"(conf: {basic_opportunity['confidence']:.2f}, strategy: {basic_opportunity['strategy']})")
+                        else:
+                            # 🎯 LOG REJECTION REASONS for live tuning (your insight!)
+                            logger.debug(f"❌ SWING [{processed_count}/{len(symbols_to_scan)}] No signal for {symbol} - both advanced and basic failed")
                         
                     # Slightly longer delay for swing analysis (more complex)
                     if i % 3 == 0:
@@ -1592,8 +1618,23 @@ class OpportunityManager:
             import math
             from .institutional_trade_analyzer import InstitutionalTradeAnalyzer
             
+            # 🎯 REJECTION TRACKING for granular debugging
+            rejection_log = {
+                "symbol": symbol,
+                "timestamp": current_time,
+                "stage": "initialization",
+                "votes": [],
+                "confidence_scores": [],
+                "structure_found": False,
+                "orderbook_confirmed": False,
+                "risk_reward": 0.0,
+                "rejection_reason": None
+            }
+            
             klines = market_data['klines']
             if len(klines) < 50:  # Need more data for swing analysis
+                rejection_log["rejection_reason"] = f"Insufficient data: {len(klines)} candles < 50 required"
+                logger.debug(f"🚫 SWING REJECTED {symbol}: {rejection_log['rejection_reason']}")
                 return None
                 
             # Extract comprehensive price data
@@ -1606,8 +1647,13 @@ class OpportunityManager:
             current_price = closes[-1]
             current_volume = volumes[-1]
             
+            rejection_log["stage"] = "structure_analysis"
+            
             # 1. STRUCTURE-BASED ANALYSIS with CONFLUENCE FILTERING
             structure_levels = self._find_structure_levels_with_confluence(highs, lows, closes, volumes)
+            rejection_log["structure_found"] = len(structure_levels.get('resistances', [])) > 0 or len(structure_levels.get('supports', [])) > 0
+            
+            rejection_log["stage"] = "strategy_voting"
             
             # 2. MULTI-STRATEGY VOTING ENGINE
             strategy_votes = []
@@ -1616,11 +1662,17 @@ class OpportunityManager:
             trend_vote = self._vote_trend_strategy(closes, highs, lows, volumes)
             if trend_vote:
                 strategy_votes.append(trend_vote)
+                logger.debug(f"✅ SWING {symbol}: Trend vote - {trend_vote['direction']} (conf: {trend_vote['confidence']:.3f})")
+            else:
+                logger.debug(f"❌ SWING {symbol}: Trend vote - NO VOTE")
             
             # Vote 2: Breakout Strategy  
             breakout_vote = self._vote_breakout_strategy(closes, highs, lows, volumes, structure_levels)
             if breakout_vote:
                 strategy_votes.append(breakout_vote)
+                logger.debug(f"✅ SWING {symbol}: Breakout vote - {breakout_vote['direction']} (conf: {breakout_vote['confidence']:.3f})")
+            else:
+                logger.debug(f"❌ SWING {symbol}: Breakout vote - NO VOTE")
                 
             # Vote 3: Institutional Analysis
             institutional_analyzer = InstitutionalTradeAnalyzer()
@@ -1632,32 +1684,74 @@ class OpportunityManager:
                     'strategy': 'institutional',
                     'reasoning': ['Institutional-grade setup confirmed']
                 })
+                logger.debug(f"✅ SWING {symbol}: Institutional vote - {institutional_vote['direction']} (conf: {institutional_vote['confidence']:.3f})")
+            else:
+                logger.debug(f"❌ SWING {symbol}: Institutional vote - NO VOTE")
             
             # Vote 4: Micro Pullback Reversal Strategy
             pullback_vote = self._vote_micro_pullback_reversal(opens, highs, lows, closes, volumes)
             if pullback_vote:
                 strategy_votes.append(pullback_vote)
-            
-            # VOTING CONSENSUS (need at least 2 votes)
-            if len(strategy_votes) < 2:
-                return None
-                
-            # Count votes by direction
-            long_votes = [v for v in strategy_votes if v['direction'] == 'LONG']
-            short_votes = [v for v in strategy_votes if v['direction'] == 'SHORT']
-            
-            if len(long_votes) >= 2:
-                winning_direction = 'LONG'
-                winning_votes = long_votes
-            elif len(short_votes) >= 2:
-                winning_direction = 'SHORT'
-                winning_votes = short_votes
+                logger.debug(f"✅ SWING {symbol}: Pullback vote - {pullback_vote['direction']} (conf: {pullback_vote['confidence']:.3f})")
             else:
-                return None  # No consensus
+                logger.debug(f"❌ SWING {symbol}: Pullback vote - NO VOTE")
             
-            # Calculate consensus confidence
+            # Update rejection log with voting results
+            rejection_log["votes"] = [{"strategy": v["strategy"], "direction": v["direction"], "confidence": v["confidence"]} for v in strategy_votes]
+            rejection_log["confidence_scores"] = [v["confidence"] for v in strategy_votes]
+            rejection_log["stage"] = "consensus_evaluation"
+            
+            # 🎯 CONFIDENCE-WEIGHTED SCORING SYSTEM (replacing rigid binary voting)
+            if len(strategy_votes) == 0:
+                rejection_log["rejection_reason"] = "No strategy votes generated"
+                logger.debug(f"🚫 SWING REJECTED {symbol}: {rejection_log['rejection_reason']}")
+                logger.debug(f"📊 SWING REJECTION LOG: {rejection_log}")
+                return None
+            
+            # Calculate direction scores using confidence weighting
+            long_score = sum(v['confidence'] for v in strategy_votes if v['direction'] == 'LONG')
+            short_score = sum(v['confidence'] for v in strategy_votes if v['direction'] == 'SHORT')
+            
+            # Determine winning direction and calculate net confidence
+            if long_score > short_score:
+                winning_direction = 'LONG'
+                winning_votes = [v for v in strategy_votes if v['direction'] == 'LONG']
+                net_confidence_score = long_score - short_score * 0.5  # Penalty for opposing votes
+            elif short_score > long_score:
+                winning_direction = 'SHORT'
+                winning_votes = [v for v in strategy_votes if v['direction'] == 'SHORT']
+                net_confidence_score = short_score - long_score * 0.5
+            else:
+                rejection_log["rejection_reason"] = f"Perfect tie in votes: LONG={long_score:.3f}, SHORT={short_score:.3f}"
+                logger.debug(f"🚫 SWING REJECTED {symbol}: {rejection_log['rejection_reason']}")
+                logger.debug(f"📊 SWING REJECTION LOG: {rejection_log}")
+                return None  # Perfect tie, no clear direction
+            
+            # Dynamic confidence threshold based on market conditions - RELAXED for swing signals
+            base_threshold = 0.5  # Base requirement (reduced from 0.6)
+            
+            # Allow high-confidence single-strategy signals (your key insight!)
+            if len(winning_votes) == 1 and winning_votes[0]['confidence'] >= 0.7:  # Reduced from 0.8
+                required_score = 0.5  # Lower threshold for high-confidence singles (reduced from 0.7)
+                threshold_reason = "high-confidence single strategy"
+            elif len(winning_votes) >= 2:
+                required_score = 0.7  # Multi-strategy consensus gets lower threshold (reduced from 0.9)
+                threshold_reason = "multi-strategy consensus"
+            else:
+                required_score = 0.9  # Mixed or low-confidence signals need higher score (reduced from 1.2)
+                threshold_reason = "mixed/low-confidence signals"
+            
+            if net_confidence_score < required_score:
+                rejection_log["rejection_reason"] = f"Confidence too low: {net_confidence_score:.3f} < {required_score:.3f} ({threshold_reason})"
+                logger.debug(f"🚫 SWING REJECTED {symbol}: {rejection_log['rejection_reason']}")
+                logger.debug(f"📊 SWING REJECTION LOG: {rejection_log}")
+                return None
+            
+            # Calculate final consensus confidence (weighted average of winning votes)
             consensus_confidence = sum(v['confidence'] for v in winning_votes) / len(winning_votes)
             consensus_confidence = min(0.95, max(0.6, consensus_confidence))
+            
+            rejection_log["stage"] = "tp_sl_calculation"
             
             # 3. STRUCTURE-BASED TP/SL (not ATR-based!)
             if winning_direction == 'LONG':
@@ -1669,18 +1763,23 @@ class OpportunityManager:
                     # Use the nearest resistance that has confluence
                     confluence_resistance = next((r for r in resistance_levels if r['confluence_score'] >= 2), resistance_levels[0])
                     take_profit = confluence_resistance['price'] * 0.995  # Slightly before resistance
+                    tp_method = f"structure resistance at {confluence_resistance['price']:.6f}"
                 else:
-                    # Fallback: 5-8% swing target
-                    take_profit = current_price * (1.05 + (consensus_confidence * 0.03))
+                    # 🎯 ATR-based fallback when structure detection fails
+                    atr = self._calculate_atr(highs, lows, closes)
+                    take_profit = current_price + (atr * 3.0 * consensus_confidence)  # 2-3x ATR based on confidence
+                    tp_method = f"ATR fallback: {atr:.6f} * 3.0 * {consensus_confidence:.3f}"
                 
                 # SL: Below nearest support or swing low
                 support_levels = [s for s in structure_levels['supports'] if s['price'] < current_price]
                 if support_levels:
                     stop_loss = support_levels[0]['price'] * 0.995  # Slightly below support
+                    sl_method = f"structure support at {support_levels[0]['price']:.6f}"
                 else:
-                    # Fallback: Recent swing low
-                    recent_low = min(lows[-20:])
-                    stop_loss = recent_low * 0.998
+                    # 🎯 ATR-based fallback for stop loss
+                    atr = self._calculate_atr(highs, lows, closes)
+                    stop_loss = current_price - (atr * 1.5)  # 1.5x ATR stop
+                    sl_method = f"ATR fallback: {current_price:.6f} - ({atr:.6f} * 1.5)"
                     
             else:  # SHORT
                 entry_price = current_price
@@ -1690,37 +1789,78 @@ class OpportunityManager:
                 if support_levels:
                     confluence_support = next((s for s in support_levels if s['confluence_score'] >= 2), support_levels[0])
                     take_profit = confluence_support['price'] * 1.005  # Slightly above support
+                    tp_method = f"structure support at {confluence_support['price']:.6f}"
                 else:
-                    # Fallback: 5-8% swing target
-                    take_profit = current_price * (0.95 - (consensus_confidence * 0.03))
+                    # 🎯 ATR-based fallback for SHORT take profit
+                    atr = self._calculate_atr(highs, lows, closes)
+                    take_profit = current_price - (atr * 3.0 * consensus_confidence)  # 2-3x ATR based on confidence
+                    tp_method = f"ATR fallback: {current_price:.6f} - ({atr:.6f} * 3.0 * {consensus_confidence:.3f})"
                 
                 # SL: Above nearest resistance or swing high
                 resistance_levels = [r for r in structure_levels['resistances'] if r['price'] > current_price]
                 if resistance_levels:
                     stop_loss = resistance_levels[0]['price'] * 1.005  # Slightly above resistance
+                    sl_method = f"structure resistance at {resistance_levels[0]['price']:.6f}"
                 else:
-                    # Fallback: Recent swing high
-                    recent_high = max(highs[-20:])
-                    stop_loss = recent_high * 1.002
+                    # 🎯 ATR-based fallback for SHORT stop loss
+                    atr = self._calculate_atr(highs, lows, closes)
+                    stop_loss = current_price + (atr * 1.5)  # 1.5x ATR stop
+                    sl_method = f"ATR fallback: {current_price:.6f} + ({atr:.6f} * 1.5)"
             
-            # Validate risk/reward (minimum 2:1 for swing trades)
+            rejection_log["stage"] = "risk_reward_validation"
+            
+            # 🎯 DYNAMIC RISK/REWARD based on signal confidence (your insight!)
             risk = abs(entry_price - stop_loss)
             reward = abs(take_profit - entry_price)
             risk_reward = reward / risk if risk > 0 else 0
+            rejection_log["risk_reward"] = risk_reward
             
-            if risk_reward < 2.0:
+            # Higher confidence signals can accept lower R/R ratios - RELAXED for swing signals
+            min_rr = 1.0 + (1.0 - consensus_confidence) * 0.5  # Range: 1.0-1.5 based on confidence (reduced from 1.3-2.0)
+            
+            if risk_reward < min_rr:
+                rejection_log["rejection_reason"] = f"R/R too low: {risk_reward:.3f} < {min_rr:.3f} (conf: {consensus_confidence:.3f}) | TP method: {tp_method} | SL method: {sl_method}"
+                logger.debug(f"🚫 SWING REJECTED {symbol}: {rejection_log['rejection_reason']}")
+                logger.debug(f"📊 SWING REJECTION LOG: {rejection_log}")
                 return None  # Not worth the risk
             
-            # 🔥 ORDERBOOK PRESSURE CONFIRMATION for swing trading
+            rejection_log["stage"] = "orderbook_pressure_check"
+            
+            # 🎯 SMART ORDERBOOK PRESSURE (only for near-breakout situations)
             swing_signal = {
                 'symbol': symbol,
                 'direction': winning_direction,
                 'confidence': consensus_confidence
             }
             
-            if not self._check_orderbook_pressure_confirmation(swing_signal, market_data):
-                logger.info(f"🚫 SWING TRADING signal for {symbol} ({winning_direction}) rejected by orderbook pressure analysis")
-                return None
+            # Only apply orderbook pressure for signals near key levels (your insight!)
+            near_breakout = False
+            if winning_direction == 'LONG':
+                # Check if we're within 2% of recent high (potential breakout)
+                recent_high = max(highs[-10:])
+                near_breakout = current_price > recent_high * 0.98
+            else:
+                # Check if we're within 2% of recent low (potential breakdown)
+                recent_low = min(lows[-10:])
+                near_breakout = current_price < recent_low * 1.02
+            
+            # Apply orderbook filtering only for breakout situations or low-confidence signals
+            orderbook_required = near_breakout or consensus_confidence < 0.75
+            if orderbook_required:
+                orderbook_confirmed = self._check_orderbook_pressure_confirmation(swing_signal, market_data)
+                rejection_log["orderbook_confirmed"] = orderbook_confirmed
+                if not orderbook_confirmed:
+                    rejection_log["rejection_reason"] = f"Orderbook pressure failed (near breakout: {near_breakout}, low confidence: {consensus_confidence < 0.75})"
+                    logger.debug(f"🚫 SWING REJECTED {symbol}: {rejection_log['rejection_reason']}")
+                    logger.debug(f"📊 SWING REJECTION LOG: {rejection_log}")
+                    return None
+            else:
+                rejection_log["orderbook_confirmed"] = "skipped"
+                logger.debug(f"⏭️  SWING {symbol}: Orderbook pressure check skipped (not near breakout, high confidence)")
+            
+            # 🎉 SIGNAL ACCEPTED - Log success details
+            logger.info(f"✅ SWING ACCEPTED {symbol}: {winning_direction} | Conf: {consensus_confidence:.3f} | R/R: {risk_reward:.2f}:1 | Votes: {len(winning_votes)} | Structure: {rejection_log['structure_found']}")
+            logger.debug(f"📊 SWING SUCCESS LOG: {rejection_log}")
             
             # Calculate $100 investment details
             volatility = self._calculate_volatility(closes)
@@ -1768,10 +1908,10 @@ class OpportunityManager:
                 # Strategy votes breakdown
                 'strategy_votes': [v['strategy'] for v in winning_votes],
                 'reasoning': [
-                    f"Multi-strategy consensus: {len(winning_votes)} votes",
-                    f"Structure-based TP/SL targeting {abs(take_profit - entry_price) / entry_price * 100:.1f}%",
-                    f"Risk/Reward: {risk_reward:.1f}:1",
-                    "✅ Orderbook pressure confirmed"
+                    f"Confidence-weighted score: {net_confidence_score:.2f} (threshold: {required_score:.2f})",
+                    f"Dynamic TP/SL targeting {abs(take_profit - entry_price) / entry_price * 100:.1f}%",
+                    f"Risk/Reward: {risk_reward:.1f}:1 (min: {min_rr:.1f}:1)",
+                    f"Smart orderbook filtering: {'applied' if orderbook_required else 'skipped'}"
                 ] + [reason for vote in winning_votes for reason in vote.get('reasoning', [])],
                 
                 # Market data
@@ -1784,7 +1924,7 @@ class OpportunityManager:
             return opportunity
             
         except Exception as e:
-            logger.error(f"Error generating swing trading signal for {symbol}: {e}")
+            logger.error(f"💥 SWING ERROR {symbol}: {str(e)}")
             return None
 
     def _find_structure_levels_with_confluence(self, highs: List[float], lows: List[float], closes: List[float], volumes: List[float]) -> Dict[str, List[Dict]]:
@@ -1870,42 +2010,42 @@ class OpportunityManager:
             return {'resistances': [], 'supports': []}
 
     def _vote_trend_strategy(self, closes: List[float], highs: List[float], lows: List[float], volumes: List[float]) -> Optional[Dict]:
-        """Trend following strategy vote."""
+        """Trend following strategy vote - FIXED: Looser but still sound criteria."""
         try:
-            if len(closes) < 20:
+            if len(closes) < 21:  # Need SMA21
                 return None
             
             # Calculate moving averages
-            sma_9 = sum(closes[-9:]) / 9
-            sma_21 = sum(closes[-21:]) / 21
+            sma_20 = sum(closes[-20:]) / 20
+            sma_50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else sum(closes[-21:]) / 21
             current_price = closes[-1]
             
-            # Trend strength
-            price_change_9 = (current_price - closes[-10]) / closes[-10] if len(closes) > 9 else 0
-            
-            # Volume confirmation
+            # Volume confirmation - REDUCED from 1.5x to 1.1x
             recent_volume = sum(volumes[-3:]) / 3
             avg_volume = sum(volumes[-20:]) / 20
             volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1
             
-            # Strong uptrend
-            if sma_9 > sma_21 and current_price > sma_9 and price_change_9 > 0.01 and volume_ratio > 1.1:
-                confidence = 0.7 + min(0.2, price_change_9 * 10) + min(0.1, (volume_ratio - 1) * 0.5)
+            # FIXED: Looser uptrend criteria - price above SMA20 and SMA20 > SMA50
+            if sma_20 > sma_50 and current_price > sma_20 and volume_ratio > 1.1:
+                # Calculate trend strength for confidence
+                price_change_20 = (current_price - closes[-21]) / closes[-21] if len(closes) > 20 else 0
+                confidence = 0.65 + min(0.25, abs(price_change_20) * 10) + min(0.1, (volume_ratio - 1.1) * 0.5)
                 return {
                     'direction': 'LONG',
                     'confidence': confidence,
                     'strategy': 'trend_following',
-                    'reasoning': [f'Strong uptrend: {price_change_9:.1%} with volume confirmation']
+                    'reasoning': [f'Uptrend: Price above SMA20, SMA20>SMA50, volume {volume_ratio:.1f}x']
                 }
             
-            # Strong downtrend
-            elif sma_9 < sma_21 and current_price < sma_9 and price_change_9 < -0.01 and volume_ratio > 1.1:
-                confidence = 0.7 + min(0.2, abs(price_change_9) * 10) + min(0.1, (volume_ratio - 1) * 0.5)
+            # FIXED: Looser downtrend criteria - price below SMA20 and SMA20 < SMA50
+            elif sma_20 < sma_50 and current_price < sma_20 and volume_ratio > 1.1:
+                price_change_20 = (current_price - closes[-21]) / closes[-21] if len(closes) > 20 else 0
+                confidence = 0.65 + min(0.25, abs(price_change_20) * 10) + min(0.1, (volume_ratio - 1.1) * 0.5)
                 return {
                     'direction': 'SHORT',
                     'confidence': confidence,
                     'strategy': 'trend_following',
-                    'reasoning': [f'Strong downtrend: {price_change_9:.1%} with volume confirmation']
+                    'reasoning': [f'Downtrend: Price below SMA20, SMA20<SMA50, volume {volume_ratio:.1f}x']
                 }
             
             return None
@@ -1914,7 +2054,7 @@ class OpportunityManager:
             return None
 
     def _vote_breakout_strategy(self, closes: List[float], highs: List[float], lows: List[float], volumes: List[float], structure_levels: Dict) -> Optional[Dict]:
-        """Breakout strategy vote with structure confirmation."""
+        """Breakout strategy vote - FIXED: Reduced volume threshold and added fallbacks."""
         try:
             current_price = closes[-1]
             current_volume = volumes[-1]
@@ -1924,13 +2064,13 @@ class OpportunityManager:
             recent_high = max(highs[-10:])
             recent_low = min(lows[-10:])
             
-            # Volume surge required
-            volume_surge = current_volume > avg_volume * 1.5
+            # FIXED: Volume surge required - reduced from 1.2x to 1.1x
+            volume_surge = current_volume > avg_volume * 1.1
             
             # Breakout above resistance
             resistance_levels = [r['price'] for r in structure_levels.get('resistances', [])]
             if resistance_levels and current_price > min(resistance_levels) and volume_surge:
-                confidence = 0.75 + min(0.15, (current_volume / avg_volume - 1.5) * 0.1)
+                confidence = 0.75 + min(0.15, (current_volume / avg_volume - 1.1) * 0.1)
                 return {
                     'direction': 'LONG',
                     'confidence': confidence,
@@ -1938,15 +2078,56 @@ class OpportunityManager:
                     'reasoning': [f'Breakout above resistance with {current_volume/avg_volume:.1f}x volume']
                 }
             
+            # FIXED: Enhanced fallback - breakout above recent high with moderate volume
+            elif volume_surge and current_price > recent_high * 0.999:
+                confidence = 0.70 + min(0.10, (current_volume / avg_volume - 1.1) * 0.05)
+                return {
+                    'direction': 'LONG',
+                    'confidence': confidence,
+                    'strategy': 'breakout',
+                    'reasoning': [f'Volume breakout above recent high with {current_volume/avg_volume:.1f}x volume']
+                }
+            
+            # FIXED: NEW - No structure fallback for multi-day highs
+            elif len(highs) >= 20 and current_price > max(highs[-21:-1]) * 0.998:  # At/near previous 20-day high
+                # Allow breakout even without volume surge if at multi-day high
+                confidence = 0.65 + min(0.10, (current_volume / avg_volume - 1.0) * 0.1)
+                return {
+                    'direction': 'LONG',
+                    'confidence': confidence,
+                    'strategy': 'breakout',
+                    'reasoning': [f'Multi-day high breakout (20-day high)']
+                }
+            
             # Breakdown below support
             support_levels = [s['price'] for s in structure_levels.get('supports', [])]
             if support_levels and current_price < max(support_levels) and volume_surge:
-                confidence = 0.75 + min(0.15, (current_volume / avg_volume - 1.5) * 0.1)
+                confidence = 0.75 + min(0.15, (current_volume / avg_volume - 1.1) * 0.1)
                 return {
                     'direction': 'SHORT',
                     'confidence': confidence,
                     'strategy': 'breakout',
                     'reasoning': [f'Breakdown below support with {current_volume/avg_volume:.1f}x volume']
+                }
+            
+            # FIXED: Enhanced fallback - breakdown below recent low with moderate volume
+            elif volume_surge and current_price < recent_low * 1.001:
+                confidence = 0.70 + min(0.10, (current_volume / avg_volume - 1.1) * 0.05)
+                return {
+                    'direction': 'SHORT',
+                    'confidence': confidence,
+                    'strategy': 'breakout',
+                    'reasoning': [f'Volume breakdown below recent low with {current_volume/avg_volume:.1f}x volume']
+                }
+            
+            # FIXED: NEW - No structure fallback for multi-day lows
+            elif len(lows) >= 20 and current_price < min(lows[-21:-1]) * 1.002:  # At/near previous 20-day low
+                confidence = 0.65 + min(0.10, (current_volume / avg_volume - 1.0) * 0.1)
+                return {
+                    'direction': 'SHORT',
+                    'confidence': confidence,
+                    'strategy': 'breakout',
+                    'reasoning': [f'Multi-day low breakdown (20-day low)']
                 }
             
             return None
@@ -1955,71 +2136,147 @@ class OpportunityManager:
             return None
 
     def _vote_micro_pullback_reversal(self, opens: List[float], highs: List[float], lows: List[float], closes: List[float], volumes: List[float]) -> Optional[Dict]:
-        """Micro pullback reversal strategy - catch the second leg."""
+        """Micro pullback reversal strategy - FIXED: Broader pattern window and looser definitions."""
         try:
-            if len(closes) < 10:
+            if len(closes) < 15:  # Need more data for RSI calculation
                 return None
             
             current_price = closes[-1]
             
-            # Step 1: Identify strong volume candle (origin breakout)
+            # FIXED: Calculate simple RSI for additional confirmation
+            def calculate_simple_rsi(prices, period=14):
+                if len(prices) < period + 1:
+                    return 50  # Neutral
+                
+                gains = []
+                losses = []
+                for i in range(1, min(len(prices), period + 1)):
+                    change = prices[i] - prices[i-1]
+                    if change > 0:
+                        gains.append(change)
+                        losses.append(0)
+                    else:
+                        gains.append(0)
+                        losses.append(abs(change))
+                
+                avg_gain = sum(gains) / len(gains) if gains else 0
+                avg_loss = sum(losses) / len(losses) if losses else 0.001
+                
+                rs = avg_gain / avg_loss if avg_loss > 0 else 100
+                rsi = 100 - (100 / (1 + rs))
+                return rsi
+            
+            current_rsi = calculate_simple_rsi(closes)
+            
+            # FIXED: Step 1 - Look for volume spike in broader window (2-8 bars back)
             volume_spike_index = None
             avg_volume = sum(volumes[-20:]) / 20
             
-            for i in range(-5, -1):  # Look back 2-5 bars
-                if volumes[i] > avg_volume * 2:  # Strong volume spike
+            for i in range(-8, -1):  # Extended from -5 to -8
+                if len(volumes) + i >= 0 and volumes[i] > avg_volume * 1.8:  # Reduced from 2.0x
                     volume_spike_index = i
                     break
             
             if volume_spike_index is None:
                 return None
             
-            # Step 2: Check for 2-3 bar pullback after volume spike
-            spike_price = closes[volume_spike_index]
-            spike_direction = 'UP' if closes[volume_spike_index] > opens[volume_spike_index] else 'DOWN'
+            # FIXED: Step 2 - More flexible pullback detection
+            spike_close = closes[volume_spike_index]
+            spike_high = highs[volume_spike_index]
+            spike_low = lows[volume_spike_index]
+            spike_direction = 'UP' if spike_close > opens[volume_spike_index] else 'DOWN'
             
-            # For UP spike: check if we've pulled back but not too much
+            # Calculate ATR for dynamic thresholds
+            def calculate_atr_simple(highs, lows, closes, period=10):
+                if len(closes) < 2:
+                    return closes[-1] * 0.02
+                
+                true_ranges = []
+                for i in range(1, min(len(closes), period + 1)):
+                    high_low = highs[i] - lows[i]
+                    high_close = abs(highs[i] - closes[i-1])
+                    low_close = abs(lows[i] - closes[i-1])
+                    true_range = max(high_low, high_close, low_close)
+                    true_ranges.append(true_range)
+                
+                return sum(true_ranges) / len(true_ranges)
+            
+            atr = calculate_atr_simple(highs, lows, closes)
+            
+            # FIXED: For UP spike - broader pullback criteria
             if spike_direction == 'UP':
                 pullback_low = min(lows[volume_spike_index:])
-                pullback_depth = (spike_price - pullback_low) / spike_price
                 
-                # Valid pullback: 1-4% retracement
-                if 0.01 <= pullback_depth <= 0.04:
-                    # Check if bouncing (current price above pullback low)
-                    if current_price > pullback_low * 1.002:
-                        # Calculate VWAP proxy (simple)
-                        vwap_proxy = sum(closes[-21:]) / 21
-                        
-                        # Bounce confirmation: price above VWAP and recent low
-                        if current_price > vwap_proxy:
-                            confidence = 0.8 - pullback_depth * 5  # Higher confidence for smaller pullbacks
-                            return {
-                                'direction': 'LONG',
-                                'confidence': confidence,
-                                'strategy': 'micro_pullback_reversal',
-                                'reasoning': [f'Micro pullback reversal: {pullback_depth:.1%} retracement, bouncing off VWAP']
-                            }
+                # FIXED: Use ATR-based pullback instead of fixed percentage
+                atr_pullback_depth = (spike_high - pullback_low) / spike_high
+                
+                # FIXED: Allow pullback if candle body < ATR × 0.6 OR series of small candles
+                recent_candles = closes[volume_spike_index:]
+                small_body_count = 0
+                for i in range(len(recent_candles)):
+                    if i == 0:
+                        continue
+                    body_size = abs(recent_candles[i] - recent_candles[i-1])
+                    if body_size < atr * 0.6:
+                        small_body_count += 1
+                
+                # FIXED: Multiple pullback validation methods
+                valid_pullback = (
+                    (0.005 <= atr_pullback_depth <= 0.06) or  # Extended range: 0.5-6%
+                    (small_body_count >= 2) or  # Series of small candles
+                    (40 <= current_rsi <= 60)   # RSI in pullback range
+                )
+                
+                if valid_pullback and current_price > pullback_low * 1.001:
+                    # FIXED: VWAP and volume tapering confirmation
+                    vwap_proxy = sum(closes[-15:]) / 15
+                    recent_vol_avg = sum(volumes[volume_spike_index:]) / len(volumes[volume_spike_index:])
+                    volume_tapering = recent_vol_avg < avg_volume * 1.2  # Volume cooling off
+                    
+                    if current_price > vwap_proxy or volume_tapering:
+                        confidence = 0.75 - (atr_pullback_depth * 3) + (0.1 if volume_tapering else 0)
+                        return {
+                            'direction': 'LONG',
+                            'confidence': min(0.9, confidence),
+                            'strategy': 'micro_pullback_reversal',
+                            'reasoning': [f'Micro pullback: {atr_pullback_depth:.1%} retracement, RSI {current_rsi:.0f}, volume tapering: {volume_tapering}']
+                        }
             
-            # For DOWN spike: check if we've bounced but not too much
+            # FIXED: For DOWN spike - broader bounce criteria
             elif spike_direction == 'DOWN':
                 bounce_high = max(highs[volume_spike_index:])
-                bounce_depth = (bounce_high - spike_price) / spike_price
                 
-                # Valid bounce: 1-4% retracement
-                if 0.01 <= bounce_depth <= 0.04:
-                    # Check if resuming down (current price below bounce high)
-                    if current_price < bounce_high * 0.998:
-                        vwap_proxy = sum(closes[-21:]) / 21
-                        
-                        # Resume confirmation: price below VWAP and recent high
-                        if current_price < vwap_proxy:
-                            confidence = 0.8 - bounce_depth * 5
-                            return {
-                                'direction': 'SHORT',
-                                'confidence': confidence,
-                                'strategy': 'micro_pullback_reversal',
-                                'reasoning': [f'Micro pullback reversal: {bounce_depth:.1%} bounce, resuming below VWAP']
-                            }
+                atr_bounce_depth = (bounce_high - spike_low) / spike_low
+                
+                # FIXED: Same flexible criteria for SHORT
+                recent_candles = closes[volume_spike_index:]
+                small_body_count = 0
+                for i in range(len(recent_candles)):
+                    if i == 0:
+                        continue
+                    body_size = abs(recent_candles[i] - recent_candles[i-1])
+                    if body_size < atr * 0.6:
+                        small_body_count += 1
+                
+                valid_bounce = (
+                    (0.005 <= atr_bounce_depth <= 0.06) or
+                    (small_body_count >= 2) or
+                    (40 <= current_rsi <= 60)
+                )
+                
+                if valid_bounce and current_price < bounce_high * 0.999:
+                    vwap_proxy = sum(closes[-15:]) / 15
+                    recent_vol_avg = sum(volumes[volume_spike_index:]) / len(volumes[volume_spike_index:])
+                    volume_tapering = recent_vol_avg < avg_volume * 1.2
+                    
+                    if current_price < vwap_proxy or volume_tapering:
+                        confidence = 0.75 - (atr_bounce_depth * 3) + (0.1 if volume_tapering else 0)
+                        return {
+                            'direction': 'SHORT',
+                            'confidence': min(0.9, confidence),
+                            'strategy': 'micro_pullback_reversal',
+                            'reasoning': [f'Micro pullback: {atr_bounce_depth:.1%} bounce, RSI {current_rsi:.0f}, volume tapering: {volume_tapering}']
+                        }
             
             return None
             
@@ -2038,6 +2295,26 @@ class OpportunityManager:
             
         except Exception:
             return 0.02
+
+    def _calculate_atr(self, highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
+        """Calculate Average True Range for dynamic TP/SL."""
+        try:
+            if len(closes) < 2:
+                return closes[-1] * 0.02  # 2% fallback
+            
+            true_ranges = []
+            for i in range(1, min(len(closes), period + 1)):
+                high_low = highs[i] - lows[i]
+                high_close = abs(highs[i] - closes[i-1])
+                low_close = abs(lows[i] - closes[i-1])
+                true_range = max(high_low, high_close, low_close)
+                true_ranges.append(true_range)
+            
+            atr = sum(true_ranges) / len(true_ranges)
+            return atr
+            
+        except Exception:
+            return closes[-1] * 0.02  # 2% fallback
 
     def _should_update_swing_signal(self, symbol: str, current_time: float) -> bool:
         """Check if a swing signal should be updated (more conservative than regular signals)."""
@@ -2433,3 +2710,134 @@ class OpportunityManager:
         except Exception as e:
             logger.error(f"Error simulating orderbook pressure for {symbol}: {e}")
             return True
+
+    def _generate_basic_swing_signal(self, symbol: str, market_data: Dict[str, Any], current_time: float) -> Optional[Dict[str, Any]]:
+        """Generate basic swing signal when advanced voting fails - ensures we get swing signals."""
+        try:
+            klines = market_data['klines']
+            if len(klines) < 20:
+                return None
+                
+            # Extract price data
+            closes = [float(k['close']) for k in klines[-20:]]
+            highs = [float(k['high']) for k in klines[-20:]]
+            lows = [float(k['low']) for k in klines[-20:]]
+            volumes = [float(k['volume']) for k in klines[-20:]]
+            
+            current_price = closes[-1]
+            
+            # Simple swing logic: momentum + basic structure
+            # 1. Check momentum (price vs moving average)
+            sma_10 = sum(closes[-10:]) / 10
+            price_vs_sma = (current_price - sma_10) / sma_10
+            
+            # 2. Check recent volatility
+            volatility = self._calculate_volatility(closes)
+            
+            # 3. Simple volume confirmation
+            recent_volume = sum(volumes[-3:]) / 3
+            avg_volume = sum(volumes) / len(volumes)
+            volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1
+            
+            # 4. Basic direction logic
+            direction = None
+            confidence = 0.6  # Base confidence for basic signals
+            
+            # LONG signal: price above SMA, positive momentum, decent volume
+            if price_vs_sma > 0.005 and volume_ratio > 1.0:  # 0.5% above SMA
+                direction = 'LONG'
+                confidence += min(0.2, price_vs_sma * 20)  # Boost based on momentum
+                confidence += min(0.1, (volume_ratio - 1.0) * 0.1)  # Volume boost
+                
+            # SHORT signal: price below SMA, negative momentum, decent volume  
+            elif price_vs_sma < -0.005 and volume_ratio > 1.0:  # 0.5% below SMA
+                direction = 'SHORT'
+                confidence += min(0.2, abs(price_vs_sma) * 20)  # Boost based on momentum
+                confidence += min(0.1, (volume_ratio - 1.0) * 0.1)  # Volume boost
+            
+            if not direction:
+                return None
+            
+            # 5. Calculate swing-style TP/SL (wider than stable signals)
+            atr = self._calculate_atr(highs, lows, closes, period=10)
+            
+            if direction == 'LONG':
+                entry_price = current_price
+                take_profit = current_price + (atr * 4.0)  # Wider TP for swing
+                stop_loss = current_price - (atr * 2.0)    # Wider SL for swing
+            else:  # SHORT
+                entry_price = current_price
+                take_profit = current_price - (atr * 4.0)  # Wider TP for swing
+                stop_loss = current_price + (atr * 2.0)    # Wider SL for swing
+            
+            # 6. Check basic risk/reward
+            risk = abs(entry_price - stop_loss)
+            reward = abs(take_profit - entry_price)
+            risk_reward = reward / risk if risk > 0 else 0
+            
+            if risk_reward < 1.5:  # Minimum R/R for basic swing
+                return None
+            
+            # 7. Calculate investment details
+            investment_calcs = self._calculate_100_dollar_investment(entry_price, take_profit, stop_loss, confidence, volatility)
+            
+            # 8. Create basic swing opportunity
+            opportunity = {
+                'symbol': symbol,
+                'direction': direction,
+                'entry_price': entry_price,
+                'entry': entry_price,
+                'take_profit': take_profit,
+                'stop_loss': stop_loss,
+                'confidence': confidence,
+                'confidence_score': confidence,
+                'leverage': 1.0,
+                'recommended_leverage': investment_calcs['recommended_leverage'],
+                'risk_reward': risk_reward,
+                
+                # $100 investment specific fields
+                'investment_amount_100': investment_calcs['investment_amount_100'],
+                'position_size_100': investment_calcs['position_size_100'],
+                'max_position_with_leverage_100': investment_calcs['max_position_with_leverage_100'],
+                'expected_profit_100': investment_calcs['expected_profit_100'],
+                'expected_return_100': investment_calcs['expected_return_100'],
+                
+                # $10,000 account fields
+                'position_size': investment_calcs['position_size'],
+                'notional_value': investment_calcs['notional_value'],
+                'expected_profit': investment_calcs['expected_profit'],
+                'expected_return': investment_calcs['expected_return'],
+                
+                'volume_24h': sum(volumes[-24:]) if len(volumes) >= 24 else sum(volumes),
+                'volatility': volatility * 100,
+                'score': confidence,
+                'timestamp': int(current_time * 1000),
+                
+                # Basic swing trading fields
+                'strategy': 'swing_basic',
+                'strategy_type': 'swing_basic',
+                'voting_consensus': 1,  # Single strategy
+                'structure_based': False,  # Basic signal, not structure-based
+                'trailing_enabled': True,
+                
+                # Strategy info
+                'strategy_votes': ['basic_momentum'],
+                'reasoning': [
+                    f"Basic swing momentum: {price_vs_sma*100:.2f}% vs SMA10",
+                    f"Volume confirmation: {volume_ratio:.2f}x average",
+                    f"Swing R/R: {risk_reward:.1f}:1 (ATR-based)",
+                    "Basic swing fallback signal"
+                ],
+                
+                # Market data
+                'market_regime': self._determine_market_regime_simple(closes, volumes),
+                'regime': self._determine_market_regime_simple(closes, volumes).upper(),
+                'data_source': market_data.get('data_source', 'unknown'),
+                'is_real_data': market_data.get('is_real_data', False),
+            }
+            
+            return opportunity
+            
+        except Exception as e:
+            logger.error(f"Error generating basic swing signal for {symbol}: {e}")
+            return None
