@@ -476,5 +476,16 @@ async def get_trading_stats():
             "message": f"Error getting trading stats: {str(e)}"
         }
 
+# Legacy aliases for old incorrect paths (to eliminate 404s from cached frontend)
+@app.get("/api/v1/stats")
+async def get_stats_legacy():
+    """Legacy alias for /api/v1/trading/stats to eliminate 404s."""
+    return await get_trading_stats()
+
+@app.get("/api/v1/positions") 
+async def get_positions_legacy():
+    """Legacy alias for /api/v1/trading/positions to eliminate 404s."""
+    return await get_positions()
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 
