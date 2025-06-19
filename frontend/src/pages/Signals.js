@@ -90,7 +90,7 @@ const Signals = () => {
     try {
       // Only show loading state if we have no signals yet (initial load)
       if (signals.length === 0) {
-      setLoading(true);
+        setLoading(true);
       }
       
       const response = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.SIGNALS}`, {
@@ -100,7 +100,7 @@ const Signals = () => {
           'Content-Type': 'application/json'
         }
       });
-      
+
       if (response.data) {
         const data = response.data;
         
@@ -137,9 +137,9 @@ const Signals = () => {
           expected_return_100: signal.expected_return_100 || 0,
           
           indicators: {
-          macd: { value: 0, signal: 0 },
+            macd: { value: 0, signal: 0 },
             rsi: 50,
-          bb: { upper: 0, middle: 0, lower: 0 }
+            bb: { upper: 0, middle: 0, lower: 0 }
           },
           is_stable_signal: signal.is_stable_signal || false,
           invalidation_reason: signal.invalidation_reason || null,
@@ -170,8 +170,8 @@ const Signals = () => {
         }
         
         setLastUpdated(new Date());
-      setError(null);
-      setRetryCount(0);
+        setError(null);
+        setRetryCount(0);
       }
     } catch (err) {
       handleError(err);
@@ -212,7 +212,7 @@ const Signals = () => {
         setError(`✅ ${response.data.message}`);
         setTimeout(() => setError(null), 5000);
       }
-    } catch (err) {
+      } catch (err) {
       console.error('Error executing manual trade:', err);
       setError(`❌ Failed to execute trade: ${err.response?.data?.detail || err.message}`);
     }
@@ -244,7 +244,7 @@ const Signals = () => {
         setTradingMode(response.data.trading_mode);
         setModeDescriptions(response.data.mode_descriptions);
       }
-        } catch (err) {
+    } catch (err) {
       console.error('Error fetching trading mode:', err);
     }
   };
@@ -264,8 +264,8 @@ const Signals = () => {
         setTimeout(() => {
           fetchSignals();
         }, 1000);
-        }
-      } catch (err) {
+      }
+    } catch (err) {
       console.error('Error changing trading mode:', err);
       setError(`❌ Failed to change trading mode: ${err.response?.data?.message || err.message}`);
     }
@@ -1082,24 +1082,24 @@ const Signals = () => {
               sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}
             >
               <MenuItem value="stable">
-            <Box>
+                <Box>
                   <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                     Stable
-                </Typography>
+                  </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                     Conservative ATR-based
-                </Typography>
+                  </Typography>
                 </Box>
               </MenuItem>
               <MenuItem value="swing_trading">
                 <Box>
                   <Typography variant="body2" fontWeight="bold" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                     Swing Trading
-                </Typography>
+                  </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
                     Multi-strategy + Structure
                   </Typography>
-            </Box>
+                </Box>
               </MenuItem>
             </Select>
           </FormControl>
@@ -1118,7 +1118,7 @@ const Signals = () => {
                 <Typography variant="body2" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                   Auto-Trading
                 </Typography>
-            <Chip
+                <Chip
                   label={autoTradingEnabled ? 'ON' : 'OFF'}
                   color={autoTradingEnabled ? 'success' : 'default'}
                   size="small"
@@ -1148,7 +1148,7 @@ const Signals = () => {
               size="small"
               sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
             />
-          <Tooltip title="Refresh signals">
+            <Tooltip title="Refresh signals">
               <IconButton 
                 onClick={fetchSignals} 
                 disabled={loading}
@@ -1156,8 +1156,8 @@ const Signals = () => {
                 sx={{ p: { xs: 0.5, sm: 1 } }}
               >
                 <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+              </IconButton>
+            </Tooltip>
           </Box>
         </Box>
       </Box>
@@ -1324,7 +1324,7 @@ const Signals = () => {
                   sx={{ fontSize: { xs: '0.8rem', sm: '1rem' } }}
                 >
                   Scan in Progress
-            </Typography>
+                </Typography>
                 <Typography 
                   variant="body2" 
                   color="text.secondary"

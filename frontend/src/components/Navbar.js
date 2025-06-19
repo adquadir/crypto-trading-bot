@@ -78,27 +78,27 @@ const Navbar = () => {
           {/* Desktop Navigation */}
           {!isMobile && (
             <Box sx={{ flexGrow: 1, display: 'flex', gap: 1, overflow: 'hidden' }}>
-            {navItems.map((item) => (
-              <Button
-                key={item.path}
-                component={RouterLink}
-                to={item.path}
-                startIcon={item.icon}
-                sx={{
-                  color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
-                  '&:hover': {
-                    backgroundColor: 'action.hover',
-                  },
+              {navItems.map((item) => (
+                <Button
+                  key={item.path}
+                  component={RouterLink}
+                  to={item.path}
+                  startIcon={item.icon}
+                  sx={{
+                    color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                    },
                     px: { sm: 1, md: 2 },
                     fontSize: { sm: '0.8rem', md: '0.875rem' },
                     minWidth: 'auto',
                     flexShrink: 0
-                }}
-              >
-                {item.label}
-              </Button>
-            ))}
-          </Box>
+                  }}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </Box>
           )}
 
           {/* Mobile Navigation */}

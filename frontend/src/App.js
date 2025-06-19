@@ -37,15 +37,15 @@ function App() {
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-        <Router>
-          <Navbar />
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/signals" element={<Signals />} />
-            <Route path="/opportunities" element={<Opportunities />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </Router>
+      <Router>
+        <Navbar />
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/signals" element={<Signals />} />
+          <Route path="/opportunities" element={<Opportunities />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </Router>
     </ThemeProvider>
   );
 }
