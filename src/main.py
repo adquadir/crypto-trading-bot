@@ -3,7 +3,8 @@ import asyncio
 import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
-from src.api.routes import router
+from src.api import routes
+router = routes.router
 from src.trading_bot import trading_bot
 from src.market_data.exchange_client import ExchangeClient
 from src.api.connection_manager import ConnectionManager
