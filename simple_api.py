@@ -33,8 +33,8 @@ _scan_in_progress = False
 _trading_mode = "stable"  # Default mode: "stable", "swing_trading"
 
 # Smart caching for different trading modes
-_stable_signals = {}
-_swing_signals = {}
+_stable_signals = []
+_swing_signals = []
 _stable_last_scan = 0
 _swing_last_scan = 0
 _signal_freshness_threshold = 120  # 2 minutes - signals are considered fresh for this long
@@ -69,18 +69,40 @@ async def _background_scan_opportunities():
         
         if _trading_mode == "swing_trading":
             await opportunity_manager.scan_opportunities_incremental_swing()
-            # Cache swing signals separately
-            signals = opportunity_manager.get_opportunities()
-            _swing_signals = signals.copy() if isinstance(signals, list) else list(signals.values())
+            # Cache swing signals separately - get ALL opportunities and filter for swing
+            all_signals = opportunity_manager.get_opportunities()
+            swing_only = []
+            for signal in all_signals:
+                is_swing_signal = (
+                    signal.get('strategy') in ['swing_trading', 'swing_basic'] or
+                    signal.get('strategy_type') in ['swing_trading', 'swing_basic'] or
+                    signal.get('signal_id', '').find('swing') != -1 or
+                    signal.get('is_stable_signal', True) == False
+                )
+                if is_swing_signal:
+                    swing_only.append(signal)
+            
+            _swing_signals = swing_only.copy()
             _swing_last_scan = time.time()
-            print(f"✅ Swing scan completed - cached {len(_swing_signals)} signals")
+            print(f"✅ Swing scan completed - cached {len(_swing_signals)} swing signals from {len(all_signals)} total")
         else:
             await opportunity_manager.scan_opportunities_incremental()
-            # Cache stable signals separately  
-            signals = opportunity_manager.get_opportunities()
-            _stable_signals = signals.copy() if isinstance(signals, list) else list(signals.values())
+            # Cache stable signals separately - get ALL opportunities and filter for stable
+            all_signals = opportunity_manager.get_opportunities()
+            stable_only = []
+            for signal in all_signals:
+                is_swing_signal = (
+                    signal.get('strategy') in ['swing_trading', 'swing_basic'] or
+                    signal.get('strategy_type') in ['swing_trading', 'swing_basic'] or
+                    signal.get('signal_id', '').find('swing') != -1 or
+                    signal.get('is_stable_signal', True) == False
+                )
+                if not is_swing_signal:  # Stable signals are NOT swing signals
+                    stable_only.append(signal)
+            
+            _stable_signals = stable_only.copy()
             _stable_last_scan = time.time()
-            print(f"✅ Stable scan completed - cached {len(_stable_signals)} signals")
+            print(f"✅ Stable scan completed - cached {len(_stable_signals)} stable signals from {len(all_signals)} total")
             
         print(f"✅ Background scan completed (mode: {_trading_mode})")
     except Exception as e:
@@ -231,6 +253,9 @@ async def get_opportunities():
                 }
             }
         
+        # Check if we have any cached signals (even if not fresh)
+        cached_signals = _get_cached_signals(_trading_mode)
+        
         # No fresh cache - check if we should trigger a scan
         should_scan = _should_trigger_scan(_trading_mode)
         
@@ -242,17 +267,19 @@ async def get_opportunities():
             # Start background scan without waiting
             _background_scan_task = asyncio.create_task(_background_scan_opportunities())
         
-        # Get any existing opportunities (from live opportunity_manager or cache)
+        # Get any existing opportunities (from live opportunity_manager, or use cached as fallback)
         live_opportunities = opportunity_manager.get_opportunities()
-        cached_opportunities = _get_cached_signals(_trading_mode)
         
-        # Use live if available, otherwise use cached
+        # Prefer live signals, but fall back to cached if no live signals
         if live_opportunities:
             all_opportunities = live_opportunities
             source = "live"
-        else:
-            all_opportunities = cached_opportunities
+        elif cached_signals:
+            all_opportunities = cached_signals
             source = "cached"
+        else:
+            all_opportunities = []
+            source = "none"
         
         # Filter opportunities to only show signals that match the current mode
         filtered_opportunities = []
@@ -389,7 +416,7 @@ async def get_trading_mode():
 @app.post("/api/v1/trading/mode/{mode}")
 async def set_trading_mode(mode: str):
     """Set trading mode with smart caching - returns cached signals immediately if fresh."""
-    global _trading_mode, _background_scan_task, _last_scan_start, _scan_in_progress
+    global _trading_mode, _background_scan_task, _last_scan_start, _scan_in_progress, _stable_signals, _swing_signals, _stable_last_scan, _swing_last_scan
     
     if mode not in ["stable", "swing_trading"]:
         return {
@@ -405,9 +432,39 @@ async def set_trading_mode(mode: str):
     
     try:
         old_mode = _trading_mode
-        _trading_mode = mode
         current_time = time.time()
         
+        # IMMEDIATE PRESERVATION: Save current signals before switching
+        if opportunity_manager:
+            current_signals = opportunity_manager.get_opportunities()
+            if current_signals:
+                # Filter and save current signals to appropriate cache
+                for signal in current_signals:
+                    is_swing_signal = (
+                        signal.get('strategy') in ['swing_trading', 'swing_basic'] or
+                        signal.get('strategy_type') in ['swing_trading', 'swing_basic'] or
+                        signal.get('signal_id', '').find('swing') != -1 or
+                        signal.get('is_stable_signal', True) == False
+                    )
+                    
+                    if is_swing_signal:
+                        # Add to swing cache if not already there
+                        if signal not in _swing_signals:
+                            _swing_signals.append(signal)
+                    else:
+                        # Add to stable cache if not already there
+                        if signal not in _stable_signals:
+                            _stable_signals.append(signal)
+                
+                # Update last scan times
+                if old_mode == "swing_trading":
+                    _swing_last_scan = current_time
+                    print(f"💾 Preserved {len([s for s in current_signals if s.get('strategy') in ['swing_trading', 'swing_basic']])} swing signals before mode switch")
+                else:
+                    _stable_last_scan = current_time  
+                    print(f"💾 Preserved {len([s for s in current_signals if s.get('strategy') not in ['swing_trading', 'swing_basic']])} stable signals before mode switch")
+        
+        _trading_mode = mode
         print(f"🔄 Trading mode changed from '{old_mode}' to '{mode}'")
         
         # Smart caching: Check if we have fresh signals for this mode
@@ -425,31 +482,49 @@ async def set_trading_mode(mode: str):
                 "signals_age_seconds": current_time - (_swing_last_scan if mode == "swing_trading" else _stable_last_scan)
             }
         else:
-            # No fresh signals - trigger background scan but return immediately
-            print(f"⚠️ No fresh {mode} signals cached - triggering background scan...")
-            
-            # Don't clear existing opportunities - let the scan populate them
-            _last_scan_start = current_time
-            _scan_in_progress = True
-            
-            # Start new scan with new mode
-            _background_scan_task = asyncio.create_task(_background_scan_opportunities())
-            
-            # Return any existing signals while scan runs in background
+            # Check if we have ANY cached signals (even if not fresh)
             existing_signals = _get_cached_signals(mode)
             
-            return {
-                "status": "success", 
-                "message": f"Trading mode changed to '{mode}' - scanning for fresh signals in background",
-                "old_mode": old_mode,
-                "new_mode": mode,
-                "cached_signals": len(existing_signals),
-                "scan_needed": True,
-                "scan_progress": {
-                    "in_progress": _scan_in_progress,
-                    "last_scan_start": _last_scan_start
+            if existing_signals:
+                print(f"📦 Returning {len(existing_signals)} cached {mode} signals while triggering refresh scan...")
+                
+                # Start background scan to refresh
+                _last_scan_start = current_time
+                _scan_in_progress = True
+                _background_scan_task = asyncio.create_task(_background_scan_opportunities())
+                
+                return {
+                    "status": "success",
+                    "message": f"Trading mode changed to '{mode}' - showing {len(existing_signals)} cached signals (refreshing in background)",
+                    "old_mode": old_mode,
+                    "new_mode": mode,
+                    "cached_signals": len(existing_signals),
+                    "scan_needed": True,
+                    "scan_progress": {
+                        "in_progress": _scan_in_progress,
+                        "last_scan_start": _last_scan_start
+                    }
                 }
-            }
+            else:
+                # No cached signals - trigger background scan
+                print(f"⚠️ No {mode} signals cached - triggering background scan...")
+                
+                _last_scan_start = current_time
+                _scan_in_progress = True
+                _background_scan_task = asyncio.create_task(_background_scan_opportunities())
+                
+                return {
+                    "status": "success", 
+                    "message": f"Trading mode changed to '{mode}' - scanning for signals in background",
+                    "old_mode": old_mode,
+                    "new_mode": mode,
+                    "cached_signals": 0,
+                    "scan_needed": True,
+                    "scan_progress": {
+                        "in_progress": _scan_in_progress,
+                        "last_scan_start": _last_scan_start
+                    }
+                }
             
     except Exception as e:
         return {
@@ -569,6 +644,35 @@ async def get_trading_stats():
             "data": {},
             "message": f"Error getting trading stats: {str(e)}"
         }
+
+@app.get("/api/v1/debug/cache")
+async def debug_cache_status():
+    """Debug endpoint to check cache status."""
+    global _stable_signals, _swing_signals, _stable_last_scan, _swing_last_scan, _trading_mode
+    
+    current_time = time.time()
+    
+    return {
+        "current_mode": _trading_mode,
+        "stable_cache": {
+            "signal_count": len(_stable_signals) if isinstance(_stable_signals, list) else 0,
+            "last_scan": _stable_last_scan,
+            "age_seconds": current_time - _stable_last_scan if _stable_last_scan > 0 else "never",
+            "is_fresh": _are_signals_fresh("stable"),
+            "sample_symbols": [s.get('symbol', 'unknown') for s in (_stable_signals[:3] if isinstance(_stable_signals, list) else [])]
+        },
+        "swing_cache": {
+            "signal_count": len(_swing_signals) if isinstance(_swing_signals, list) else 0,
+            "last_scan": _swing_last_scan,
+            "age_seconds": current_time - _swing_last_scan if _swing_last_scan > 0 else "never",
+            "is_fresh": _are_signals_fresh("swing_trading"),
+            "sample_symbols": [s.get('symbol', 'unknown') for s in (_swing_signals[:3] if isinstance(_swing_signals, list) else [])]
+        },
+        "opportunity_manager": {
+            "live_signals": len(opportunity_manager.get_opportunities()) if opportunity_manager else 0,
+            "sample_symbols": [s.get('symbol', 'unknown') for s in (opportunity_manager.get_opportunities()[:3] if opportunity_manager else [])]
+        }
+    }
 
 # Legacy aliases for old incorrect paths (to eliminate 404s from cached frontend)
 @app.get("/api/v1/stats")
