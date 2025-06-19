@@ -551,13 +551,37 @@ class InstitutionalTradeAnalyzer:
         # Convert to notional value
         notional_value = position_size * trade_setup['entry_price']
         
+        # Calculate for $100 investment specifically
+        investment_amount = 100.0
+        
+        # For $100 investment, calculate how much we can trade with leverage
+        max_position_with_leverage = investment_amount * recommended_leverage
+        
+        # Calculate position size for $100 (considering leverage)
+        position_size_100 = max_position_with_leverage / trade_setup['entry_price']
+        
+        # Calculate expected profit for $100 investment
+        price_movement = abs(trade_setup['take_profit'] - trade_setup['entry_price'])
+        profit_per_unit = price_movement
+        expected_profit_100 = position_size_100 * profit_per_unit
+        
+        # Calculate return percentage for $100 investment
+        expected_return_100 = expected_profit_100 / investment_amount
+        
         return {
             'risk_percent': risk_percent,
             'recommended_leverage': recommended_leverage,
             'position_size': position_size,
             'notional_value': notional_value,
             'risk_amount': risk_amount,
-            'account_size': account_size
+            'account_size': account_size,
+            
+            # $100 investment specific calculations
+            'investment_amount_100': investment_amount,
+            'position_size_100': position_size_100,
+            'max_position_with_leverage_100': max_position_with_leverage,
+            'expected_profit_100': expected_profit_100,
+            'expected_return_100': expected_return_100
         }
     
     def _validate_and_finalize_trade(self, symbol: str, trade_setup: Dict[str, Any],
@@ -595,6 +619,13 @@ class InstitutionalTradeAnalyzer:
             'expected_profit': expected_profit,
             'expected_return': expected_return,
             
+            # $100 investment specific data
+            'investment_amount_100': position_info.get('investment_amount_100', 100.0),
+            'position_size_100': position_info.get('position_size_100', 0),
+            'max_position_with_leverage_100': position_info.get('max_position_with_leverage_100', 0),
+            'expected_profit_100': position_info.get('expected_profit_100', 0),
+            'expected_return_100': position_info.get('expected_return_100', 0),
+            
             # Market analysis
             'market_regime': structure['regime']['type'],
             'trend_alignment': structure['trend_alignment'],
@@ -612,6 +643,7 @@ class InstitutionalTradeAnalyzer:
                 f"Trend alignment: {structure['trend_alignment']:.1%}",
                 f"Risk/Reward: {trade_setup['risk_reward']:.1f}:1",
                 f"Expected return: {expected_return:.1%}",
+                f"$100 investment profit: ${position_info.get('expected_profit_100', 0):.2f}",
                 f"Market regime: {structure['regime']['type']}",
                 f"Volatility: {structure['volatility']['regime']}"
             ],

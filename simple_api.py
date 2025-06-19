@@ -124,6 +124,15 @@ async def startup_event():
 async def root():
     return {"message": "Crypto Trading Bot API is running", "status": "incremental"}
 
+@app.get("/api/v1/test")
+async def test_connection():
+    """Simple test endpoint to verify API connectivity."""
+    return {
+        "status": "success",
+        "message": "API connection is working",
+        "timestamp": time.time()
+    }
+
 @app.get("/api/v1/trading/opportunities")
 async def get_opportunities():
     """Get current trading opportunities with incremental results."""

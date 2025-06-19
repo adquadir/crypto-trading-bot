@@ -912,6 +912,9 @@ class OpportunityManager:
             confidence = float(best_signal['confidence']) if best_signal['confidence'] and not math.isnan(best_signal['confidence']) else 0.5
             volume_24h = float(market_data.get('volume_24h', sum(volumes))) if market_data.get('volume_24h') else sum(volumes)
             
+            # Calculate $100 investment details
+            investment_calcs = self._calculate_100_dollar_investment(entry_price, take_profit, stop_loss, confidence, volatility)
+            
             # Create opportunity with all required fields
             opportunity = {
                 'symbol': symbol,
@@ -923,7 +926,22 @@ class OpportunityManager:
                 'confidence': confidence,
                 'confidence_score': confidence,  # Alias for frontend compatibility
                 'leverage': 1.0,
+                'recommended_leverage': investment_calcs['recommended_leverage'],
                 'risk_reward': risk_reward if risk_reward and not math.isnan(risk_reward) else 1.67,
+                
+                # $100 investment specific fields
+                'investment_amount_100': investment_calcs['investment_amount_100'],
+                'position_size_100': investment_calcs['position_size_100'],
+                'max_position_with_leverage_100': investment_calcs['max_position_with_leverage_100'],
+                'expected_profit_100': investment_calcs['expected_profit_100'],
+                'expected_return_100': investment_calcs['expected_return_100'],
+                
+                # $10,000 account fields (traditional position sizing)
+                'position_size': investment_calcs['position_size'],
+                'notional_value': investment_calcs['notional_value'],
+                'expected_profit': investment_calcs['expected_profit'],
+                'expected_return': investment_calcs['expected_return'],
+                
                 'volume_24h': volume_24h,
                 'volatility': volatility * 100,  # As percentage
                 'score': confidence,
@@ -1218,6 +1236,9 @@ class OpportunityManager:
             confidence = float(best_signal['confidence']) if best_signal['confidence'] and not math.isnan(best_signal['confidence']) else 0.6
             volume_24h = float(market_data.get('volume_24h', sum(volumes))) if market_data.get('volume_24h') else sum(volumes)
             
+            # Calculate $100 investment details for stable signals
+            investment_calcs = self._calculate_100_dollar_investment(entry_price, take_profit, stop_loss, confidence, volatility)
+            
             # Create stable opportunity
             opportunity = {
                 'symbol': symbol,
@@ -1229,7 +1250,22 @@ class OpportunityManager:
                 'confidence': confidence,
                 'confidence_score': confidence,
                 'leverage': 1.0,
+                'recommended_leverage': investment_calcs['recommended_leverage'],
                 'risk_reward': risk_reward if risk_reward and not math.isnan(risk_reward) else 1.67,
+                
+                # $100 investment specific fields
+                'investment_amount_100': investment_calcs['investment_amount_100'],
+                'position_size_100': investment_calcs['position_size_100'],
+                'max_position_with_leverage_100': investment_calcs['max_position_with_leverage_100'],
+                'expected_profit_100': investment_calcs['expected_profit_100'],
+                'expected_return_100': investment_calcs['expected_return_100'],
+                
+                # $10,000 account fields (traditional position sizing)
+                'position_size': investment_calcs['position_size'],
+                'notional_value': investment_calcs['notional_value'],
+                'expected_profit': investment_calcs['expected_profit'],
+                'expected_return': investment_calcs['expected_return'],
+                
                 'volume_24h': volume_24h,
                 'volatility': volatility * 100,
                 'score': confidence,
@@ -1287,3 +1323,75 @@ class OpportunityManager:
         except Exception as e:
             logger.error(f"Error generating stable signal for {symbol}: {e}")
             return None 
+
+    def _calculate_100_dollar_investment(self, entry_price: float, take_profit: float, stop_loss: float, confidence: float, volatility: float) -> Dict[str, Any]:
+        """Calculate $100 investment details with leverage and $10,000 account position sizing."""
+        try:
+            # Calculate leverage based on confidence and volatility
+            base_leverage = min(5.0, confidence * 5)  # 0.5-1.0 confidence -> 2.5-5.0x leverage
+            volatility_factor = max(0.3, 1.0 - volatility * 5)  # Reduce leverage in high volatility
+            recommended_leverage = max(1.0, base_leverage * volatility_factor)
+            
+            # $100 investment calculations
+            investment_amount = 100.0
+            max_position_with_leverage = investment_amount * recommended_leverage
+            position_size_100 = max_position_with_leverage / entry_price
+            
+            # Calculate expected profit for $100 investment
+            price_movement = abs(take_profit - entry_price)
+            expected_profit_100 = position_size_100 * price_movement
+            expected_return_100 = expected_profit_100 / investment_amount
+            
+            # $10,000 account calculations (traditional position sizing)
+            account_size = 10000.0
+            risk_per_trade = 0.02  # 2% risk per trade
+            risk_amount = account_size * risk_per_trade
+            
+            # Calculate position size based on stop loss distance
+            price_distance = abs(entry_price - stop_loss)
+            if price_distance > 0:
+                position_size = risk_amount / price_distance
+                notional_value = position_size * entry_price
+                
+                # Calculate expected profit for $10,000 account
+                expected_profit = position_size * price_movement
+                expected_return = expected_profit / account_size
+            else:
+                # Fallback if stop loss distance is zero
+                position_size = risk_amount / entry_price
+                notional_value = position_size * entry_price
+                expected_profit = notional_value * 0.02  # 2% profit assumption
+                expected_return = expected_profit / account_size
+            
+            return {
+                # $100 investment fields
+                'recommended_leverage': recommended_leverage,
+                'investment_amount_100': investment_amount,
+                'position_size_100': position_size_100,
+                'max_position_with_leverage_100': max_position_with_leverage,
+                'expected_profit_100': expected_profit_100,
+                'expected_return_100': expected_return_100,
+                
+                # $10,000 account fields (traditional)
+                'position_size': position_size,
+                'notional_value': notional_value,
+                'expected_profit': expected_profit,
+                'expected_return': expected_return
+            }
+        except Exception as e:
+            logger.error(f"Error calculating investment details: {e}")
+            return {
+                # $100 investment defaults
+                'recommended_leverage': 1.0,
+                'investment_amount_100': 100.0,
+                'position_size_100': 0.0,
+                'max_position_with_leverage_100': 100.0,
+                'expected_profit_100': 0.0,
+                'expected_return_100': 0.0,
+                
+                # $10,000 account defaults
+                'position_size': 0.0,
+                'notional_value': 0.0,
+                'expected_profit': 0.0,
+                'expected_return': 0.0
+            } 

@@ -128,6 +128,13 @@ const Signals = () => {
         trend_alignment: opportunity.trend_alignment || 0,
         liquidity_score: opportunity.liquidity_score || 0,
         
+        // $100 investment specific fields
+        investment_amount_100: opportunity.investment_amount_100 || 100,
+        position_size_100: opportunity.position_size_100 || 0,
+        max_position_with_leverage_100: opportunity.max_position_with_leverage_100 || 0,
+        expected_profit_100: opportunity.expected_profit_100 || 0,
+        expected_return_100: opportunity.expected_return_100 || 0,
+        
         indicators: {
           macd: { value: 0, signal: 0 },
           rsi: 50,
@@ -348,127 +355,297 @@ const Signals = () => {
           }
         />
         <CardContent>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography color="textSecondary" variant="body2">
-              Entry Price
+          <Grid container spacing={2} mb={2}>
+            <Grid item xs={4}>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Entry Price
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                  ${entry_price?.toFixed(2) || 'N/A'}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={4}>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Stop Loss
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                  ${stop_loss?.toFixed(2) || 'N/A'}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={4}>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Take Profit
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                  ${take_profit?.toFixed(2) || 'N/A'}
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+
+          <Grid container spacing={2} mb={2}>
+            <Grid item xs={4}>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Confidence
+                </Typography>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: '1rem',
+                    color: confidence > 0.7 ? 'success.main' : confidence > 0.5 ? 'warning.main' : 'error.main'
+                  }}
+                >
+                  {(confidence * 100)?.toFixed(0) || 'N/A'}{confidence > 0.7 ? '% 🏛️' : confidence > 0.5 ? '% ⚠️' : '% ❌'} 
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={4}>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Risk/Reward
+                </Typography>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    fontWeight: 'bold', 
+                    fontSize: '1rem',
+                    color: signal.risk_reward > 2 ? 'success.main' : 'inherit'
+                  }}
+                >
+                  {signal.risk_reward?.toFixed(1) || 'N/A'}:1
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={4}>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Leverage
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                  {signal.recommended_leverage?.toFixed(1) || '1.0'}x
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+
+          {/* $100 Investment Section - Highlighted */}
+          <Box 
+            sx={{ 
+              backgroundColor: 'primary.main', 
+              color: 'primary.contrastText', 
+              p: 2.5, 
+              borderRadius: 2, 
+              mb: 2,
+              border: '1px solid',
+              borderColor: 'primary.dark',
+              boxShadow: 2
+            }}
+          >
+            <Typography 
+              variant="h6" 
+              sx={{ 
+                mb: 2, 
+                textAlign: 'center',
+                fontWeight: 'bold',
+                fontSize: '1.1rem'
+              }}
+            >
+              💰 $100 Investment with {signal.recommended_leverage?.toFixed(1) || '1.0'}x Leverage
             </Typography>
-            <Typography variant="body1">
-              ${entry_price?.toFixed(2) || 'N/A'}
-            </Typography>
+            <Grid container spacing={2} sx={{ textAlign: 'center' }}>
+              <Grid item xs={4}>
+                <Box sx={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      opacity: 0.9, 
+                      fontSize: '0.75rem',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      mb: 0.5
+                    }}
+                  >
+                    Trading Power
+                  </Typography>
+                  <Typography 
+                    variant="h5" 
+                    sx={{ 
+                      fontWeight: 'bold',
+                      fontSize: '1.25rem',
+                      lineHeight: 1.2
+                    }}
+                  >
+                    ${signal.max_position_with_leverage_100?.toFixed(0) || 'N/A'}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={4}>
+                <Box sx={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      opacity: 0.9, 
+                      fontSize: '0.75rem',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      mb: 0.5
+                    }}
+                  >
+                    Expected Profit
+                  </Typography>
+                  <Typography 
+                    variant="h5" 
+                    sx={{ 
+                      color: 'success.light',
+                      fontWeight: 'bold',
+                      fontSize: '1.25rem',
+                      lineHeight: 1.2
+                    }}
+                  >
+                    ${signal.expected_profit_100?.toFixed(2) || 'N/A'}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={4}>
+                <Box sx={{ minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      opacity: 0.9, 
+                      fontSize: '0.75rem',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      mb: 0.5
+                    }}
+                  >
+                    Return %
+                  </Typography>
+                  <Typography 
+                    variant="h5" 
+                    sx={{ 
+                      color: 'success.light',
+                      fontWeight: 'bold',
+                      fontSize: '1.25rem',
+                      lineHeight: 1.2
+                    }}
+                  >
+                    {signal.expected_return_100 ? (signal.expected_return_100 * 100).toFixed(1) + '%' : 'N/A'}
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
           </Box>
-          
+
           <Grid container spacing={2} mb={2}>
             <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Stop Loss
-              </Typography>
-              <Typography variant="body1">
-                ${stop_loss?.toFixed(2) || 'N/A'}
-              </Typography>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Position Size
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
+                  ${signal.notional_value?.toFixed(0) || 'N/A'}
+                </Typography>
+              </Box>
             </Grid>
             <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Take Profit
-              </Typography>
-              <Typography variant="body1">
-                ${take_profit?.toFixed(2) || 'N/A'}
-              </Typography>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Expected Profit
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem', color: 'success.main' }}>
+                  ${signal.expected_profit?.toFixed(0) || 'N/A'}
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={4}>
+              <Box sx={{ textAlign: 'center', minHeight: '50px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Expected Return
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1rem', color: 'success.main' }}>
+                  {signal.expected_return ? (signal.expected_return * 100).toFixed(1) + '%' : 'N/A'}
+                </Typography>
+              </Box>
             </Grid>
           </Grid>
 
           <Grid container spacing={2} mb={2}>
             <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Confidence
-              </Typography>
-              <Typography variant="body1" color={confidence > 0.7 ? 'success.main' : confidence > 0.5 ? 'warning.main' : 'error.main'}>
-                {confidence?.toFixed(1)}{confidence > 0.7 ? '% 🏛️' : confidence > 0.5 ? '% ⚠️' : '% ❌'} 
-              </Typography>
+              <Box sx={{ textAlign: 'center', minHeight: '45px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Volume
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: 'medium', fontSize: '0.9rem' }}>
+                  {signal.volume ? (signal.volume / 1000000).toFixed(2) + 'M' : 'N/A'}
+                </Typography>
+              </Box>
             </Grid>
             <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Risk/Reward
-              </Typography>
-              <Typography variant="body1" color={signal.risk_reward > 2 ? 'success.main' : 'inherit'}>
-                {signal.risk_reward?.toFixed(1) || 'N/A'}:1
-              </Typography>
+              <Box sx={{ textAlign: 'center', minHeight: '45px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Volatility
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: 'medium', fontSize: '0.9rem' }}>
+                  {signal.volatility ? (signal.volatility * 100).toFixed(3) + '%' : 'N/A'}
+                </Typography>
+              </Box>
             </Grid>
             <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Leverage
-              </Typography>
-              <Typography variant="body1">
-                {signal.recommended_leverage?.toFixed(1) || '1.0'}x
-              </Typography>
-            </Grid>
-          </Grid>
-
-          <Grid container spacing={2} mb={2}>
-            <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Position Size
-              </Typography>
-              <Typography variant="body1">
-                ${signal.notional_value?.toFixed(0) || 'N/A'}
-              </Typography>
-            </Grid>
-            <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Expected Profit
-              </Typography>
-              <Typography variant="body1" color="success.main">
-                ${signal.expected_profit?.toFixed(0) || 'N/A'}
-              </Typography>
-            </Grid>
-            <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Expected Return
-              </Typography>
-              <Typography variant="body1" color="success.main">
-                {signal.expected_return ? (signal.expected_return * 100).toFixed(1) + '%' : 'N/A'}
-              </Typography>
-            </Grid>
-          </Grid>
-
-          <Grid container spacing={2} mb={2}>
-            <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Volume
-              </Typography>
-              <Typography variant="body1">
-                {signal.volume ? (signal.volume / 1000000).toFixed(2) + 'M' : 'N/A'}
-              </Typography>
-            </Grid>
-            <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Volatility
-              </Typography>
-              <Typography variant="body1">
-                {signal.volatility ? (signal.volatility * 100).toFixed(3) + '%' : 'N/A'}
-              </Typography>
-            </Grid>
-            <Grid item xs={4}>
-              <Typography color="textSecondary" variant="body2">
-                Spread
-              </Typography>
-              <Typography variant="body1">
-                {signal.spread ? (signal.spread * 100).toFixed(3) + '%' : 'N/A'}
-              </Typography>
+              <Box sx={{ textAlign: 'center', minHeight: '45px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <Typography color="textSecondary" variant="body2" sx={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px', mb: 0.5 }}>
+                  Spread
+                </Typography>
+                <Typography variant="body1" sx={{ fontWeight: 'medium', fontSize: '0.9rem' }}>
+                  {signal.spread ? (signal.spread * 100).toFixed(3) + '%' : 'N/A'}
+                </Typography>
+              </Box>
             </Grid>
           </Grid>
 
           <Divider sx={{ my: 2 }} />
           
-          <Box display="flex" justifyContent="space-between" alignItems="center">
-            <Typography variant="caption" color="textSecondary">
+          <Box 
+            display="flex" 
+            justifyContent="space-between" 
+            alignItems="center"
+            sx={{ 
+              flexDirection: { xs: 'column', sm: 'row' },
+              gap: { xs: 2, sm: 0 }
+            }}
+          >
+            <Typography 
+              variant="caption" 
+              color="text.secondary"
+              sx={{ 
+                fontSize: '0.75rem',
+                textAlign: { xs: 'center', sm: 'left' }
+              }}
+            >
               {timestamp ? new Date(timestamp).toLocaleString() : 'No timestamp'}
             </Typography>
             <Button
               variant="contained"
               color={signal_type === 'LONG' ? 'success' : 'error'}
-              size="small"
+              size="medium"
               startIcon={signal_type === 'LONG' ? <TrendingUpIcon /> : <TrendingDownIcon />}
               onClick={() => executeManualTrade(signal)}
+              sx={{ 
+                fontWeight: 'bold',
+                px: 3,
+                py: 1,
+                borderRadius: 2,
+                boxShadow: 2,
+                '&:hover': {
+                  boxShadow: 3
+                }
+              }}
             >
               Execute {signal_type} Trade
             </Button>
