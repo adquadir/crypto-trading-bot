@@ -24,26 +24,53 @@ command_exists() {
 kill_port() {
   local port=$1
   echo "🔪 Killing processes on port $port..."
+  
+  # Kill by port
   sudo lsof -ti:$port | sudo xargs kill -9 2>/dev/null || true
-  sleep 2
+  
+  # For port 3000, also kill react-scripts and node processes
+  if [ "$port" = "3000" ]; then
+    sudo pkill -f "react-scripts" 2>/dev/null || true
+    sudo pkill -f "node.*3000" 2>/dev/null || true
+    sudo pkill -f "webpack-dev-server" 2>/dev/null || true
+    # Kill by process name patterns
+    sudo fuser -k 3000/tcp 2>/dev/null || true
+  fi
+  
+  sleep 3
+  
+  # Verify port is free
+  if nc -z localhost "$port" 2>/dev/null; then
+    echo "⚠️ Port $port still in use, trying harder..."
+    sudo kill -9 $(sudo lsof -t -i:$port) 2>/dev/null || true
+    sleep 2
+  fi
 }
 
 fix_python_imports() {
   echo "🔧 Fixing Python import conflicts..."
   
-  # Fix the routes directory conflict
-  if [ -d "$PROJECT_ROOT/src/api/routes" ]; then
-    echo "📁 Renaming routes directory to avoid import conflicts..."
-    mv "$PROJECT_ROOT/src/api/routes" "$PROJECT_ROOT/src/api/routes_backup" 2>/dev/null || true
+  # Fix the name conflict between routes.py file and routes/ directory
+  # Rename routes.py to base_routes.py to avoid confusion
+  if [ -f "$PROJECT_ROOT/src/api/routes.py" ]; then
+    echo "📁 Renaming routes.py to base_routes.py to avoid import conflicts..."
+    mv "$PROJECT_ROOT/src/api/routes.py" "$PROJECT_ROOT/src/api/base_routes.py"
   fi
   
-  # Fix main.py import
-  echo "🔄 Fixing imports in main.py..."
-  sed -i 's|from src.api import routes|from src.api.routes import router as api_router|g' "$PROJECT_ROOT/src/main.py"
+  echo "🔄 Fixing imports in main.py and api/main.py..."
+  
+  # Fix bot main.py to import from renamed file
+  sed -i 's|from src.api import routes|from src.api.base_routes import router as api_router|g' "$PROJECT_ROOT/src/main.py"
+  sed -i 's|from src.api.routes import router as api_router|from src.api.base_routes import router as api_router|g' "$PROJECT_ROOT/src/main.py"
   sed -i 's|router = routes.router|router = api_router|g' "$PROJECT_ROOT/src/main.py"
   
-  # Ensure proper import in API main
-  sed -i 's|from src.api.routes import router|from src.api.routes import router|g' "$PROJECT_ROOT/src/api/main.py"
+  # Fix API main.py to import from renamed file
+  sed -i 's|from src.api.routes import router as base_router, set_components|from src.api.base_routes import router as base_router, set_components|g' "$PROJECT_ROOT/src/api/main.py"
+  
+  # Make sure the routes directory has proper __init__.py
+  if [ ! -f "$PROJECT_ROOT/src/api/routes/__init__.py" ]; then
+    echo "# Trading routes package" > "$PROJECT_ROOT/src/api/routes/__init__.py"
+  fi
 }
 
 # --------------------------
