@@ -9,8 +9,10 @@ from src.market_data.exchange_client import ExchangeClient
 from src.strategy.strategy_manager import StrategyManager
 from src.risk.risk_manager import RiskManager
 from src.opportunity.opportunity_manager import OpportunityManager
-from src.api.routes import router as trading_router, set_components
+from src.api.routes import router as base_router, set_components
+from src.api.routes.trading import router as trading_router
 from src.api.websocket import router as ws_router, set_websocket_components
+from src.api.routes.trading import set_trading_components
 from src.utils.config import load_config
 
 load_dotenv()
@@ -119,6 +121,7 @@ async def initialize_components():
         # Set components in routes so they can be accessed by API endpoints
         logger.info("Setting route components...")
         set_components(opportunity_manager, exchange_client, strategy_manager, risk_manager)
+        set_trading_components(opportunity_manager, exchange_client, strategy_manager, risk_manager)
         logger.info("Components set in routes")
         
         logger.info("All components initialized successfully!")
@@ -162,7 +165,8 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(trading_router, prefix="/api/v1/trading")
+app.include_router(base_router, prefix="/api/v1")  # Base routes (scan, health, etc.)
+app.include_router(trading_router, prefix="/api/v1/trading")  # Trading routes with dynamic signals
 app.include_router(ws_router)  # No prefix needed since endpoint includes /ws
 
 @app.get("/")

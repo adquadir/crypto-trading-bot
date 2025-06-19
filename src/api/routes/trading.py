@@ -2,8 +2,21 @@ from typing import List, Dict, Any
 from fastapi import HTTPException
 from pydantic import BaseModel
 from src.api.routes import router
-from src.trading_bot import trading_bot
 from src.utils.logger import logger
+
+# Import the global components
+opportunity_manager = None
+exchange_client = None
+strategy_manager = None
+risk_manager = None
+
+def set_trading_components(opp_mgr, exch_client, strat_mgr, risk_mgr):
+    """Set the component instances for trading routes."""
+    global opportunity_manager, exchange_client, strategy_manager, risk_manager
+    opportunity_manager = opp_mgr
+    exchange_client = exch_client
+    strategy_manager = strat_mgr
+    risk_manager = risk_mgr
 
 class ManualTradeRequest(BaseModel):
     symbol: str
@@ -18,12 +31,21 @@ class ManualTradeRequest(BaseModel):
 async def get_opportunities():
     """Get current trading opportunities."""
     try:
-        # Get opportunities directly from symbol discovery
-        opportunities = await trading_bot.symbol_discovery.scan_opportunities()
-        return {
-            "status": "success",
-            "data": [opp.to_dict() for opp in opportunities]
-        }
+        # Get opportunities from the opportunity manager which has our dynamic signal generation
+        if opportunity_manager:
+            # Scan for new opportunities using our enhanced system
+            await opportunity_manager.scan_opportunities()
+            opportunities = opportunity_manager.get_opportunities()
+            return {
+                "status": "success",
+                "data": opportunities
+            }
+        else:
+            return {
+                "status": "initializing",
+                "data": [],
+                "message": "Opportunity manager is still initializing"
+            }
     except Exception as e:
         logger.error(f"Error getting opportunities: {str(e)}")
         raise HTTPException(

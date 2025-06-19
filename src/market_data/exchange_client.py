@@ -124,7 +124,7 @@ def retry_with_backoff(max_retries: int = 3, base_delay: float = 1.0):
                     last_exception = e
                     if attempt < max_retries - 1:
                         delay = base_delay * (2 ** attempt)
-                        logger.warning(f"Error in {func.__name__}, retrying in {delay}s: {e}")
+                        logger.debug(f"Error in {func.__name__}, retrying in {delay}s: {e}")
                         await asyncio.sleep(delay)
                     else:
                         raise
@@ -168,7 +168,7 @@ class ExchangeClient:
         self.config = config if config is not None else load_config()
         self.initialized = False
         self.retry_delay = 1.0
-        self.max_retries = 3
+        self.max_retries = 1  # Reduced from 3 to minimize log spam
         self.base_url = "https://fapi.binance.com"  # Binance Futures API
         self.ws_url = "wss://fstream.binance.com/ws"
         self.testnet = os.getenv('USE_TESTNET', 'false').lower() == 'true'
@@ -531,7 +531,7 @@ class ExchangeClient:
         # Sleep with the calculated backoff
         time.sleep(self.rate_limit_backoff)
 
-    @retry_with_backoff(max_retries=3)
+    @retry_with_backoff(max_retries=1)  # Reduced from 3 to 1
     @rate_limit(limit=3, period=1.0)  # Reduced to 3 requests per second
     async def get_historical_data(self, symbol: str, interval: str, limit: int = 100) -> List[Dict]:
         """Get historical klines/candlestick data."""
@@ -595,10 +595,10 @@ class ExchangeClient:
             self._handle_rate_limit_error()
             raise
         except ccxt.NetworkError as e:
-            logger.error(f"Network error while fetching historical data: {e}")
+            logger.debug(f"Network error while fetching historical data: {e}")
             raise
         except ccxt.ExchangeError as e:
-            logger.error(f"Exchange error while fetching historical data: {e}")
+            logger.debug(f"Exchange error while fetching historical data: {e}")
             raise
         except Exception as e:
             logger.error(f"Unexpected error fetching historical data for {symbol}: {e}")
@@ -976,15 +976,13 @@ class ExchangeClient:
                 proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
                 if self.proxy_user and self.proxy_pass:
                     proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
-                exchange_config['proxies'] = {
-                    'http': proxy_url,
-                    'https': proxy_url
-                }
+                # Use only one proxy method to avoid conflicts
                 exchange_config['proxy'] = proxy_url
                 logger.info(f"Proxy configured for exchange: {self.proxy_host}:{self.proxy_port}")
                 logger.info(f"Full proxy URL: {proxy_url}")
             logger.info(f"Initializing ccxt for private endpoints only: {exchange_config}")
             self.exchange = ccxt.binance(exchange_config)
+            self.ccxt_client = self.exchange  # Alias for compatibility
             logger.info("Exchange client initialized for private endpoints only (no public ccxt calls)")
         except Exception as e:
             logger.error(f"Error initializing exchange: {e}")

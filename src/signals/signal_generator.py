@@ -15,6 +15,7 @@ from src.strategy.dynamic_config import strategy_config
 from src.strategies.candle_cluster.detector import CandleClusterDetector
 from .confidence_calibrator import ConfidenceCalibrator
 from .signal_tracker import SignalTracker, SignalProfile
+from .accuracy_enhancer import AccuracyEnhancer
 from src.market_data.exchange_client import ExchangeClient
 from src.models.signal import TradingSignal
 from src.models.strategy import Strategy
@@ -41,6 +42,7 @@ class SignalGenerator:
         self.candle_detector = CandleClusterDetector()
         self.signal_tracker = SignalTracker()
         self.confidence_calibrator = ConfidenceCalibrator()
+        self.accuracy_enhancer = AccuracyEnhancer()
         self.regime_history = {}  # Initialize regime history dictionary
         
     async def initialize(self):
@@ -435,12 +437,21 @@ class SignalGenerator:
                 "timestamp": float(current_time),
             }
 
-            # Log the signal
+            # Apply accuracy enhancement
+            enhanced_signal = await self.accuracy_enhancer.enhance_signal(final_signal, market_data)
+            
+            if not enhanced_signal:
+                logger.debug(f"Signal filtered out by accuracy enhancer for {symbol}")
+                return None
+
+            # Log the enhanced signal
             logger.info(
-                f"Generated signal for {symbol}: {signal['direction']} at {entry:.2f}, TP: {tp:.2f}, SL: {sl:.2f}"
+                f"Enhanced signal for {symbol}: {enhanced_signal['direction']} at {enhanced_signal.get('entry_price', entry):.2f}, "
+                f"TP: {enhanced_signal.get('take_profit', tp):.2f}, SL: {enhanced_signal.get('stop_loss', sl):.2f}, "
+                f"Confidence: {enhanced_signal['confidence']:.2f}"
             )
 
-            return final_signal
+            return enhanced_signal
 
         except Exception as e:
             logger.error(f"Error generating signals for {symbol}: {str(e)}")
@@ -859,7 +870,11 @@ class SignalGenerator:
         self.signals.append(signal)
         # Keep only last 1000 signals
         if len(self.signals) > 1000:
-            self.signals = self.signals[-1000:] 
+            self.signals = self.signals[-1000:]
+            
+    def get_accuracy_stats(self) -> Dict:
+        """Get accuracy enhancement statistics."""
+        return self.accuracy_enhancer.get_accuracy_stats() 
 
     def _find_nearest_structure_level(
         self, indicators: Dict, current_price: float, signal_type: str
