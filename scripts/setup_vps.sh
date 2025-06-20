@@ -135,7 +135,7 @@ if ! command_exists serve; then
 fi
 
 # Install netcat for port checking
-sudo apt install -y netcat
+sudo apt install -y netcat-openbsd
 
 # --------------------------
 # 🐍 Python environment setup
