@@ -133,6 +133,16 @@ if ! command_exists node; then
   echo "📦 Installing Node.js..."
   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
   sudo apt-get install -y nodejs
+else
+  # Check Node.js version
+  NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+  if [ "$NODE_VERSION" -lt 16 ]; then
+    echo "⚠️ Node.js version $NODE_VERSION is too old, upgrading to LTS..."
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+  else
+    echo "✅ Node.js version $(node --version) is compatible"
+  fi
 fi
 
 # Install npm globally packages
@@ -187,18 +197,52 @@ echo "🌐 Setting up frontend..."
 
 cd "$FRONTEND_DIR"
 
-# Install frontend dependencies
+# Complete cleanup of node_modules and cache
 if [ -d "node_modules" ]; then
   echo "🗑️ Removing old node_modules..."
   rm -rf node_modules package-lock.json
 fi
 
-echo "📦 Installing frontend dependencies..."
-npm install
+# Clear npm cache
+echo "🧹 Clearing npm cache..."
+npm cache clean --force
 
-# Build production frontend
+# Clear any webpack cache
+rm -rf .cache node_modules/.cache 2>/dev/null || true
+
+echo "📦 Installing frontend dependencies..."
+# Install with clean slate
+npm install --no-cache
+
+# Verify critical packages are installed
+if [ ! -d "node_modules/html-webpack-plugin" ]; then
+  echo "⚠️ html-webpack-plugin missing, installing manually..."
+  npm install html-webpack-plugin --save-dev
+fi
+
+if [ ! -d "node_modules/webpack" ]; then
+  echo "⚠️ webpack missing, installing manually..."
+  npm install webpack webpack-cli --save-dev
+fi
+
+# Build production frontend with error handling
 echo "🏗️ Building production frontend..."
-npm run build
+if npm run build; then
+  echo "✅ Frontend build successful"
+else
+  echo "❌ Frontend build failed, trying alternative approach..."
+  
+  # Try installing react-scripts if missing
+  npm install react-scripts --save
+  
+  # Try build again
+  if npm run build; then
+    echo "✅ Frontend build successful on retry"
+  else
+    echo "⚠️ Frontend build failed - check logs above"
+    echo "📋 Continuing deployment, frontend may need manual fix"
+  fi
+fi
 
 # --------------------------
 # 📁 Create directories
