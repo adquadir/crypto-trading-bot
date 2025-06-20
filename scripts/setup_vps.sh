@@ -115,16 +115,23 @@ echo "📦 Installing system dependencies..."
 # Update system
 sudo apt update
 
+# Install essential packages
+sudo apt install -y curl wget git unzip software-properties-common apt-transport-https ca-certificates gnupg lsb-release
+
 # Install Python 3 and pip
 if ! command_exists python3; then
   echo "📦 Installing Python 3..."
-  sudo apt install -y python3 python3-venv python3-pip
+  sudo apt install -y python3 python3-venv python3-pip python3-dev
 fi
 
-# Install Node.js if needed
+# Install build dependencies for Python packages
+echo "📦 Installing build dependencies..."
+sudo apt install -y build-essential libpq-dev libssl-dev libffi-dev python3-dev
+
+# Install Node.js (latest LTS)
 if ! command_exists node; then
   echo "📦 Installing Node.js..."
-  curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+  curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
   sudo apt-get install -y nodejs
 fi
 
@@ -156,8 +163,22 @@ source "$VENV_DIR/bin/activate"
 
 # Install Python packages
 echo "📦 Installing Python dependencies..."
-pip install --upgrade pip
-pip install -r requirements.txt
+pip install --upgrade pip setuptools wheel
+
+# Try to install requirements with better error handling
+if pip install -r requirements.txt; then
+  echo "✅ All Python dependencies installed successfully"
+else
+  echo "⚠️ Some packages failed to install, trying alternative approach..."
+  
+  # Install psycopg2-binary specifically if psycopg2 fails
+  echo "📦 Installing psycopg2-binary as fallback..."
+  pip install psycopg2-binary
+  
+  # Try requirements again, excluding problematic packages
+  echo "📦 Retrying requirements installation..."
+  pip install -r requirements.txt --force-reinstall || echo "⚠️ Some packages may need manual installation"
+fi
 
 # --------------------------
 # 🌐 Frontend setup
