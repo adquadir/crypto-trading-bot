@@ -218,6 +218,21 @@ npm install --no-cache
 echo "📦 Installing lodash for html-webpack-plugin compatibility..."
 npm install lodash lodash.template --save-dev
 
+# 🔧 CRITICAL: Install webpack 5 polyfills for Node.js modules
+echo "📦 Installing webpack 5 polyfills for Node.js modules..."
+npm install --save-dev \
+  assert \
+  browserify-zlib \
+  buffer \
+  crypto-browserify \
+  https-browserify \
+  path-browserify \
+  process \
+  stream-browserify \
+  stream-http \
+  url \
+  util
+
 # Verify critical packages are installed
 if [ ! -d "node_modules/html-webpack-plugin" ]; then
   echo "⚠️ html-webpack-plugin missing, installing manually..."
@@ -243,6 +258,18 @@ else
   # Comprehensive dependency fix
   echo "📦 Installing comprehensive dependency fix..."
   npm install react-scripts lodash lodash.template html-webpack-plugin webpack webpack-cli --save
+  npm install --save-dev \
+    assert \
+    browserify-zlib \
+    buffer \
+    crypto-browserify \
+    https-browserify \
+    path-browserify \
+    process \
+    stream-browserify \
+    stream-http \
+    url \
+    util
   
   # Clear cache again and retry
   npm cache clean --force
