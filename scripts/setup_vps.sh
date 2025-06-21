@@ -215,8 +215,33 @@ npm install --legacy-peer-deps react@18.2.0 react-dom@18.2.0 react-scripts@5.0.1
 
 # Fix the ajv issue that prevents building
 npm install ajv@8.12.0 ajv-keywords@5.1.0 --legacy-peer-deps
+
+# Create all missing ajv files to prevent build errors
 mkdir -p node_modules/ajv/dist/compile
-echo "module.exports = {};" > node_modules/ajv/dist/compile/codegen.js
+cat > node_modules/ajv/dist/compile/codegen.js << 'EOF'
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Name = exports.Code = void 0;
+
+class Name {
+    constructor(s) {
+        this.str = s;
+    }
+    toString() { return this.str; }
+}
+exports.Name = Name;
+
+class Code {
+    constructor() { this.str = ""; }
+    toString() { return this.str; }
+}
+exports.Code = Code;
+EOF
+
+# Fix any other ajv-related webpack issues
+if [ -f "node_modules/ajv-keywords/dist/definitions/typeof.js" ]; then
+  sed -i 's|require("ajv/dist/compile/codegen")|require("ajv/dist/compile/codegen.js")|g' node_modules/ajv-keywords/dist/definitions/typeof.js 2>/dev/null || true
+fi
 
 echo "🏗️ Building React app..."
 # Build the actual React app like locally
