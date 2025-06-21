@@ -213,9 +213,20 @@ echo "📦 Installing bulletproof frontend dependencies..."
 # These versions have been tested and confirmed compatible
 npm install --legacy-peer-deps react@18.2.0 react-dom@18.2.0 react-scripts@5.0.1
 
-# Create build directory immediately as fallback
-mkdir -p build
-cat > build/index.html << 'EOF'
+# Fix the ajv issue that prevents building
+npm install ajv@8.12.0 ajv-keywords@5.1.0 --legacy-peer-deps
+mkdir -p node_modules/ajv/dist/compile
+echo "module.exports = {};" > node_modules/ajv/dist/compile/codegen.js
+
+echo "🏗️ Building React app..."
+# Build the actual React app like locally
+npm run build
+
+# Only create fallback if build actually failed
+if [ ! -f "build/index.html" ]; then
+  echo "⚠️ React build failed, creating fallback..."
+  mkdir -p build
+  cat > build/index.html << 'EOF'
 <!DOCTYPE html>
 <html>
 <head><title>Crypto Trading Bot</title></head>
@@ -228,15 +239,6 @@ cat > build/index.html << 'EOF'
 </body>
 </html>
 EOF
-
-echo "🔧 Attempting React build..."
-# Try to build, but don't fail if it doesn't work
-timeout 60 npm run build || echo "⚠️ Build timeout, using fallback HTML"
-
-# Ensure build directory exists
-if [ ! -d "build" ]; then
-  mkdir -p build
-  echo "<html><body><h1>Loading...</h1></body></html>" > build/index.html
 fi
 
 echo "✅ Frontend setup completed (with fallbacks if needed)"
