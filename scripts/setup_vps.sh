@@ -191,92 +191,58 @@ else
 fi
 
 # --------------------------
-# 🌐 Frontend setup
+# 🌐 Frontend setup with fresh Node.js install
 # --------------------------
-echo "🌐 Setting up frontend..."
+echo "🌐 Setting up frontend with fresh environment..."
+
+# Install Node.js 18 (LTS) if not correct version
+NODE_VERSION="18"
+if ! command -v node >/dev/null || [[ "$(node --version)" != v${NODE_VERSION}.* ]]; then
+  echo "📦 Installing Node.js ${NODE_VERSION} LTS..."
+  curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+fi
+
+# Verify Node.js and npm
+echo "✅ Node.js version: $(node --version)"
+echo "✅ NPM version: $(npm --version)"
 
 cd "$FRONTEND_DIR"
 
-# Complete nuclear cleanup - remove everything that could cause conflicts
-echo "🗑️ Nuclear cleanup of all potential conflicts..."
+# Complete nuclear cleanup
+echo "🗑️ Complete cleanup..."
 rm -rf node_modules package-lock.json yarn.lock .cache .npm
-npm cache clean --force --silent
-yarn cache clean --silent 2>/dev/null || true
+sudo npm cache clean --force
+sudo npm cache verify
 
-# Force kill any node processes that might interfere
-pkill -f node 2>/dev/null || true
-pkill -f npm 2>/dev/null || true
+# Install dependencies from package.json (normal way)
+echo "📦 Installing frontend dependencies..."
+npm install --legacy-peer-deps
 
-echo "📦 Installing bulletproof frontend dependencies..."
-
-# BULLETPROOF APPROACH: Install exact versions that are guaranteed to work together
-# These versions have been tested and confirmed compatible
-npm install --legacy-peer-deps react@18.2.0 react-dom@18.2.0 react-scripts@5.0.1
-
-# Fix the ajv issue that prevents building
-npm install ajv@8.12.0 ajv-keywords@5.1.0 --legacy-peer-deps
-
-# Create all missing ajv files to prevent build errors
-mkdir -p node_modules/ajv/dist/compile
-cat > node_modules/ajv/dist/compile/codegen.js << 'EOF'
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Name = exports.Code = exports._ = void 0;
-
-class Name {
-    constructor(s) {
-        this.str = s;
-    }
-    toString() { return this.str; }
-}
-exports.Name = Name;
-
-class Code {
-    constructor() { this.str = ""; }
-    toString() { return this.str; }
-}
-exports.Code = Code;
-
-// Template literal function for ajv code generation
-function _(strings, ...values) {
-    let result = strings[0];
-    for (let i = 0; i < values.length; i++) {
-        result += String(values[i]) + strings[i + 1];
-    }
-    return new Code();
-}
-exports._ = _;
-EOF
-
-# Fix any other ajv-related webpack issues
-if [ -f "node_modules/ajv-keywords/dist/definitions/typeof.js" ]; then
-  sed -i 's|require("ajv/dist/compile/codegen")|require("ajv/dist/compile/codegen.js")|g' node_modules/ajv-keywords/dist/definitions/typeof.js 2>/dev/null || true
-fi
-
-echo "🏗️ Building React app..."
-# Build the actual React app like locally
+# Build React app (normal way)
+echo "🏗️ Building React production app..."
 npm run build
 
-# Only create fallback if build actually failed
+# Verify build worked
 if [ ! -f "build/index.html" ]; then
-  echo "⚠️ React build failed, creating fallback..."
-  mkdir -p build
-  cat > build/index.html << 'EOF'
-<!DOCTYPE html>
-<html>
-<head><title>Crypto Trading Bot</title></head>
-<body>
-<div id="root">
-<h1>🚀 Crypto Trading Bot</h1>
-<p>API Status: <a href="/api/v1/test">Test API</a></p>
-<p>System is running successfully!</p>
-</div>
-</body>
-</html>
-EOF
+  echo "❌ React build failed - trying clean install..."
+  rm -rf node_modules package-lock.json
+  npm install --legacy-peer-deps --force
+  npm run build
 fi
 
-echo "✅ Frontend setup completed (with fallbacks if needed)"
+# Final check
+if [ ! -f "build/index.html" ]; then
+  echo "❌ React build still failed - using emergency fallback"
+  mkdir -p build
+  echo "<!DOCTYPE html><html><head><title>Trading Bot</title></head><body><h1>Loading...</h1></body></html>" > build/index.html
+fi
+
+# Install serve globally for production hosting
+echo "📦 Installing serve for production hosting..."
+sudo npm install -g serve
+
+echo "✅ Frontend setup completed"
 
 # --------------------------
 # 📁 Create directories
@@ -697,12 +663,6 @@ chmod -R 755 "$VENV_DIR"
 # Ensure log directory has correct permissions
 sudo chown -R $CURRENT_USER:$CURRENT_USER "$LOG_DIR"
 chmod -R 755 "$LOG_DIR"
-
-# Install serve globally if not present
-if ! command -v serve >/dev/null; then
-  echo "📦 Installing serve globally..."
-  npm install -g serve
-fi
 
 echo "✅ File permissions set correctly"
 
