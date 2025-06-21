@@ -27,11 +27,16 @@ import {
   Switch,
   FormControlLabel,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import AssessmentIcon from '@mui/icons-material/Assessment';
 import axios from 'axios';
 import config from '../config';
 import SignalChart from '../components/SignalChart';
@@ -54,6 +59,12 @@ const Signals = () => {
   const [scanStatus, setScanStatus] = useState('idle');
   const [tradingMode, setTradingMode] = useState('stable');
   const [modeDescriptions, setModeDescriptions] = useState({});
+  
+  // Validation states
+  const [validationResults, setValidationResults] = useState({});
+  const [validatingSignals, setValidatingSignals] = useState(new Set());
+  const [validationDialog, setValidationDialog] = useState({ open: false, data: null });
+  
   const maxRetries = 3;
 
   const handleError = (error) => {
@@ -268,6 +279,210 @@ const Signals = () => {
       } catch (err) {
       console.error('Error changing trading mode:', err);
       setError(`❌ Failed to change trading mode: ${err.response?.data?.message || err.message}`);
+    }
+  };
+
+  const validateStrategy = async (signal) => {
+    const signalKey = `${signal.symbol}-${signal.strategy}`;
+    
+    // Don't validate if already validating
+    if (validatingSignals.has(signalKey)) {
+      return;
+    }
+
+    try {
+      // Add to validating set
+      setValidatingSignals(prev => new Set([...prev, signalKey]));
+
+      // Try real signal replay first (Phase 3)
+      let results = await tryRealSignalValidation(signal);
+      
+      // Fallback to comparative backtesting (Phase 1) if no real data
+      if (!results) {
+        results = await tryComparativeBacktesting(signal);
+      }
+
+      if (results) {
+        // Store validation results
+        setValidationResults(prev => ({
+          ...prev,
+          [signalKey]: results
+        }));
+
+        // Show validation dialog
+        setValidationDialog({
+          open: true,
+          data: {
+            signal,
+            results
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error validating strategy:', err);
+      setError(`❌ Failed to validate strategy: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      // Remove from validating set
+      setValidatingSignals(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(signalKey);
+        return newSet;
+      });
+    }
+  };
+
+  const tryRealSignalValidation = async (signal) => {
+    try {
+      // First, try to get real signal performance
+      const performanceResponse = await axios.get(
+        `${config.API_BASE_URL}/api/v1/signals/performance`,
+        {
+          params: {
+            symbol: signal.symbol,
+            strategy: signal.strategy,
+            days_back: 30
+          },
+          timeout: 15000
+        }
+      );
+
+      if (performanceResponse.data.success && performanceResponse.data.data.performance_metrics.total_signals > 0) {
+        const perf = performanceResponse.data.data.performance_metrics;
+        
+        // We have real signal data! Use signal replay
+        const replayResponse = await axios.post(
+          `${config.API_BASE_URL}/api/v1/signals/replay`,
+          {
+            symbol: signal.symbol,
+            strategy: signal.strategy,
+            days_back: 30,
+            max_signals: 100
+          },
+          {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000
+          }
+        );
+
+        if (replayResponse.data.success) {
+          const replayData = replayResponse.data.data.replay_results;
+          
+          return {
+            validation_type: 'REAL_SIGNAL_REPLAY',
+            confidence_level: 'HIGH - Based on actual signals from your system',
+            win_rate: replayData.win_rate * 100,
+            total_return: replayData.total_return_pct,
+            sharpe_ratio: replayData.sharpe_ratio,
+            max_drawdown: Math.abs(replayData.max_drawdown) * 100,
+            total_trades: replayData.total_signals,
+            avg_trade_duration: `${Math.round(replayData.avg_duration_hours)}h ${Math.round((replayData.avg_duration_hours % 1) * 60)}m`,
+            profit_factor: replayData.total_return_pct > 0 ? 2.0 : 0.5, // Approximate
+            rating: getRatingFromRealPerformance(replayData),
+            real_data: {
+              signals_replayed: replayData.signals_replayed,
+              tp_hits: replayData.winning_signals,
+              sl_hits: replayData.losing_signals,
+              timeouts: replayData.timeout_signals,
+              best_trade: replayData.best_trade_pct,
+              worst_trade: replayData.worst_trade_pct
+            }
+          };
+        }
+      }
+      
+      return null; // No real data available
+      
+    } catch (err) {
+      console.warn('Real signal validation failed, will try comparative backtesting:', err.message);
+      return null;
+    }
+  };
+
+  const tryComparativeBacktesting = async (signal) => {
+    try {
+      const response = await axios.post(
+        `${config.API_BASE_URL}/api/v1/backtesting/run`,
+        {
+          symbol: signal.symbol,
+          strategy: signal.strategy,
+          timeframe: '1h',
+          days: 30
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 30000
+        }
+      );
+
+      if (response.data.success) {
+        return {
+          validation_type: 'COMPARATIVE_BACKTESTING',
+          confidence_level: 'MEDIUM - Simulated strategy comparison',
+          win_rate: response.data.performance.win_rate * 100,
+          total_return: response.data.performance.total_return * 100,
+          sharpe_ratio: response.data.performance.sharpe_ratio,
+          max_drawdown: Math.abs(response.data.performance.max_drawdown) * 100,
+          total_trades: response.data.performance.total_trades,
+          avg_trade_duration: `${Math.round(response.data.performance.avg_trade_duration / 60)}h ${Math.round(response.data.performance.avg_trade_duration % 60)}m`,
+          profit_factor: response.data.performance.profit_factor,
+          rating: getRatingFromPerformance(response.data.performance)
+        };
+      }
+      
+      return null;
+      
+    } catch (err) {
+      throw err; // Re-throw to be caught by main validation function
+    }
+  };
+
+  const getRatingFromRealPerformance = (replayData) => {
+    const winRate = replayData.win_rate * 100;
+    const totalReturn = replayData.total_return_pct;
+    const sharpeRatio = replayData.sharpe_ratio;
+    
+    // Real data gets stricter criteria since it's actual performance
+    if (winRate > 65 && totalReturn > 15 && sharpeRatio > 1.8) {
+      return '⭐⭐⭐⭐⭐ EXCELLENT - Real Performance';
+    } else if (winRate > 55 && totalReturn > 8 && sharpeRatio > 1.2) {
+      return '⭐⭐⭐⭐ GOOD - Real Performance';
+    } else if (winRate > 45 && totalReturn > 2 && sharpeRatio > 0.8) {
+      return '⭐⭐⭐ OK - Real Performance';
+    } else if (winRate > 35 && totalReturn > -5) {
+      return '⭐⭐ WEAK - Real Performance';
+    } else {
+      return '❌ AVOID - Poor Real Performance';
+    }
+  };
+
+  const closeValidationDialog = () => {
+    setValidationDialog({ open: false, data: null });
+  };
+
+  const getRatingEmoji = (rating) => {
+    if (rating.includes('EXCELLENT')) return '⭐⭐⭐⭐⭐';
+    if (rating.includes('GOOD')) return '⭐⭐⭐⭐';
+    if (rating.includes('OK')) return '⭐⭐⭐';
+    if (rating.includes('WEAK')) return '⭐⭐';
+    if (rating.includes('AVOID')) return '❌';
+    return '⭐⭐⭐';
+  };
+
+  const getRatingFromPerformance = (performance) => {
+    const winRate = performance.win_rate * 100;
+    const totalReturn = performance.total_return * 100;
+    const sharpeRatio = performance.sharpe_ratio;
+    
+    if (winRate > 70 && totalReturn > 20 && sharpeRatio > 2.0) {
+      return '⭐⭐⭐⭐⭐ EXCELLENT PERFORMANCE';
+    } else if (winRate > 60 && totalReturn > 10 && sharpeRatio > 1.5) {
+      return '⭐⭐⭐⭐ GOOD PERFORMANCE';
+    } else if (winRate > 50 && totalReturn > 5 && sharpeRatio > 1.0) {
+      return '⭐⭐⭐ OK PERFORMANCE';
+    } else if (winRate > 40 && totalReturn > 0) {
+      return '⭐⭐ WEAK PERFORMANCE';
+    } else {
+      return '❌ AVOID - POOR PERFORMANCE';
     }
   };
 
@@ -982,7 +1197,7 @@ const Signals = () => {
             alignItems="center"
             sx={{ 
               flexDirection: { xs: 'column', sm: 'row' },
-              gap: { xs: 1.5, sm: 0 }
+              gap: { xs: 1.5, sm: 1 }
             }}
           >
             <Typography 
@@ -995,26 +1210,62 @@ const Signals = () => {
             >
               {timestamp ? new Date(timestamp).toLocaleString() : 'No timestamp'}
             </Typography>
-            <Button
-              variant="contained"
-              color={signal_type === 'LONG' ? 'success' : 'error'}
-              size={isMobile ? 'small' : 'medium'}
-              startIcon={signal_type === 'LONG' ? <TrendingUpIcon /> : <TrendingDownIcon />}
-              onClick={() => executeManualTrade(signal)}
+            
+            <Box 
+              display="flex" 
+              gap={{ xs: 1, sm: 2 }}
               sx={{ 
-                fontWeight: 'bold',
-                px: { xs: 2, sm: 3 },
-                py: { xs: 0.5, sm: 1 },
-                borderRadius: 2,
-                boxShadow: 2,
-                fontSize: { xs: '0.75rem', sm: '0.875rem' },
-                '&:hover': {
-                  boxShadow: 3
-                }
+                flexDirection: { xs: 'column', sm: 'row' },
+                width: { xs: '100%', sm: 'auto' }
               }}
             >
-              Execute {signal_type} Trade
-            </Button>
+              <Button
+                variant="outlined"
+                color="primary"
+                size={isMobile ? 'small' : 'medium'}
+                startIcon={validatingSignals.has(`${signal.symbol}-${signal.strategy}`) ? 
+                  <CircularProgress size={16} /> : <AssessmentIcon />}
+                onClick={() => validateStrategy(signal)}
+                disabled={validatingSignals.has(`${signal.symbol}-${signal.strategy}`)}
+                sx={{ 
+                  fontWeight: 'bold',
+                  px: { xs: 2, sm: 3 },
+                  py: { xs: 0.5, sm: 1 },
+                  borderRadius: 2,
+                  fontSize: { xs: '0.7rem', sm: '0.8rem' },
+                  minWidth: { xs: '120px', sm: '140px' },
+                  '&:hover': {
+                    backgroundColor: 'primary.light',
+                    color: 'white'
+                  }
+                }}
+              >
+                {validatingSignals.has(`${signal.symbol}-${signal.strategy}`) ? 
+                  'Validating...' : 'Validate Strategy'}
+              </Button>
+              
+              <Button
+                variant="contained"
+                color={signal_type === 'LONG' ? 'success' : 'error'}
+                size={isMobile ? 'small' : 'medium'}
+                startIcon={signal_type === 'LONG' ? <TrendingUpIcon /> : <TrendingDownIcon />}
+                onClick={() => executeManualTrade(signal)}
+                sx={{ 
+                  fontWeight: 'bold',
+                  px: { xs: 2, sm: 3 },
+                  py: { xs: 0.5, sm: 1 },
+                  borderRadius: 2,
+                  boxShadow: 2,
+                  fontSize: { xs: '0.7rem', sm: '0.8rem' },
+                  minWidth: { xs: '120px', sm: '140px' },
+                  '&:hover': {
+                    boxShadow: 3
+                  }
+                }}
+              >
+                Execute {signal_type} Trade
+              </Button>
+            </Box>
           </Box>
         </CardContent>
       </Card>
@@ -1378,6 +1629,183 @@ const Signals = () => {
           </Paper>
         </Grid>
       </Grid>
+      
+      {/* Enhanced Validation Dialog */}
+      <Dialog 
+        open={validationDialog.open} 
+        onClose={closeValidationDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={2}>
+            <AssessmentIcon color="primary" />
+            <Box>
+              <Typography variant="h6">
+                Strategy Validation Results
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {validationDialog.data?.signal.symbol} • {validationDialog.data?.signal.strategy}
+              </Typography>
+            </Box>
+          </Box>
+        </DialogTitle>
+        
+        <DialogContent>
+          {validationDialog.data && (
+            <Box>
+              {/* Validation Type Banner */}
+              <Alert 
+                severity={validationDialog.data.results.validation_type === 'REAL_SIGNAL_REPLAY' ? 'success' : 'info'}
+                sx={{ mb: 3 }}
+              >
+                <Typography variant="subtitle2">
+                  {validationDialog.data.results.validation_type === 'REAL_SIGNAL_REPLAY' 
+                    ? '🎯 REAL SIGNAL REPLAY - Actual system performance'
+                    : '📊 COMPARATIVE BACKTESTING - Simulated strategy comparison'
+                  }
+                </Typography>
+                <Typography variant="body2">
+                  Confidence Level: {validationDialog.data.results.confidence_level}
+                </Typography>
+              </Alert>
+
+              {/* Performance Metrics */}
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <Paper sx={{ p: 2 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Performance Metrics
+                    </Typography>
+                    
+                    <Box display="flex" justifyContent="space-between" mb={1}>
+                      <Typography variant="body2">Win Rate:</Typography>
+                      <Typography variant="body2" fontWeight="bold" color={validationDialog.data.results.win_rate > 60 ? 'success.main' : 'text.primary'}>
+                        {validationDialog.data.results.win_rate.toFixed(1)}%
+                      </Typography>
+                    </Box>
+                    
+                    <Box display="flex" justifyContent="space-between" mb={1}>
+                      <Typography variant="body2">Total Return:</Typography>
+                      <Typography variant="body2" fontWeight="bold" color={validationDialog.data.results.total_return > 0 ? 'success.main' : 'error.main'}>
+                        {validationDialog.data.results.total_return.toFixed(1)}%
+                      </Typography>
+                    </Box>
+                    
+                    <Box display="flex" justifyContent="space-between" mb={1}>
+                      <Typography variant="body2">Sharpe Ratio:</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {validationDialog.data.results.sharpe_ratio.toFixed(2)}
+                      </Typography>
+                    </Box>
+                    
+                    <Box display="flex" justifyContent="space-between" mb={1}>
+                      <Typography variant="body2">Max Drawdown:</Typography>
+                      <Typography variant="body2" fontWeight="bold" color="error.main">
+                        -{validationDialog.data.results.max_drawdown.toFixed(1)}%
+                      </Typography>
+                    </Box>
+                    
+                    <Box display="flex" justifyContent="space-between" mb={1}>
+                      <Typography variant="body2">Total Trades:</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {validationDialog.data.results.total_trades}
+                      </Typography>
+                    </Box>
+                    
+                    <Box display="flex" justifyContent="space-between">
+                      <Typography variant="body2">Avg Duration:</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {validationDialog.data.results.avg_trade_duration}
+                      </Typography>
+                    </Box>
+                  </Paper>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Paper sx={{ p: 2 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Strategy Rating
+                    </Typography>
+                    
+                    <Box textAlign="center" mb={2}>
+                      <Typography variant="h4" component="div" mb={1}>
+                        {getRatingEmoji(validationDialog.data.results.rating)}
+                      </Typography>
+                      <Typography variant="body1" fontWeight="bold">
+                        {validationDialog.data.results.rating}
+                      </Typography>
+                    </Box>
+
+                    {/* Real Signal Data (if available) */}
+                    {validationDialog.data.results.real_data && (
+                      <Box>
+                        <Typography variant="subtitle2" gutterBottom>
+                          Real Signal Breakdown:
+                        </Typography>
+                        <Box display="flex" justifyContent="space-between" mb={1}>
+                          <Typography variant="body2">Signals Replayed:</Typography>
+                          <Typography variant="body2" fontWeight="bold">
+                            {validationDialog.data.results.real_data.signals_replayed}
+                          </Typography>
+                        </Box>
+                        <Box display="flex" justifyContent="space-between" mb={1}>
+                          <Typography variant="body2">Take Profit Hits:</Typography>
+                          <Typography variant="body2" fontWeight="bold" color="success.main">
+                            {validationDialog.data.results.real_data.tp_hits}
+                          </Typography>
+                        </Box>
+                        <Box display="flex" justifyContent="space-between" mb={1}>
+                          <Typography variant="body2">Stop Loss Hits:</Typography>
+                          <Typography variant="body2" fontWeight="bold" color="error.main">
+                            {validationDialog.data.results.real_data.sl_hits}
+                          </Typography>
+                        </Box>
+                        <Box display="flex" justifyContent="space-between" mb={1}>
+                          <Typography variant="body2">Timeouts:</Typography>
+                          <Typography variant="body2" fontWeight="bold">
+                            {validationDialog.data.results.real_data.timeouts}
+                          </Typography>
+                        </Box>
+                        <Box display="flex" justifyContent="space-between" mb={1}>
+                          <Typography variant="body2">Best Trade:</Typography>
+                          <Typography variant="body2" fontWeight="bold" color="success.main">
+                            +{validationDialog.data.results.real_data.best_trade.toFixed(1)}%
+                          </Typography>
+                        </Box>
+                        <Box display="flex" justifyContent="space-between">
+                          <Typography variant="body2">Worst Trade:</Typography>
+                          <Typography variant="body2" fontWeight="bold" color="error.main">
+                            {validationDialog.data.results.real_data.worst_trade.toFixed(1)}%
+                          </Typography>
+                        </Box>
+                      </Box>
+                    )}
+                  </Paper>
+                </Grid>
+              </Grid>
+            </Box>
+          )}
+        </DialogContent>
+        
+        <DialogActions>
+          <Button onClick={closeValidationDialog}>
+            Close
+          </Button>
+          {validationDialog.data?.results.validation_type === 'REAL_SIGNAL_REPLAY' && (
+            <Button 
+              variant="contained" 
+              color="primary"
+              onClick={() => {
+                executeManualTrade(validationDialog.data.signal);
+                closeValidationDialog();
+              }}
+            >
+              Execute Trade
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

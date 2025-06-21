@@ -6,7 +6,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import Signals from './pages/Signals';
-import Opportunities from './components/Opportunities';
+import Opportunities from './pages/Opportunities';
 import Settings from './pages/Settings';
 
 // Layout components

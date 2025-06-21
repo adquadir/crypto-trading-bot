@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Card,
@@ -21,21 +21,59 @@ import {
   DialogActions,
   Button,
   Grid,
+  Divider,
   TextField,
-  Alert
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  ToggleButton,
+  ToggleButtonGroup,
+  Slider,
+  InputAdornment,
+  Alert,
+  Badge
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   Info as InfoIcon,
   Refresh as RefreshIcon,
+  ShowChart as ChartIcon,
+  FilterList as FilterIcon,
+  Sort as SortIcon,
   MonetizationOn as ProfitIcon,
   Speed as SpeedIcon,
   TrendingFlat as PrecisionIcon,
   AccountBalance as LeverageIcon
 } from '@mui/icons-material';
 import axios from 'axios';
+import { Line, Bar } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip as ChartTooltip,
+  Legend
+} from 'chart.js';
 import config from '../config';
+// import { useWebSocket } from '../contexts/WebSocketContext';  // Disabled WebSocket
+
+// Register ChartJS components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  ChartTooltip,
+  Legend
+);
 
 // 3% Precision Trading Calculator
 const calculateProfitScenarios = (entry, takeProfit, stopLoss, direction) => {
@@ -100,17 +138,12 @@ const ProfitCalculator = ({ signal }) => {
   const [capital, setCapital] = useState(500);
   const [leverage, setLeverage] = useState(10);
   
-  if (!signal.entry && !signal.entry_price) return null;
-  if (!signal.take_profit && !signal.takeProfit) return null;
+  if (!signal.entry || !signal.take_profit) return null;
   
-  const entry = signal.entry || signal.entry_price;
-  const tp = signal.take_profit || signal.takeProfit;
-  const sl = signal.stop_loss || signal.stopLoss || entry * 0.98; // Default 2% SL
-  
-  const movePct = Math.abs((tp - entry) / entry) * 100;
+  const movePct = Math.abs((signal.take_profit - signal.entry) / signal.entry) * 100;
   const grossProfit = capital * (movePct / 100) * leverage;
-  const risk = Math.abs(entry - sl);
-  const riskAmount = capital * (risk / entry) * leverage;
+  const risk = Math.abs(signal.entry - signal.stop_loss);
+  const riskAmount = capital * (risk / signal.entry) * leverage;
   
   return (
     <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid #e0e0e0' }}>
@@ -179,52 +212,6 @@ const PrecisionBadge = ({ signal }) => {
   );
 };
 
-const CertaintyBadge = ({ signal }) => {
-  const certaintyLabel = signal.certainty_label || 'UNKNOWN';
-  const certaintyScore = signal.certainty_score || 0;
-  const winRate = signal.expected_win_rate || '?';
-  
-  const getColor = () => {
-    switch(certaintyLabel) {
-      case 'GUARANTEED': return 'success';
-      case 'VERY HIGH': return 'info';
-      case 'HIGH': return 'warning';
-      case 'MODERATE': return 'secondary';
-      case 'LOW': return 'error';
-      case 'REJECTED': return 'error';
-      default: return 'default';
-    }
-  };
-  
-  const getIcon = () => {
-    switch(certaintyLabel) {
-      case 'GUARANTEED': return '🟢';
-      case 'VERY HIGH': return '🔵';
-      case 'HIGH': return '🟡';
-      case 'MODERATE': return '🟠';
-      case 'LOW': return '🔴';
-      case 'REJECTED': return '❌';
-      default: return '⚪';
-    }
-  };
-  
-  return (
-    <Box>
-      <Chip
-        icon={<span>{getIcon()}</span>}
-        label={`${certaintyLabel} (${certaintyScore}/100)`}
-        color={getColor()}
-        size="small"
-        variant="filled"
-        sx={{ fontWeight: 'bold', mb: 0.5 }}
-      />
-      <Typography variant="caption" display="block" color="textSecondary">
-        Expected: {winRate} win rate
-      </Typography>
-    </Box>
-  );
-};
-
 const Opportunities = () => {
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -232,28 +219,29 @@ const Opportunities = () => {
   const [selectedSignal, setSelectedSignal] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [filters, setFilters] = useState({
-    minPrecisionScore: 0,
-    maxMove: 10.0,
-    minMove: 0.5,
-    minConfidence: 0.0,
-    searchText: '',
-    showOnlyHighCertainty: false
+    minPrecisionScore: 60,
+    maxMove: 5.0,
+    minMove: 2.0,
+    minConfidence: 0.6,
+    searchText: ''
   });
 
   useEffect(() => {
     fetchSignals();
-    const interval = setInterval(fetchSignals, 15000);
+    const interval = setInterval(fetchSignals, 15000); // Poll every 15 seconds
     return () => clearInterval(interval);
   }, []);
 
   const fetchSignals = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${config.API_BASE_URL}/api/v1/trading/opportunities`);
+      // Try to get recent signals from the signal tracking system
+      const response = await axios.get(`${config.API_BASE_URL}/api/v1/signals/recent?limit=50`);
       
       if (response.data && response.data.length > 0) {
         setSignals(response.data);
       } else {
+        // Fallback to opportunities endpoint
         const oppResponse = await axios.get(`${config.API_BASE_URL}${config.ENDPOINTS.OPPORTUNITIES}`);
         const opportunitiesData = oppResponse.data.data || {};
         const opportunitiesArray = Array.isArray(opportunitiesData) 
@@ -306,13 +294,6 @@ const Opportunities = () => {
     
     const movePct = Math.abs((tp - entry) / entry) * 100;
     const precisionScore = calculatePrecisionScore(signal);
-    const certaintyLabel = signal.certainty_label || 'UNKNOWN';
-    
-    // High-certainty filter
-    if (filters.showOnlyHighCertainty) {
-      const isHighCertainty = ['GUARANTEED', 'VERY HIGH', 'HIGH'].includes(certaintyLabel);
-      if (!isHighCertainty) return false;
-    }
     
     return (
       precisionScore >= filters.minPrecisionScore &&
@@ -322,12 +303,7 @@ const Opportunities = () => {
       (signal.symbol || '').toLowerCase().includes(filters.searchText.toLowerCase())
     );
   }).sort((a, b) => {
-    // Sort by certainty score first, then precision score
-    const aCertainty = a.certainty_score || 0;
-    const bCertainty = b.certainty_score || 0;
-    if (aCertainty !== bCertainty) {
-      return bCertainty - aCertainty;
-    }
+    // Sort by precision score descending
     return calculatePrecisionScore(b) - calculatePrecisionScore(a);
   });
 
@@ -354,14 +330,8 @@ const Opportunities = () => {
         <Box display="flex" gap={2} alignItems="center">
           <Chip 
             icon={<SpeedIcon />} 
-            label={`${filteredSignals.length} Total Signals`} 
+            label={`${filteredSignals.length} High-Precision Signals`} 
             color="primary" 
-          />
-          <Chip 
-            icon={<span>🟢</span>} 
-            label={`${filteredSignals.filter(s => ['GUARANTEED', 'VERY HIGH', 'HIGH'].includes(s.certainty_label)).length} High-Certainty`} 
-            color="success" 
-            variant="filled"
           />
           <Tooltip title="Refresh Signals">
             <IconButton onClick={fetchSignals} disabled={loading}>
@@ -425,8 +395,8 @@ const Opportunities = () => {
           <Typography variant="subtitle1" gutterBottom>
             🔍 3% Precision Filters
           </Typography>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={2}>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={3}>
               <TextField
                 fullWidth
                 label="Search Symbol"
@@ -468,7 +438,7 @@ const Opportunities = () => {
                 inputProps={{ min: 0, max: 100 }}
               />
             </Grid>
-            <Grid item xs={12} md={2}>
+            <Grid item xs={12} md={3}>
               <TextField
                 fullWidth
                 label="Min Confidence"
@@ -478,19 +448,6 @@ const Opportunities = () => {
                 size="small"
                 inputProps={{ step: 0.1, min: 0, max: 1 }}
               />
-            </Grid>
-            <Grid item xs={12} md={2}>
-              <Button
-                fullWidth
-                variant={filters.showOnlyHighCertainty ? "contained" : "outlined"}
-                color={filters.showOnlyHighCertainty ? "success" : "primary"}
-                onClick={() => setFilters(prev => ({ ...prev, showOnlyHighCertainty: !prev.showOnlyHighCertainty }))}
-                startIcon={filters.showOnlyHighCertainty ? <span>🟢</span> : <span>🎯</span>}
-                size="small"
-                sx={{ height: '40px' }}
-              >
-                {filters.showOnlyHighCertainty ? 'High Certainty ON' : 'Show High Certainty'}
-              </Button>
             </Grid>
           </Grid>
         </CardContent>
@@ -503,7 +460,6 @@ const Opportunities = () => {
             <TableRow>
               <TableCell>Symbol</TableCell>
               <TableCell>Direction</TableCell>
-              <TableCell>Take Profit Certainty</TableCell>
               <TableCell>Entry Price</TableCell>
               <TableCell>Take Profit</TableCell>
               <TableCell>Stop Loss</TableCell>
@@ -519,11 +475,11 @@ const Opportunities = () => {
             {filteredSignals.map((signal, index) => {
               const entry = signal.entry || signal.entry_price || 0;
               const tp = signal.take_profit || signal.takeProfit || 0;
-              const sl = signal.stop_loss || signal.stopLoss || entry * 0.98; // Default 2% SL
+              const sl = signal.stop_loss || signal.stopLoss || 0;
               const confidence = signal.confidence || signal.confidence_score || 0;
               const movePct = Math.abs((tp - entry) / entry) * 100;
               const riskReward = Math.abs(tp - entry) / Math.abs(entry - sl);
-              const profitAt10x = 500 * (movePct / 100) * 10;
+              const profitAt10x = 500 * (movePct / 100) * 10; // $500 capital example
               
               return (
                 <TableRow key={signal.signal_id || index} hover>
@@ -544,9 +500,6 @@ const Opportunities = () => {
                       color={getDirectionColor(signal.direction)}
                       size="small"
                     />
-                  </TableCell>
-                  <TableCell>
-                    <CertaintyBadge signal={signal} />
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2">
@@ -581,28 +534,26 @@ const Opportunities = () => {
                   <TableCell>
                     <Typography 
                       variant="body2" 
-                      color={riskReward >= 2 ? 'success.main' : 'text.primary'}
+                      color={riskReward >= 2 ? 'success.main' : 'warning.main'}
                     >
-                      {riskReward.toFixed(2)}:1
+                      {riskReward.toFixed(2)}
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Typography variant="body2" color="success.main" fontWeight="bold">
-                      ${profitAt10x.toFixed(0)}
+                    <Typography variant="body2" color="primary.main" fontWeight="bold">
+                      ${profitAt10x.toFixed(2)}
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Tooltip title="View Details">
-                      <IconButton 
-                        size="small" 
-                        onClick={() => {
-                          setSelectedSignal(signal);
-                          setDetailsOpen(true);
-                        }}
-                      >
-                        <InfoIcon />
-                      </IconButton>
-                    </Tooltip>
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        setSelectedSignal(signal);
+                        setDetailsOpen(true);
+                      }}
+                    >
+                      <InfoIcon />
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               );

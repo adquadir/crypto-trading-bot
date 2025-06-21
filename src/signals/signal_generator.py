@@ -14,7 +14,7 @@ from ta.volatility import BollingerBands, AverageTrueRange
 from src.strategy.dynamic_config import strategy_config
 from src.strategies.candle_cluster.detector import CandleClusterDetector
 from .confidence_calibrator import ConfidenceCalibrator
-from .signal_tracker import SignalTracker, SignalProfile
+from .signal_tracker import RealSignalTracker
 from .accuracy_enhancer import AccuracyEnhancer
 from src.market_data.exchange_client import ExchangeClient
 from src.models.signal import TradingSignal
@@ -40,7 +40,7 @@ class SignalGenerator:
         self.strategy_config = strategy_config
         self.strategy_config.set_profile("moderate")  # Default to moderate profile
         self.candle_detector = CandleClusterDetector()
-        self.signal_tracker = SignalTracker()
+        self.signal_tracker = RealSignalTracker()
         self.confidence_calibrator = ConfidenceCalibrator()
         self.accuracy_enhancer = AccuracyEnhancer()
         self.regime_history = {}  # Initialize regime history dictionary

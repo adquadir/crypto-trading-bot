@@ -9,6 +9,7 @@ fastapi==0.95.2
 uvicorn==0.22.0
 sqlalchemy==2.0.12
 psycopg2-binary==2.9.6
+asyncpg==0.30.0              # 🔥 NEW: Required for signal tracking database
 redis>=5.0.0
 aiohttp>=3.9.1            # 🛠️ Updated for Python 3.12 compatibility
 websockets==11.0.3

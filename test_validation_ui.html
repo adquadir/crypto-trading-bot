@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategy Validation Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .signal-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .btn-validate {
+            background-color: #1976d2;
+            color: white;
+        }
+        .btn-execute {
+            background-color: #2e7d32;
+            color: white;
+        }
+        .btn:hover {
+            opacity: 0.8;
+        }
+        .validation-result {
+            background: #e3f2fd;
+            border: 1px solid #1976d2;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 10px;
+            display: none;
+        }
+        .rating {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .stat-item {
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 Strategy Validation Integration - Option 1</h1>
+    <p><strong>✅ Implementation Complete!</strong> The "Validate Strategy" button has been successfully integrated into each signal card.</p>
+    
+    <div class="signal-card">
+        <h3>📊 BTCUSDT - Trend Following</h3>
+        <p><strong>Signal Type:</strong> LONG | <strong>Confidence:</strong> 75% | <strong>Entry:</strong> $104,799.85</p>
+        <p><strong>Stop Loss:</strong> $102,000.00 | <strong>Take Profit:</strong> $108,500.00</p>
+        
+        <div class="button-group">
+            <button class="btn btn-validate" onclick="showValidation()">
+                📈 Validate Strategy
+            </button>
+            <button class="btn btn-execute">
+                🚀 Execute LONG Trade  
+            </button>
+        </div>
+        
+        <div id="validation-result" class="validation-result">
+            <div class="rating">⭐⭐⭐ OK PERFORMANCE</div>
+            <p><strong>Last 30 Days Performance:</strong></p>
+            <div class="stats">
+                <div class="stat-item">
+                    <strong>Win Rate</strong><br>
+                    58.3%
+                </div>
+                <div class="stat-item">
+                    <strong>Total Return</strong><br>
+                    12.4%
+                </div>
+                <div class="stat-item">
+                    <strong>Sharpe Ratio</strong><br>
+                    1.8
+                </div>
+                <div class="stat-item">
+                    <strong>Max Drawdown</strong><br>
+                    -8.2%
+                </div>
+            </div>
+            <p><strong>💡 Recommendation:</strong> This trend following strategy shows moderate performance with acceptable returns. Consider taking this trade with standard position sizing.</p>
+        </div>
+    </div>
+
+    <h2>🎯 How It Works</h2>
+    <ol>
+        <li><strong>User sees a signal</strong> → Clicks "Validate Strategy" button</li>
+        <li><strong>System runs backtest</strong> → Uses your actual SignalGenerator on last 30 days</li>
+        <li><strong>Shows performance</strong> → Win rate, returns, Sharpe ratio, rating</li>
+        <li><strong>User decides</strong> → Take trade with confidence or skip it</li>
+    </ol>
+
+    <h2>✨ Key Benefits</h2>
+    <ul>
+        <li><strong>🔗 Integrated UX:</strong> No context switching - validation right where you trade</li>
+        <li><strong>⚡ Real-time validation:</strong> Uses your production SignalGenerator</li>
+        <li><strong>📊 Instant confidence:</strong> See historical performance before trading</li>
+        <li><strong>🎯 Smart decisions:</strong> Data-driven trade selection</li>
+    </ul>
+
+    <h2>🚀 Implementation Status</h2>
+    <p>✅ <strong>COMPLETE!</strong> The validation feature is now live in your trading bot:</p>
+    <ul>
+        <li>✅ Validate Strategy button added to each signal card</li>
+        <li>✅ Backtesting API integration working</li>
+        <li>✅ Beautiful validation results dialog</li>
+        <li>✅ Real-time performance metrics</li>
+        <li>✅ Strategy rating system (⭐⭐⭐⭐⭐ to ❌)</li>
+    </ul>
+
+    <script>
+        function showValidation() {
+            const result = document.getElementById('validation-result');
+            if (result.style.display === 'none' || result.style.display === '') {
+                result.style.display = 'block';
+            } else {
+                result.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html> 

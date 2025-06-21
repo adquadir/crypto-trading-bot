@@ -20,6 +20,24 @@ from risk.risk_manager import RiskManager
 from opportunity.opportunity_manager import OpportunityManager
 from utils.config import load_config
 
+# Import backtesting routes
+try:
+    from src.api.backtesting_routes import router as backtesting_router
+    BACKTESTING_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Backtesting routes not available: {e}")
+    backtesting_router = None
+    BACKTESTING_AVAILABLE = False
+
+# Import signal tracking routes
+try:
+    from src.api.trading_routes.signal_tracking_routes import router as signal_tracking_router
+    SIGNAL_TRACKING_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Signal tracking routes not available: {e}")
+    signal_tracking_router = None
+    SIGNAL_TRACKING_AVAILABLE = False
+
 # Load environment
 load_dotenv()
 
@@ -58,6 +76,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include backtesting routes if available
+if BACKTESTING_AVAILABLE and backtesting_router:
+    app.include_router(backtesting_router)
+    print("✅ Backtesting routes enabled")
+else:
+    print("⚠️ Backtesting routes disabled")
+
+# Include signal tracking routes if available
+if SIGNAL_TRACKING_AVAILABLE and signal_tracking_router:
+    app.include_router(signal_tracking_router)
+    print("✅ Signal tracking routes enabled")
+else:
+    print("⚠️ Signal tracking routes disabled")
 
 async def _background_scan_opportunities():
     """Background task to scan opportunities based on current mode."""
