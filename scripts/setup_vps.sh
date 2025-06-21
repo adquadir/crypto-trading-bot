@@ -214,6 +214,10 @@ echo "📦 Installing frontend dependencies..."
 # Install with clean slate
 npm install --no-cache
 
+# 🔧 CRITICAL: Install lodash explicitly to fix html-webpack-plugin dependency
+echo "📦 Installing lodash for html-webpack-plugin compatibility..."
+npm install lodash lodash.template --save-dev
+
 # Verify critical packages are installed
 if [ ! -d "node_modules/html-webpack-plugin" ]; then
   echo "⚠️ html-webpack-plugin missing, installing manually..."
@@ -225,22 +229,48 @@ if [ ! -d "node_modules/webpack" ]; then
   npm install webpack webpack-cli --save-dev
 fi
 
+# 🔧 ADDITIONAL: Ensure all webpack dependencies are present
+echo "📦 Installing additional webpack dependencies..."
+npm install css-loader style-loader file-loader url-loader --save-dev
+
 # Build production frontend with error handling
 echo "🏗️ Building production frontend..."
 if npm run build; then
   echo "✅ Frontend build successful"
 else
-  echo "❌ Frontend build failed, trying alternative approach..."
+  echo "❌ Frontend build failed, trying comprehensive fix..."
   
-  # Try installing react-scripts if missing
-  npm install react-scripts --save
+  # Comprehensive dependency fix
+  echo "📦 Installing comprehensive dependency fix..."
+  npm install react-scripts lodash lodash.template html-webpack-plugin webpack webpack-cli --save
+  
+  # Clear cache again and retry
+  npm cache clean --force
+  rm -rf node_modules/.cache 2>/dev/null || true
   
   # Try build again
   if npm run build; then
     echo "✅ Frontend build successful on retry"
   else
-    echo "⚠️ Frontend build failed - check logs above"
-    echo "📋 Continuing deployment, frontend may need manual fix"
+    echo "❌ Frontend build still failing, checking for specific errors..."
+    
+    # Check if lodash is properly installed
+    if [ ! -d "node_modules/lodash" ]; then
+      echo "🔧 Force installing lodash..."
+      npm install lodash --force
+    fi
+    
+    # Final attempt
+    if npm run build; then
+      echo "✅ Frontend build successful after lodash fix"
+    else
+      echo "⚠️ Frontend build failed - manual intervention may be required"
+      echo "📋 Common fixes:"
+      echo "   1. npm install lodash"
+      echo "   2. npm install lodash.template"
+      echo "   3. rm -rf node_modules && npm install"
+      echo "📋 Continuing deployment, frontend may need manual fix"
+    fi
   fi
 fi
 
