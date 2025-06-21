@@ -221,7 +221,7 @@ mkdir -p node_modules/ajv/dist/compile
 cat > node_modules/ajv/dist/compile/codegen.js << 'EOF'
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Name = exports.Code = void 0;
+exports.Name = exports.Code = exports._ = void 0;
 
 class Name {
     constructor(s) {
@@ -236,6 +236,16 @@ class Code {
     toString() { return this.str; }
 }
 exports.Code = Code;
+
+// Template literal function for ajv code generation
+function _(strings, ...values) {
+    let result = strings[0];
+    for (let i = 0; i < values.length; i++) {
+        result += String(values[i]) + strings[i + 1];
+    }
+    return new Code();
+}
+exports._ = _;
 EOF
 
 # Fix any other ajv-related webpack issues
