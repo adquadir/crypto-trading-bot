@@ -210,93 +210,89 @@ npm cache clean --force
 # Clear any webpack cache
 rm -rf .cache node_modules/.cache 2>/dev/null || true
 
-echo "📦 Installing frontend dependencies..."
-# Install with clean slate
-npm install --no-cache
+echo "📦 Installing frontend dependencies with proven working versions..."
 
-# 🔧 CRITICAL: Install lodash explicitly to fix html-webpack-plugin dependency
-echo "📦 Installing lodash for html-webpack-plugin compatibility..."
-npm install lodash lodash.template --save-dev
+# 🔧 CRITICAL: Install exact working versions that are proven to work together
+npm install --save --exact \
+  react@18.2.0 \
+  react-dom@18.2.0 \
+  react-scripts@5.0.1 \
+  @emotion/react@11.11.0 \
+  @emotion/styled@11.11.0 \
+  @mui/material@5.13.0 \
+  @mui/icons-material@5.11.16 \
+  @testing-library/jest-dom@5.17.0 \
+  @testing-library/react@13.4.0 \
+  @testing-library/user-event@13.5.0 \
+  axios@1.6.2 \
+  chart.js@4.4.9 \
+  react-chartjs-2@5.3.0 \
+  react-router-dom@6.11.1 \
+  web-vitals@2.1.4
 
-# 🔧 CRITICAL: Install webpack 5 polyfills for Node.js modules
-echo "📦 Installing webpack 5 polyfills for Node.js modules..."
-npm install --save-dev \
-  assert \
-  browserify-zlib \
-  buffer \
-  crypto-browserify \
-  https-browserify \
-  path-browserify \
-  process \
-  stream-browserify \
-  stream-http \
-  url \
-  util
+# 🔧 Install exact dev dependencies
+npm install --save-dev --exact \
+  lodash@4.17.21 \
+  react-app-rewired@2.2.1 \
+  webpack@5.89.0 \
+  webpack-dev-server@4.15.1 \
+  eslint-plugin-jest@27.2.1
 
-# Verify critical packages are installed
-if [ ! -d "node_modules/html-webpack-plugin" ]; then
-  echo "⚠️ html-webpack-plugin missing, installing manually..."
-  npm install html-webpack-plugin --save-dev
-fi
+# 🔧 CRITICAL: Install webpack 5 polyfills for Node.js modules (exact versions)
+echo "📦 Installing webpack 5 polyfills with exact versions..."
+npm install --save-dev --exact \
+  assert@2.0.0 \
+  browserify-zlib@0.2.0 \
+  buffer@6.0.3 \
+  crypto-browserify@3.12.0 \
+  https-browserify@1.0.0 \
+  path-browserify@1.0.1 \
+  process@0.11.10 \
+  stream-browserify@3.0.0 \
+  stream-http@3.2.0 \
+  url@0.11.0 \
+  util@0.12.5
 
-if [ ! -d "node_modules/webpack" ]; then
-  echo "⚠️ webpack missing, installing manually..."
-  npm install webpack webpack-cli --save-dev
-fi
+# Force resolve any peer dependency issues
+echo "🔧 Resolving peer dependencies..."
+npm install --legacy-peer-deps || true
 
-# 🔧 ADDITIONAL: Ensure all webpack dependencies are present
-echo "📦 Installing additional webpack dependencies..."
-npm install css-loader style-loader file-loader url-loader --save-dev
-
-# Build production frontend with error handling
+# Build production frontend with comprehensive error handling
 echo "🏗️ Building production frontend..."
 if npm run build; then
   echo "✅ Frontend build successful"
 else
-  echo "❌ Frontend build failed, trying comprehensive fix..."
+  echo "❌ Frontend build failed, trying nuclear reset approach..."
   
-  # Comprehensive dependency fix
-  echo "📦 Installing comprehensive dependency fix..."
-  npm install react-scripts lodash lodash.template html-webpack-plugin webpack webpack-cli --save
-  npm install --save-dev \
-    assert \
-    browserify-zlib \
-    buffer \
-    crypto-browserify \
-    https-browserify \
-    path-browserify \
-    process \
-    stream-browserify \
-    stream-http \
-    url \
-    util
-  
-  # Clear cache again and retry
+  # Nuclear reset with force flags
+  echo "🧹 Nuclear cleanup..."
+  rm -rf node_modules package-lock.json .cache
   npm cache clean --force
-  rm -rf node_modules/.cache 2>/dev/null || true
+  
+  # Reinstall everything with legacy peer deps
+  echo "📦 Reinstalling with legacy peer deps..."
+  npm install --legacy-peer-deps --save --exact \
+    react@18.2.0 \
+    react-dom@18.2.0 \
+    react-scripts@5.0.1 \
+    lodash@4.17.21
   
   # Try build again
   if npm run build; then
-    echo "✅ Frontend build successful on retry"
+    echo "✅ Frontend build successful after nuclear reset"
   else
-    echo "❌ Frontend build still failing, checking for specific errors..."
+    echo "❌ Frontend build still failing - trying minimal build..."
     
-    # Check if lodash is properly installed
-    if [ ! -d "node_modules/lodash" ]; then
-      echo "🔧 Force installing lodash..."
-      npm install lodash --force
-    fi
+    # Last resort: minimal package set
+    rm -rf node_modules package-lock.json
+    npm install --legacy-peer-deps react@18.2.0 react-dom@18.2.0 react-scripts@5.0.1 lodash@4.17.21
     
     # Final attempt
     if npm run build; then
-      echo "✅ Frontend build successful after lodash fix"
+      echo "✅ Frontend build successful with minimal packages"
     else
-      echo "⚠️ Frontend build failed - manual intervention may be required"
-      echo "📋 Common fixes:"
-      echo "   1. npm install lodash"
-      echo "   2. npm install lodash.template"
-      echo "   3. rm -rf node_modules && npm install"
-      echo "📋 Continuing deployment, frontend may need manual fix"
+      echo "⚠️ Frontend build failed - this may require manual intervention"
+      echo "📋 The backend will still work, frontend may need debugging"
     fi
   fi
 fi
