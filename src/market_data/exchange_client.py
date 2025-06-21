@@ -209,9 +209,12 @@ class ExchangeClient:
         self.exchange = None
         
         # Initialize WebSocket tracking
-        self.ws_connections = {}
+        self.ws_clients = {}
+        self.ws_last_message = {}
+        self.symbols = self.config.get('symbols', ['BTCUSDT'])
         self.ws_manager = None
         self.cache_manager = CacheManager()
+        self.cache = self.cache_manager  # Alias for convenience
         self.proxy_metrics = ProxyMetrics()
         
         self.logger = logging.getLogger(__name__)
@@ -244,6 +247,20 @@ class ExchangeClient:
         self.last_rate_limit_error = 0
         self.rate_limit_backoff = 1.0  # Initial backoff in seconds
         self.max_rate_limit_backoff = 60.0  # Maximum backoff in seconds
+
+        # Initialize running state
+        self.running = False
+
+        # Initialize cache TTLs
+        self.cache_ttls = {
+            'funding_rate': 300,  # 5 minutes
+            'volatility': 60,     # 1 minute
+            'ticker': 30,         # 30 seconds
+            'orderbook': 5        # 5 seconds
+        }
+        
+        # Initialize proxy authentication flag
+        self.proxy_auth = bool(self.proxy_user and self.proxy_pass)
 
     async def _init_client(self):
         """Initialize the Binance client with proper configuration."""
@@ -293,6 +310,9 @@ class ExchangeClient:
             self.ws_manager = MarketDataWebSocket(self, symbols)
             await self.ws_manager.initialize()
             
+            # Set running state to True before starting background tasks
+            self.running = True
+            
             # Start health check loop
             asyncio.create_task(self._health_check_loop())
             
@@ -318,6 +338,8 @@ class ExchangeClient:
             if self.ws_manager:
                 await self.ws_manager.initialize()
             
+            # Set running state and initialization flag
+            self.running = True
             self.initialized = True
             logger.info("Successfully reconnected to exchange")
             return True
@@ -384,6 +406,15 @@ class ExchangeClient:
         except Exception as e:
             logger.error(f"Error making API request: {e}")
             raise
+
+    def _generate_signature(self, params: Dict) -> str:
+        """Generate HMAC SHA256 signature for signed requests."""
+        query_string = '&'.join([f"{key}={value}" for key, value in params.items() if key != 'signature'])
+        return hmac.new(
+            self.api_secret.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
 
     async def get_all_symbols(self):
         """Get all available trading symbols from the exchange using aiohttp."""
@@ -991,6 +1022,7 @@ class ExchangeClient:
     async def stop(self):
         """Stop the exchange client and WebSocket manager."""
         try:
+            self.running = False
             if self.ws_manager:
                 await self.ws_manager.stop()
             logger.info("Exchange client stopped")
