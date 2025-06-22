@@ -23,6 +23,7 @@ import {
   Psychology as StrategiesIcon,
   Settings as SettingsIcon,
   TrendingUp as OpportunitiesIcon,
+  Assessment as PerformanceIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 240;
@@ -32,6 +33,7 @@ const menuItems = [
   { text: 'Opportunities', icon: <OpportunitiesIcon />, path: '/opportunities' },
   { text: 'Signals', icon: <SignalsIcon />, path: '/signals' },
   { text: 'Positions', icon: <PositionsIcon />, path: '/positions' },
+  { text: 'Performance', icon: <PerformanceIcon />, path: '/performance' },
   { text: 'Strategies', icon: <StrategiesIcon />, path: '/strategies' },
   { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
 ];

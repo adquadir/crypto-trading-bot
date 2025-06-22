@@ -18,7 +18,8 @@ import {
   Paper,
   Stack,
   Divider,
-  LinearProgress
+  LinearProgress,
+  Snackbar
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { useMediaQuery } from '@mui/system';
@@ -49,9 +50,14 @@ const Scalping = () => {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [summary, setSummary] = useState(null);
+  const [executing, setExecuting] = useState(false);
+  const [executedTrades, setExecutedTrades] = useState(new Set());
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [tradingStatus, setTradingStatus] = useState(null);
 
   useEffect(() => {
     fetchScalpingSignals();
+    fetchTradingStatus();
     const interval = setInterval(fetchScalpingSignals, 60000); // Refresh every minute for scalping
     return () => clearInterval(interval);
   }, []);
@@ -80,6 +86,17 @@ const Scalping = () => {
     }
   };
 
+  const fetchTradingStatus = async () => {
+    try {
+      const response = await axios.get(`${config.API_BASE_URL}/api/v1/trading/status`);
+      if (response.data.status === 'success') {
+        setTradingStatus(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching trading status:', error);
+    }
+  };
+
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
@@ -89,6 +106,52 @@ const Scalping = () => {
       setError('Failed to refresh scalping signals');
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleEnterTrade = async (signal) => {
+    setExecuting(true);
+    
+    try {
+      const tradeRequest = {
+        symbol: signal.symbol,
+        signal_type: signal.direction,
+        entry_price: signal.entry_price,
+        stop_loss: signal.stop_loss,
+        take_profit: signal.take_profit,
+        confidence: signal.confidence,
+        strategy: signal.scalping_type || 'scalping'
+      };
+
+      const response = await fetch('/api/v1/trading/execute_manual_trade', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(tradeRequest),
+      });
+
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        setExecutedTrades(prev => new Set([...prev, signal.signal_id || signal.symbol]));
+        setSnackbar({
+          open: true,
+          message: `Trade entered for ${signal.symbol}! ${result.message}`,
+          severity: 'success'
+        });
+      } else {
+        throw new Error(result.message || 'Trade execution failed');
+      }
+    } catch (error) {
+      console.error('Error entering trade:', error);
+      setSnackbar({
+        open: true,
+        message: `Failed to enter trade: ${error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setExecuting(false);
     }
   };
 
@@ -387,9 +450,9 @@ const Scalping = () => {
               <Typography variant="caption" color="textSecondary" fontSize={isMobile ? '0.65rem' : undefined}>
                 Time
               </Typography>
-              <Typography variant={isMobile ? "caption" : "body2"} fontWeight="bold" color="primary.main" display="block">
-                {signal.timeframe || '15m'}
-              </Typography>
+                              <Typography variant={isMobile ? "caption" : "body2"} fontWeight="bold" color="primary.main" display="block">
+                  {signal.timeframe || '15m/1h'}
+                </Typography>
             </Box>
           </Stack>
 
@@ -440,21 +503,39 @@ const Scalping = () => {
             </Box>
           )}
 
-          {/* Action Button */}
-          <Box textAlign="center" mb={isMobile ? 1 : 0}>
+          {/* Action Buttons */}
+          <Box display="flex" gap={1} mt={2}>
             <Button
               variant="contained"
-              color="primary"
-              startIcon={!isMobile ? <AssessmentIcon /> : null}
+              color={signal.direction === 'LONG' ? 'success' : 'error'}
+              size="small"
+              startIcon={executing ? <CircularProgress size={16} color="inherit" /> : getDirectionIcon(signal.direction)}
+              onClick={() => handleEnterTrade(signal)}
+              disabled={executing || executedTrades.has(signal.signal_id || signal.symbol)}
+              sx={{ 
+                flex: 1,
+                fontWeight: 'bold',
+                opacity: executedTrades.has(signal.signal_id || signal.symbol) ? 0.6 : 1
+              }}
+            >
+              {executedTrades.has(signal.signal_id || signal.symbol) 
+                ? 'Trade Entered' 
+                : executing 
+                  ? 'Entering...' 
+                  : `Enter ${signal.direction} Trade`
+              }
+            </Button>
+            
+            <Button
+              variant="outlined"
+              size="small"
               onClick={() => {
                 setSelectedSignal(signal);
                 setDetailsOpen(true);
               }}
-              fullWidth={isMobile}
-              size={isMobile ? "small" : "medium"}
-              sx={{ minWidth: isMobile ? 'auto' : '140px' }}
+              sx={{ minWidth: 'auto', px: 2 }}
             >
-              {isMobile ? 'Details' : 'View Details'}
+              Details
             </Button>
           </Box>
 
@@ -525,7 +606,7 @@ const Scalping = () => {
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="textSecondary">Timeframe:</Typography>
-                  <Typography variant="body1">{signal.timeframe || '15m'}</Typography>
+                  <Typography variant="body1">{signal.timeframe || '15m/1h'}</Typography>
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="textSecondary">Volume Surge:</Typography>
@@ -597,12 +678,28 @@ const Scalping = () => {
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={isMobile ? 2 : 3} px={isMobile ? 1 : 0}>
         <Box>
-          <Typography variant={isMobile ? "h5" : "h4"} color="primary" gutterBottom>
-            Precision Scalping
-          </Typography>
+          <Box display="flex" alignItems="center" gap={1} mb={1}>
+            <Typography variant={isMobile ? "h5" : "h4"} color="primary">
+              Precision Scalping
+            </Typography>
+            {tradingStatus && (
+              <Chip
+                label={tradingStatus.trading_mode}
+                color={tradingStatus.real_trading_enabled ? 'success' : 'warning'}
+                size="small"
+                variant="outlined"
+                sx={{ fontWeight: 'bold' }}
+              />
+            )}
+          </Box>
           <Typography variant={isMobile ? "body2" : "body1"} color="textSecondary">
             {isMobile ? '3-10% Capital Returns' : '3-10% Capital Returns via Precise Leverage • 15m/1h Timeframes'}
           </Typography>
+          {tradingStatus && !tradingStatus.real_trading_enabled && (
+            <Typography variant="caption" color="warning.main" display="block" mt={0.5}>
+              ⚠️ Simulation Mode Active - No real money at risk
+            </Typography>
+          )}
         </Box>
         <Button
           variant="outlined"
@@ -712,6 +809,22 @@ const Scalping = () => {
         open={detailsOpen} 
         onClose={() => setDetailsOpen(false)} 
       />
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert 
+          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

@@ -9,6 +9,7 @@ import Signals from './pages/Signals';
 import Opportunities from './pages/Opportunities';
 import Scalping from './pages/Scalping';
 import Settings from './pages/Settings';
+import Performance from './pages/Performance';
 
 // Layout components
 import DashboardLayout from './layouts/DashboardLayout';
@@ -45,6 +46,9 @@ function App() {
             <Route path="/signals" element={<Signals />} />
             <Route path="/opportunities" element={<Opportunities />} />
             <Route path="/scalping" element={<Scalping />} />
+            <Route path="/positions" element={<Positions />} />
+            <Route path="/performance" element={<Performance />} />
+            <Route path="/strategies" element={<Strategies />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </Router>
