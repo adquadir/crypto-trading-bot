@@ -68,18 +68,46 @@ Signal: BTCUSDT SHORT
 🏆 Result: HIGH CERTAINTY (67/100) - 65-75% win rate
 ```
 
+### 🏎️ **Precision Scalping System** ⭐ **NEW FEATURE**
+- **Target**: 3-10% capital returns via precise leverage application
+- **Timeframes**: 15m primary analysis with 1h trend confirmation
+- **Market Moves**: Small 0.3-1.2% market movements amplified by 5-15x leverage
+- **Capital Focus**: Returns calculated on your capital, not market percentage
+
+**Example Scalping Trade:**
+```
+Market Move: 0.7% (perfect scalping range)
+Leverage: 7.1x (calculated: 5% target ÷ 0.7% move)
+Capital Return: 5.0% (0.7% × 7.1x)
+Your Profit: $25 profit on $500 capital
+```
+
+**Scalping Validation Criteria:**
+- **Market Move Range**: 0.3-1.2% for true scalping
+- **Capital Return Target**: 2.5-15% after leverage
+- **Risk/Reward Minimum**: 1.2:1 ratio
+- **Volatility Cap**: Max 6% for stable execution
+- **Leverage Range**: 3-20x safe operating range
+
+**Background Scanner:**
+- **Complete Coverage**: Scans all 437 USDT trading pairs
+- **Independent Operation**: Runs continuously without blocking API
+- **Batch Processing**: 20 symbols per batch for efficient scanning
+- **Real-time Updates**: Signals updated every 5-10 minutes
+
 ### 🎮 **Modern Web Interface**
 - **High-Certainty Filter**: Show only guaranteed/high-certainty signals
 - **Take Profit Certainty Column**: Prominently displays win rate expectations
 - **Interactive Profit Calculator**: Adjust capital and leverage for personalized calculations
 - **Color-Coded Classifications**: Easy identification of signal quality
 - **Real-time Updates**: 15-second refresh with validation status
+- **Scalping Dashboard**: Dedicated `/scalping` page for precision scalping opportunities
 
 ### ⚡ **Smart Signal Management**
-- **Daily Timeframe Analysis**: 1-day intervals for reliable 3% move detection
+- **Dual Timeframe Analysis**: Daily for 3% precision + 15m/1h for scalping
 - **Market-Based Invalidation**: Signals only removed when real market hits stop/target
-- **Validation-First Approach**: All signals processed through 5-step framework
-- **High-Quality Focus**: Shows 5% of signals that are actually profitable
+- **Validation-First Approach**: All signals processed through respective validation frameworks
+- **Quality Focus**: Shows only profitable opportunities for each trading style
 
 ## 🛠️ Technical Architecture
 
@@ -151,8 +179,9 @@ python simple_api.py
 # Start frontend (new terminal)
 cd frontend && npm start
 
-# Access dashboard
-open http://localhost:3000/opportunities
+# Access dashboards
+open http://localhost:3000/opportunities  # 3% Precision Trading
+open http://localhost:3000/scalping       # Precision Scalping
 ```
 
 ## 🔗 API Endpoints
@@ -160,6 +189,12 @@ open http://localhost:3000/opportunities
 ### **Precision Trading Opportunities**
 ```http
 GET /api/v1/trading/opportunities
+```
+
+### **Precision Scalping Signals**
+```http
+GET /api/v1/trading/scalping-signals
+POST /api/v1/trading/refresh-scalping
 ```
 
 **Response Structure:**
@@ -186,6 +221,46 @@ GET /api/v1/trading/opportunities
       "verdict": "✅ Tradable"
     }
   ]
+}
+```
+
+**Scalping Response Structure:**
+```json
+{
+  "status": "complete",
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "direction": "LONG",
+      "entry_price": 101883.1,
+      "take_profit": 101169.9,
+      "stop_loss": 102175.0,
+      "scalping_type": "momentum_scalp",
+      "optimal_leverage": 7.1,
+      "expected_capital_return_pct": 5.0,
+      "market_move_pct": 0.7,
+      "timeframe": "15m",
+      "capital_100": {
+        "capital": 100,
+        "leverage": 7.1,
+        "expected_profit": 5.0,
+        "expected_return_pct": 5.0
+      },
+      "capital_500": {
+        "capital": 500,
+        "leverage": 7.1,
+        "expected_profit": 25.0,
+        "expected_return_pct": 5.0
+      },
+      "scalping_ready": true,
+      "validation_applied": true
+    }
+  ],
+  "summary": {
+    "total_signals": 1,
+    "avg_capital_return_pct": 5.0,
+    "avg_optimal_leverage": 7.1
+  }
 }
 ```
 
@@ -231,24 +306,40 @@ GET /api/v1/debug/cache
 
 ## 💰 Profit Calculations
 
-### **Frontend Table Example:**
+### **3% Precision Trading Example:**
 ```
 Symbol: BTCUSDT SHORT
 Move %: 3.00%  
 Profit @ 10x: $150 (based on $500 capital × 3% × 10x leverage)
 ```
 
-### **Interactive Calculator:**
+### **Precision Scalping Example:**
+```
+Symbol: BTCUSDT LONG
+Market Move: 0.7%
+Optimal Leverage: 7.1x (auto-calculated for 5% capital return)
+Capital Return: 5.0%
+Profit on $500: $25 (5% of $500)
+```
+
+### **Interactive Calculators:**
 - **Adjustable Capital**: Any amount you choose
-- **Adjustable Leverage**: 1x to 20x
+- **Adjustable Leverage**: 1x to 20x (precision) / Auto-calculated (scalping)
 - **Real-time Updates**: See profits as you change parameters
 
-**Formula:** `Your Capital × Move% × Your Leverage = Your Profit`
+**Formulas:**
+- **Precision Trading**: `Your Capital × Move% × Your Leverage = Your Profit`
+- **Scalping**: `Your Capital × Target% = Your Profit` (leverage auto-calculated)
 
-**Examples:**
+**Precision Trading Examples:**
 - $1,000 × 3% × 15x = $450 profit
 - $10,000 × 3% × 10x = $3,000 profit
 - $500 × 2.5% × 20x = $250 profit
+
+**Scalping Examples:**
+- $100 × 5% = $5 profit (0.7% move × 7.1x leverage)
+- $1,000 × 5% = $50 profit (0.7% move × 7.1x leverage)
+- $5,000 × 5% = $250 profit (0.7% move × 7.1x leverage)
 
 ## 🎯 Trading Philosophy
 
@@ -259,11 +350,21 @@ Profit @ 10x: $150 (based on $500 capital × 3% × 10x leverage)
 - **Daily Timeframes**: Reliable execution without scalping stress
 - **Validation First**: Every signal must pass 5-step validation
 
+### **"Precision Scalping" Approach:**
+- **Capital-Focused Returns**: Target 3-10% return on your capital, not market percentage
+- **Small Market Moves**: 0.3-1.2% movements amplified by precise leverage
+- **Auto-Calculated Leverage**: System determines optimal leverage for target returns
+- **Fast Timeframes**: 15m analysis with 1h trend confirmation
+- **Strict Validation**: Even tighter criteria than precision trading
+
 ### **Why This Works:**
 - **Market Reality**: Most crypto pairs move 3%+ regularly on daily timeframes
+- **Scalping Reality**: Small 0.7% moves happen frequently on 15m timeframes
 - **Execution Safety**: Daily timeframes have lower slippage and better fills
+- **Scalping Safety**: 15m timeframes balance speed with execution quality
 - **Profit Scaling**: 3% moves with 10-20x leverage = 30-60% returns
-- **Compounding**: Consistent 3% opportunities compound rapidly
+- **Capital Scaling**: 0.7% moves with 7x leverage = 5% capital returns
+- **Compounding**: Consistent opportunities compound rapidly (both approaches)
 - **Risk Control**: Strict validation prevents systematic losses
 
 ## 📈 System Statistics
@@ -299,15 +400,17 @@ Profit @ 10x: $150 (based on $500 capital × 3% × 10x leverage)
 ## 🔧 Development & Customization
 
 ### **Key Files:**
-- `src/opportunity/opportunity_manager.py` - Core validation and classification logic
+- `src/opportunity/opportunity_manager.py` - Core validation, classification, and scalping logic
 - `frontend/src/components/Opportunities.js` - UI for precision trading
-- `simple_api.py` - API server with validation endpoints
+- `frontend/src/pages/Scalping.js` - UI for precision scalping
+- `simple_api.py` - API server with validation and scalping endpoints
 
 ### **Customization Options:**
-- **Risk Tolerance**: Adjust minimum R/R ratio (currently 0.8:1)
+- **Risk Tolerance**: Adjust minimum R/R ratio (0.8:1 precision / 1.2:1 scalping)
 - **Volume Requirements**: Change minimum volume ratio (currently 0.5x)
 - **Slippage Models**: Adjust for different trading styles
 - **Certainty Thresholds**: Modify classification scoring
+- **Scalping Parameters**: Adjust capital return targets (2.5-15%), market move range (0.3-1.2%), volatility caps (6%)
 
 ---
 

@@ -7,6 +7,7 @@ import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import Signals from './pages/Signals';
 import Opportunities from './pages/Opportunities';
+import Scalping from './pages/Scalping';
 import Settings from './pages/Settings';
 
 // Layout components
@@ -43,6 +44,7 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/signals" element={<Signals />} />
             <Route path="/opportunities" element={<Opportunities />} />
+            <Route path="/scalping" element={<Scalping />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </Router>

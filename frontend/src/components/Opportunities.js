@@ -22,8 +22,12 @@ import {
   Button,
   Grid,
   TextField,
-  Alert
+  Alert,
+  Divider,
+  Stack
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import { useMediaQuery } from '@mui/system';
 import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
@@ -32,7 +36,9 @@ import {
   MonetizationOn as ProfitIcon,
   Speed as SpeedIcon,
   TrendingFlat as PrecisionIcon,
-  AccountBalance as LeverageIcon
+  AccountBalance as LeverageIcon,
+  TouchApp as TouchIcon,
+  Assessment as AssessmentIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -225,7 +231,172 @@ const CertaintyBadge = ({ signal }) => {
   );
 };
 
+// Mobile-Friendly Signal Card Component
+const SignalCard = ({ signal, onDetailsClick }) => {
+  const entry = signal.entry || signal.entry_price || 0;
+  const tp = signal.take_profit || signal.takeProfit || 0;
+  const sl = signal.stop_loss || signal.stopLoss || entry * 0.98;
+  const confidence = signal.confidence || signal.confidence_score || 0;
+  const movePct = Math.abs((tp - entry) / entry) * 100;
+  const riskReward = Math.abs(tp - entry) / Math.abs(entry - sl);
+  const profitAt10x = 500 * (movePct / 100) * 10;
+  
+  const getDirectionColor = (direction) => {
+    switch(direction?.toLowerCase()) {
+      case 'long':
+      case 'buy':
+        return 'success';
+      case 'short':
+      case 'sell':
+        return 'error';
+      default:
+        return 'default';
+    }
+  };
+
+  const getDirectionIcon = (direction) => {
+    switch(direction?.toLowerCase()) {
+      case 'long':
+      case 'buy':
+        return <TrendingUpIcon />;
+      case 'short':
+      case 'sell':
+        return <TrendingDownIcon />;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <Card 
+      sx={{ 
+        mb: 2, 
+        borderRadius: 2, 
+        boxShadow: 2,
+        '&:hover': { boxShadow: 4 },
+        border: '1px solid #e0e0e0'
+      }}
+    >
+      <CardContent sx={{ p: 2 }}>
+        {/* Header Row */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Box display="flex" alignItems="center" gap={1}>
+            <Typography variant="h6" fontWeight="bold" color="primary">
+              {signal.symbol}
+            </Typography>
+            <Chip
+              icon={getDirectionIcon(signal.direction)}
+              label={signal.direction}
+              color={getDirectionColor(signal.direction)}
+              size="small"
+              sx={{ fontWeight: 'bold' }}
+            />
+          </Box>
+          <IconButton 
+            size="small" 
+            color="primary"
+            onClick={() => onDetailsClick(signal)}
+            sx={{ p: 1 }}
+          >
+            <InfoIcon />
+          </IconButton>
+        </Box>
+
+        {/* Certainty Badge - Prominent */}
+        <Box mb={2}>
+          <CertaintyBadge signal={signal} />
+        </Box>
+
+        {/* Key Metrics Grid */}
+        <Grid container spacing={2} mb={2}>
+          <Grid item xs={6}>
+            <Box textAlign="center" p={1} bgcolor="background.default" borderRadius={1}>
+              <Typography variant="caption" color="textSecondary">Entry Price</Typography>
+              <Typography variant="body1" fontWeight="bold">
+                ${entry.toFixed(6)}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={6}>
+            <Box textAlign="center" p={1} bgcolor="success.light" borderRadius={1}>
+              <Typography variant="caption" color="textSecondary">Take Profit</Typography>
+              <Typography variant="body1" fontWeight="bold" color="success.dark">
+                ${tp.toFixed(6)}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={6}>
+            <Box textAlign="center" p={1} bgcolor="error.light" borderRadius={1}>
+              <Typography variant="caption" color="textSecondary">Stop Loss</Typography>
+              <Typography variant="body1" fontWeight="bold" color="error.dark">
+                ${sl.toFixed(6)}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={6}>
+            <Box textAlign="center" p={1} bgcolor="warning.light" borderRadius={1}>
+              <Typography variant="caption" color="textSecondary">Move %</Typography>
+              <Typography variant="body1" fontWeight="bold" color="warning.dark">
+                {movePct.toFixed(2)}%
+              </Typography>
+            </Box>
+          </Grid>
+        </Grid>
+
+        {/* Performance Metrics */}
+        <Stack direction="row" spacing={2} justifyContent="space-between" mb={2}>
+          <Box textAlign="center">
+            <Typography variant="caption" color="textSecondary">Confidence</Typography>
+            <Typography variant="body2" fontWeight="bold">
+              {(confidence * 100).toFixed(1)}%
+            </Typography>
+          </Box>
+          <Box textAlign="center">
+            <Typography variant="caption" color="textSecondary">Risk:Reward</Typography>
+            <Typography variant="body2" fontWeight="bold" color={riskReward >= 2 ? 'success.main' : 'text.primary'}>
+              {riskReward.toFixed(2)}:1
+            </Typography>
+          </Box>
+          <Box textAlign="center">
+            <Typography variant="caption" color="textSecondary">Profit @ 10x</Typography>
+            <Typography variant="body2" fontWeight="bold" color="success.main">
+              ${profitAt10x.toFixed(0)}
+            </Typography>
+          </Box>
+        </Stack>
+
+        {/* Precision Score */}
+        <Box display="flex" justifyContent="center">
+          <PrecisionBadge signal={signal} />
+        </Box>
+
+        {/* Quick Touch Action */}
+        <Box mt={2} textAlign="center">
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<TouchIcon />}
+            onClick={() => onDetailsClick(signal)}
+            sx={{ minWidth: '120px' }}
+          >
+            View Details
+          </Button>
+        </Box>
+
+        {/* Timestamp */}
+        {signal.timestamp && (
+          <Typography variant="caption" color="textSecondary" display="block" textAlign="center" mt={1}>
+            {new Date(signal.timestamp).toLocaleString()}
+          </Typography>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
 const Opportunities = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -331,6 +502,11 @@ const Opportunities = () => {
     return calculatePrecisionScore(b) - calculatePrecisionScore(a);
   });
 
+  const handleDetailsClick = (signal) => {
+    setSelectedSignal(signal);
+    setDetailsOpen(true);
+  };
+
   if (loading && signals.length === 0) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -340,78 +516,90 @@ const Opportunities = () => {
   }
 
   return (
-    <Box>
-      {/* Header */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Box>
-          <Typography variant="h5" gutterBottom>
-            🎯 3% Precision Trading Opportunities
-          </Typography>
-          <Typography variant="body2" color="textSecondary">
-            "Give me just 3% of movement — with precision, volume, and high probability — and I'll scale that into serious profit."
-          </Typography>
+    <Box sx={{ p: isMobile ? 1 : 2 }}>
+      {/* Header - Mobile Optimized */}
+      <Box mb={3}>
+        <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+          <Box flex={1}>
+            <Typography variant={isMobile ? "h6" : "h5"} gutterBottom fontWeight="bold">
+              🎯 3% Precision Trading
+            </Typography>
+            <Typography variant="body2" color="textSecondary" sx={{ display: isMobile ? 'none' : 'block' }}>
+              "Give me just 3% of movement — with precision, volume, and high probability — and I'll scale that into serious profit."
+            </Typography>
+          </Box>
+          <IconButton onClick={fetchSignals} disabled={loading} color="primary">
+            <RefreshIcon />
+          </IconButton>
         </Box>
-        <Box display="flex" gap={2} alignItems="center">
+        
+        {/* Mobile Stats Row */}
+        <Stack direction="row" spacing={1} justifyContent="space-between" flexWrap="wrap" gap={1}>
           <Chip 
             icon={<SpeedIcon />} 
-            label={`${filteredSignals.length} Total Signals`} 
+            label={`${filteredSignals.length} Signals`} 
             color="primary" 
+            size="small"
           />
           <Chip 
             icon={<span>🟢</span>} 
             label={`${filteredSignals.filter(s => ['GUARANTEED', 'VERY HIGH', 'HIGH'].includes(s.certainty_label)).length} High-Certainty`} 
             color="success" 
             variant="filled"
+            size="small"
           />
-          <Tooltip title="Refresh Signals">
-            <IconButton onClick={fetchSignals} disabled={loading}>
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
-        </Box>
+          {isMobile && (
+            <Chip 
+              icon={<AssessmentIcon />} 
+              label={isMobile ? "Cards" : "Card View"}
+              color="info"
+              size="small"
+            />
+          )}
+        </Stack>
       </Box>
 
-      {/* Strategy Stats */}
+      {/* Strategy Stats Grid - Responsive */}
       <Grid container spacing={2} mb={3}>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={6} md={3}>
           <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <PrecisionIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-              <Typography variant="h6">Precision Focus</Typography>
-              <Typography variant="body2" color="textSecondary">
+            <CardContent sx={{ textAlign: 'center', p: isMobile ? 1.5 : 2 }}>
+              <PrecisionIcon color="primary" sx={{ fontSize: isMobile ? 30 : 40, mb: 1 }} />
+              <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">Precision Focus</Typography>
+              <Typography variant="caption" color="textSecondary">
                 2-4% moves only
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={6} md={3}>
           <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <LeverageIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
-              <Typography variant="h6">Leverage Ready</Typography>
-              <Typography variant="body2" color="textSecondary">
+            <CardContent sx={{ textAlign: 'center', p: isMobile ? 1.5 : 2 }}>
+              <LeverageIcon color="success" sx={{ fontSize: isMobile ? 30 : 40, mb: 1 }} />
+              <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">Leverage Ready</Typography>
+              <Typography variant="caption" color="textSecondary">
                 5x-15x amplification
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={6} md={3}>
           <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <SpeedIcon color="warning" sx={{ fontSize: 40, mb: 1 }} />
-              <Typography variant="h6">Fast Execution</Typography>
-              <Typography variant="body2" color="textSecondary">
+            <CardContent sx={{ textAlign: 'center', p: isMobile ? 1.5 : 2 }}>
+              <SpeedIcon color="warning" sx={{ fontSize: isMobile ? 30 : 40, mb: 1 }} />
+              <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">Fast Execution</Typography>
+              <Typography variant="caption" color="textSecondary">
                 In/out &lt; 2 hours
               </Typography>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={6} md={3}>
           <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <ProfitIcon color="error" sx={{ fontSize: 40, mb: 1 }} />
-              <Typography variant="h6">Compound Ready</Typography>
-              <Typography variant="body2" color="textSecondary">
+            <CardContent sx={{ textAlign: 'center', p: isMobile ? 1.5 : 2 }}>
+              <ProfitIcon color="error" sx={{ fontSize: isMobile ? 30 : 40, mb: 1 }} />
+              <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">Compound Ready</Typography>
+              <Typography variant="caption" color="textSecondary">
                 Repeatable profits
               </Typography>
             </CardContent>
@@ -419,13 +607,13 @@ const Opportunities = () => {
         </Grid>
       </Grid>
 
-      {/* Filters */}
+      {/* Filters - Mobile Optimized */}
       <Card sx={{ mb: 3 }}>
-        <CardContent>
+        <CardContent sx={{ p: isMobile ? 1.5 : 2 }}>
           <Typography variant="subtitle1" gutterBottom>
-            🔍 3% Precision Filters
+            🔍 Precision Filters
           </Typography>
-          <Grid container spacing={2} alignItems="center">
+          <Grid container spacing={isMobile ? 1 : 2} alignItems="center">
             <Grid item xs={12} md={2}>
               <TextField
                 fullWidth
@@ -435,7 +623,7 @@ const Opportunities = () => {
                 size="small"
               />
             </Grid>
-            <Grid item xs={12} md={2}>
+            <Grid item xs={6} md={2}>
               <TextField
                 fullWidth
                 label="Min Move %"
@@ -446,7 +634,7 @@ const Opportunities = () => {
                 inputProps={{ step: 0.1, min: 0.5, max: 10 }}
               />
             </Grid>
-            <Grid item xs={12} md={2}>
+            <Grid item xs={6} md={2}>
               <TextField
                 fullWidth
                 label="Max Move %"
@@ -457,10 +645,10 @@ const Opportunities = () => {
                 inputProps={{ step: 0.1, min: 1, max: 20 }}
               />
             </Grid>
-            <Grid item xs={12} md={2}>
+            <Grid item xs={6} md={2}>
               <TextField
                 fullWidth
-                label="Min Precision Score"
+                label="Min Precision"
                 type="number"
                 value={filters.minPrecisionScore}
                 onChange={(e) => setFilters(prev => ({ ...prev, minPrecisionScore: Number(e.target.value) }))}
@@ -468,7 +656,7 @@ const Opportunities = () => {
                 inputProps={{ min: 0, max: 100 }}
               />
             </Grid>
-            <Grid item xs={12} md={2}>
+            <Grid item xs={6} md={2}>
               <TextField
                 fullWidth
                 label="Min Confidence"
@@ -489,127 +677,138 @@ const Opportunities = () => {
                 size="small"
                 sx={{ height: '40px' }}
               >
-                {filters.showOnlyHighCertainty ? 'High Certainty ON' : 'Show High Certainty'}
+                {isMobile ? (filters.showOnlyHighCertainty ? 'High ✓' : 'High Filter') : (filters.showOnlyHighCertainty ? 'High Certainty ON' : 'Show High Certainty')}
               </Button>
             </Grid>
           </Grid>
         </CardContent>
       </Card>
 
-      {/* Signals Table */}
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Symbol</TableCell>
-              <TableCell>Direction</TableCell>
-              <TableCell>Take Profit Certainty</TableCell>
-              <TableCell>Entry Price</TableCell>
-              <TableCell>Take Profit</TableCell>
-              <TableCell>Stop Loss</TableCell>
-              <TableCell>Move %</TableCell>
-              <TableCell>Confidence</TableCell>
-              <TableCell>Precision Score</TableCell>
-              <TableCell>Risk:Reward</TableCell>
-              <TableCell>Profit @ 10x</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredSignals.map((signal, index) => {
-              const entry = signal.entry || signal.entry_price || 0;
-              const tp = signal.take_profit || signal.takeProfit || 0;
-              const sl = signal.stop_loss || signal.stopLoss || entry * 0.98; // Default 2% SL
-              const confidence = signal.confidence || signal.confidence_score || 0;
-              const movePct = Math.abs((tp - entry) / entry) * 100;
-              const riskReward = Math.abs(tp - entry) / Math.abs(entry - sl);
-              const profitAt10x = 500 * (movePct / 100) * 10;
-              
-              return (
-                <TableRow key={signal.signal_id || index} hover>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight="bold">
-                      {signal.symbol}
-                    </Typography>
-                    {signal.timestamp && (
-                      <Typography variant="caption" color="textSecondary">
-                        {new Date(signal.timestamp).toLocaleTimeString()}
+      {/* Responsive Content: Cards on Mobile, Table on Desktop */}
+      {isMobile ? (
+        /* Mobile Card View */
+        <Box>
+          {filteredSignals.map((signal, index) => (
+            <SignalCard 
+              key={signal.signal_id || index} 
+              signal={signal} 
+              onDetailsClick={handleDetailsClick}
+            />
+          ))}
+        </Box>
+      ) : (
+        /* Desktop Table View */
+        <TableContainer component={Paper}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Symbol</TableCell>
+                <TableCell>Direction</TableCell>
+                <TableCell>Take Profit Certainty</TableCell>
+                <TableCell>Entry Price</TableCell>
+                <TableCell>Take Profit</TableCell>
+                <TableCell>Stop Loss</TableCell>
+                <TableCell>Move %</TableCell>
+                <TableCell>Confidence</TableCell>
+                <TableCell>Precision Score</TableCell>
+                <TableCell>Risk:Reward</TableCell>
+                <TableCell>Profit @ 10x</TableCell>
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredSignals.map((signal, index) => {
+                const entry = signal.entry || signal.entry_price || 0;
+                const tp = signal.take_profit || signal.takeProfit || 0;
+                const sl = signal.stop_loss || signal.stopLoss || entry * 0.98; // Default 2% SL
+                const confidence = signal.confidence || signal.confidence_score || 0;
+                const movePct = Math.abs((tp - entry) / entry) * 100;
+                const riskReward = Math.abs(tp - entry) / Math.abs(entry - sl);
+                const profitAt10x = 500 * (movePct / 100) * 10;
+                
+                return (
+                  <TableRow key={signal.signal_id || index} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="bold">
+                        {signal.symbol}
                       </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      icon={getDirectionIcon(signal.direction)}
-                      label={signal.direction}
-                      color={getDirectionColor(signal.direction)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <CertaintyBadge signal={signal} />
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      ${entry.toFixed(6)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" color="success.main">
-                      ${tp.toFixed(6)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" color="error.main">
-                      ${sl.toFixed(6)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={`${movePct.toFixed(2)}%`}
-                      color={movePct >= 2.5 && movePct <= 3.5 ? 'success' : 'warning'}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {(confidence * 100).toFixed(1)}%
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <PrecisionBadge signal={signal} />
-                  </TableCell>
-                  <TableCell>
-                    <Typography 
-                      variant="body2" 
-                      color={riskReward >= 2 ? 'success.main' : 'text.primary'}
-                    >
-                      {riskReward.toFixed(2)}:1
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" color="success.main" fontWeight="bold">
-                      ${profitAt10x.toFixed(0)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Tooltip title="View Details">
-                      <IconButton 
-                        size="small" 
-                        onClick={() => {
-                          setSelectedSignal(signal);
-                          setDetailsOpen(true);
-                        }}
+                      {signal.timestamp && (
+                        <Typography variant="caption" color="textSecondary">
+                          {new Date(signal.timestamp).toLocaleTimeString()}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        icon={getDirectionIcon(signal.direction)}
+                        label={signal.direction}
+                        color={getDirectionColor(signal.direction)}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <CertaintyBadge signal={signal} />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        ${entry.toFixed(6)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="success.main">
+                        ${tp.toFixed(6)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="error.main">
+                        ${sl.toFixed(6)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={`${movePct.toFixed(2)}%`}
+                        color={movePct >= 2.5 && movePct <= 3.5 ? 'success' : 'warning'}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {(confidence * 100).toFixed(1)}%
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <PrecisionBadge signal={signal} />
+                    </TableCell>
+                    <TableCell>
+                      <Typography 
+                        variant="body2" 
+                        color={riskReward >= 2 ? 'success.main' : 'text.primary'}
                       >
-                        <InfoIcon />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                        {riskReward.toFixed(2)}:1
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="success.main" fontWeight="bold">
+                        ${profitAt10x.toFixed(0)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title="View Details">
+                        <IconButton 
+                          size="small" 
+                          onClick={() => handleDetailsClick(signal)}
+                        >
+                          <InfoIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
       {filteredSignals.length === 0 && !loading && (
         <Box textAlign="center" py={4}>
@@ -622,12 +821,13 @@ const Opportunities = () => {
         </Box>
       )}
 
-      {/* Signal Details Dialog */}
+      {/* Signal Details Dialog - Mobile Optimized */}
       <Dialog
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>
           🎯 3% Precision Signal Details: {selectedSignal?.symbol}
@@ -674,7 +874,9 @@ const Opportunities = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDetailsOpen(false)}>Close</Button>
+          <Button onClick={() => setDetailsOpen(false)} fullWidth={isMobile}>
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
 

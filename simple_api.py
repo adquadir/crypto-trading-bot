@@ -717,5 +717,118 @@ async def get_positions_legacy():
     """Legacy alias for /api/v1/trading/positions to eliminate 404s."""
     return await get_positions()
 
+@app.get("/api/v1/trading/scalping-signals")
+async def get_scalping_signals():
+    """Get scalping trading signals focused on capital returns."""
+    if not opportunity_manager:
+        return {
+            "status": "initializing",
+            "data": [],
+            "message": "Opportunity manager is still initializing"
+        }
+    
+    try:
+        # Get scalping opportunities
+        scalping_signals = opportunity_manager.get_scalping_opportunities()
+        
+        if not scalping_signals:
+            return {
+                "status": "complete",
+                "data": [],
+                "message": "No scalping signals found",
+                "summary": {
+                    "total_signals": 0,
+                    "high_priority_signals": 0,
+                    "avg_capital_return_pct": 0,
+                    "max_capital_return_pct": 0,
+                    "avg_optimal_leverage": 0
+                }
+            }
+        
+        # Calculate summary statistics
+        capital_returns = [signal.get('expected_capital_return_pct', 0) for signal in scalping_signals]
+        leverages = [signal.get('optimal_leverage', 0) for signal in scalping_signals]
+        high_priority_count = len([s for s in scalping_signals if s.get('expected_capital_return_pct', 0) >= 7])
+        
+        summary = {
+            "total_signals": len(scalping_signals),
+            "high_priority_signals": high_priority_count,
+            "avg_capital_return_pct": round(sum(capital_returns) / len(capital_returns), 2) if capital_returns else 0,
+            "max_capital_return_pct": round(max(capital_returns), 2) if capital_returns else 0,
+            "avg_optimal_leverage": round(sum(leverages) / len(leverages), 1) if leverages else 0
+        }
+        
+        return {
+            "status": "complete",
+            "data": scalping_signals,
+            "message": f"Found {len(scalping_signals)} scalping signals",
+            "summary": summary
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "data": [],
+            "message": f"Error getting scalping signals: {str(e)}",
+            "summary": {
+                "total_signals": 0,
+                "high_priority_signals": 0,
+                "avg_capital_return_pct": 0,
+                "max_capital_return_pct": 0,
+                "avg_optimal_leverage": 0
+            }
+        }
+
+@app.post("/api/v1/trading/refresh-scalping")
+async def refresh_scalping_signals():
+    """Manually refresh scalping signals scan."""
+    if not opportunity_manager:
+        return {
+            "status": "error",
+            "message": "Opportunity manager not initialized"
+        }
+    
+    try:
+        print("🔄 Manual scalping scan triggered...")
+        
+        # Trigger scalping scan
+        await opportunity_manager.scan_scalping_opportunities()
+        
+        # Get updated signals
+        scalping_signals = opportunity_manager.get_scalping_opportunities()
+        
+        # Calculate summary statistics
+        capital_returns = [signal.get('expected_capital_return_pct', 0) for signal in scalping_signals]
+        leverages = [signal.get('optimal_leverage', 0) for signal in scalping_signals]
+        high_priority_count = len([s for s in scalping_signals if s.get('expected_capital_return_pct', 0) >= 7])
+        
+        summary = {
+            "total_signals": len(scalping_signals),
+            "high_priority_signals": high_priority_count,
+            "avg_capital_return_pct": round(sum(capital_returns) / len(capital_returns), 2) if capital_returns else 0,
+            "max_capital_return_pct": round(max(capital_returns), 2) if capital_returns else 0,
+            "avg_optimal_leverage": round(sum(leverages) / len(leverages), 1) if leverages else 0
+        }
+        
+        return {
+            "status": "success",
+            "message": f"Scalping scan completed - found {len(scalping_signals)} signals",
+            "data": scalping_signals,
+            "summary": summary
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Scalping scan failed: {str(e)}",
+            "data": [],
+            "summary": {
+                "total_signals": 0,
+                "high_priority_signals": 0,
+                "avg_capital_return": 0,
+                "max_capital_return": 0
+            }
+        }
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 

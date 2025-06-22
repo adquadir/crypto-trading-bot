@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import asyncio
@@ -45,10 +46,11 @@ class OpportunityManager:
         self.last_opportunities = []  # Cache last opportunities
         self.direct_fetcher = DirectMarketDataFetcher()  # Direct API access
         
+        # Scalping-specific attributes
+        self.scalping_opportunities = {}  # Populated by background scanner
+        
     def get_opportunities(self) -> List[Dict[str, Any]]:
         """Get all current trading opportunities."""
-        import time
-        
         # Check if we need to refresh opportunities
         current_time = time.time()
         if current_time - self.last_scan_time > self.scan_interval:
@@ -68,7 +70,6 @@ class OpportunityManager:
     async def scan_opportunities(self) -> None:
         """Scan for new trading opportunities using enhanced signal generator."""
         try:
-            import time
             logger.info("Starting opportunity scan...")
             self.last_scan_time = time.time()  # Update scan time
             self.opportunities.clear()  # Clear old opportunities
@@ -122,7 +123,6 @@ class OpportunityManager:
     async def scan_opportunities_incremental(self) -> None:
         """Scan for trading opportunities incrementally, updating results as they're found."""
         try:
-            import time
             logger.info("Starting incremental opportunity scan with signal persistence...")
             current_time = time.time()
             self.last_scan_time = current_time
@@ -234,7 +234,6 @@ class OpportunityManager:
     async def scan_opportunities_incremental_swing(self) -> None:
         """Scan for swing trading opportunities incrementally with multi-strategy voting."""
         try:
-            import time
             logger.info("Starting SWING TRADING incremental scan with structure-based analysis...")
             current_time = time.time()
             self.last_scan_time = current_time
@@ -647,7 +646,6 @@ class OpportunityManager:
                 logger.error(f"⚠️  WARNING: Using simulated data - NOT suitable for real trading!")
                 market_data_source = "SIMULATION_FALLBACK"
                 # Create realistic market simulation based on actual market patterns
-                import time
                 import random
                 import math
                 
@@ -839,7 +837,6 @@ class OpportunityManager:
     def _analyze_market_and_generate_signal(self, symbol: str, market_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Analyze market data and generate institutional-grade signals."""
         try:
-            import time
             import math
             from .institutional_trade_analyzer import InstitutionalTradeAnalyzer
             
@@ -1228,13 +1225,46 @@ class OpportunityManager:
             return 'unknown'
 
     async def initialize(self):
-        """Initialize the opportunity manager and signal tracker."""
+        """Initialize the opportunity manager, signal tracker, and background scanners."""
         try:
             # Initialize the real signal tracker
             await real_signal_tracker.initialize()
-            logger.info("✅ OpportunityManager initialized with signal tracking")
+            
+            # Start independent background scalping scanner
+            asyncio.create_task(self._persistent_scalping_scanner())
+            logger.info("🔄 Started persistent background scalping scanner")
+            
+            logger.info("✅ OpportunityManager initialized with signal tracking and background scanners")
         except Exception as e:
             logger.error(f"❌ Failed to initialize OpportunityManager: {e}")
+
+    async def _persistent_scalping_scanner(self):
+        """
+        Persistent background scanner that runs independently forever.
+        This ensures scalping opportunities are always fresh without blocking API calls.
+        """
+        # Initial delay to let the system settle
+        await asyncio.sleep(30)
+        
+        while True:
+            try:
+                scan_start = time.time()
+                logger.info("🔄 INDEPENDENT background scalping scan starting...")
+                
+                # Run the full scalping scan
+                await self.scan_scalping_opportunities()
+                
+                scan_duration = time.time() - scan_start
+                logger.info(f"✅ INDEPENDENT background scalping scan completed in {scan_duration:.1f}s. "
+                           f"Found {len(self.scalping_opportunities)} opportunities")
+                
+                # Wait 10 minutes before next scan (600 seconds)
+                await asyncio.sleep(600)
+                
+            except Exception as e:
+                logger.error(f"❌ Background scalping scan failed: {e}")
+                # Wait 2 minutes on error before retrying
+                await asyncio.sleep(120)
 
     async def _get_market_data_for_signal_stable(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get market data formatted for signal generation with stability."""
@@ -1248,7 +1278,6 @@ class OpportunityManager:
     def _analyze_market_and_generate_signal_balanced(self, symbol: str, market_data: Dict[str, Any], current_time: float) -> Optional[Dict[str, Any]]:
         """Analyze market data and generate stable signals that don't change constantly."""
         try:
-            import time
             import math
             from .institutional_trade_analyzer import InstitutionalTradeAnalyzer
             
@@ -1663,7 +1692,6 @@ class OpportunityManager:
     def _analyze_market_and_generate_signal_swing_trading(self, symbol: str, market_data: Dict[str, Any], current_time: float) -> Optional[Dict[str, Any]]:
         """Advanced swing trading with structure-based TP/SL and multi-strategy voting."""
         try:
-            import time
             import math
             from .institutional_trade_analyzer import InstitutionalTradeAnalyzer
             
@@ -2557,7 +2585,6 @@ class OpportunityManager:
         """Simulate orderbook pressure when real data is unavailable."""
         try:
             import random
-            import time
             
             symbol = signal.get('symbol', 'UNKNOWN')
             direction = signal.get('direction', 'UNKNOWN')
@@ -2763,7 +2790,6 @@ class OpportunityManager:
         WITH HIGH-CERTAINTY TAKE PROFIT CLASSIFICATION
         """
         try:
-            import time
             symbol = opportunity['symbol']
             logger.info(f"🔧 VALIDATION STARTING for {symbol}")
             entry_price = opportunity['entry_price']
@@ -3052,3 +3078,688 @@ class OpportunityManager:
             opportunity['certainty_factors'] = ["Validation error"]
             opportunity['validation_applied'] = True
             return opportunity
+
+    def _analyze_market_and_generate_scalping_signal(self, symbol: str, market_data: Dict[str, Any], current_time: float) -> Optional[Dict[str, Any]]:
+        """
+        Generate precision scalping signals targeting 3-10% capital returns via leverage.
+        Focuses on small market moves (0.3-1.2%) with tight stops and high probability setups.
+        """
+        try:
+            import math
+            klines_15m = market_data['klines_15m']
+            klines_1h = market_data['klines_1h']
+            if len(klines_15m) < 50 or len(klines_1h) < 12:  # Need more data for scalping analysis
+                return None
+                
+            # Extract 15m price data for scalping precision
+            closes_15m = [float(k['close']) for k in klines_15m[-50:]]
+            highs_15m = [float(k['high']) for k in klines_15m[-50:]]
+            lows_15m = [float(k['low']) for k in klines_15m[-50:]]
+            volumes_15m = [float(k['volume']) for k in klines_15m[-50:]]
+            opens_15m = [float(k['open']) for k in klines_15m[-50:]]
+            
+            # Extract 1h data for trend confirmation
+            closes_1h = [float(k['close']) for k in klines_1h[-12:]]
+            highs_1h = [float(k['high']) for k in klines_1h[-12:]]
+            lows_1h = [float(k['low']) for k in klines_1h[-12:]]
+            
+            current_price = closes_15m[-1]
+            
+            # 1h trend confirmation (higher timeframe filter)
+            trend_1h_up = closes_1h[-1] > closes_1h[-3]  # Price above 3 hours ago
+            trend_1h_strength = (closes_1h[-1] - closes_1h[-6]) / closes_1h[-6] if len(closes_1h) >= 6 else 0
+            
+            # Scalping-specific indicators (15m timeframe for responsiveness)
+            sma_8 = sum(closes_15m[-8:]) / 8
+            sma_21 = sum(closes_15m[-21:]) / 21
+            ema_5 = self._calculate_ema(closes_15m, 5)
+            ema_13 = self._calculate_ema(closes_15m, 13)
+            
+            # Micro-momentum analysis (15m precision)
+            momentum_1 = (current_price - closes_15m[-2]) / closes_15m[-2] if len(closes_15m) > 1 else 0
+            momentum_3 = (current_price - closes_15m[-4]) / closes_15m[-4] if len(closes_15m) > 3 else 0
+            momentum_5 = (current_price - closes_15m[-6]) / closes_15m[-6] if len(closes_15m) > 5 else 0
+            
+            # Volume analysis using 15m data (NOT 24hr!)
+            current_volume = market_data.get('current_volume', 0)
+            avg_volume_recent = market_data.get('avg_volume_recent', 1)
+            volume_surge = current_volume / avg_volume_recent if avg_volume_recent > 0 else 1
+            
+            # Volatility (ATR) for tight stop calculations (15m timeframe)
+            atr = self._calculate_atr(highs_15m[-14:], lows_15m[-14:], closes_15m[-14:], 14)
+            volatility_pct = (atr / current_price) * 100
+            
+            # Range analysis for scalping conditions (15m)
+            current_range = (max(highs_15m[-5:]) - min(lows_15m[-5:])) / current_price
+            avg_range = sum([(highs_15m[i] - lows_15m[i]) / closes_15m[i] for i in range(-20, 0)]) / 20
+            range_expansion = current_range / avg_range if avg_range > 0 else 1
+            
+            # Support/Resistance for precise entries (15m data)
+            pivot_highs = self._find_pivot_highs(highs_15m[-20:], 2)
+            pivot_lows = self._find_pivot_lows(lows_15m[-20:], 2)
+            
+            # SCALPING SIGNAL GENERATION
+            scalping_signals = []
+            
+            # 1. MOMENTUM SCALP (quick trend continuation) with 1h trend confirmation
+            if (ema_5 > ema_13 and momentum_1 > 0.0003 and momentum_3 > 0.0008 and 
+                volume_surge > 1.1 and volatility_pct < 4.0 and trend_1h_up):  # Added 1h trend filter
+                
+                confidence = 0.75 + min(momentum_3 * 50, 0.15) + min((volume_surge - 1) * 0.1, 0.1)
+                
+                scalping_signals.append({
+                    'direction': 'LONG',
+                    'confidence': min(confidence, 0.95),
+                    'entry_type': 'momentum_scalp',
+                    'reasoning': [
+                        f'Momentum scalp: 3-period momentum {momentum_3*100:.3f}%',
+                        f'Volume surge: {volume_surge:.2f}x',
+                        f'EMA alignment bullish',
+                        f'Low volatility: {volatility_pct:.2f}%'
+                    ],
+                    'strategy': 'momentum_scalp'
+                })
+                
+            elif (ema_5 < ema_13 and momentum_1 < -0.0003 and momentum_3 < -0.0008 and 
+                  volume_surge > 1.1 and volatility_pct < 4.0 and not trend_1h_up):  # Added 1h trend filter
+                
+                confidence = 0.75 + min(abs(momentum_3) * 50, 0.15) + min((volume_surge - 1) * 0.1, 0.1)
+                
+                scalping_signals.append({
+                    'direction': 'SHORT',
+                    'confidence': min(confidence, 0.95),
+                    'entry_type': 'momentum_scalp',
+                    'reasoning': [
+                        f'Momentum scalp: 3-period momentum {momentum_3*100:.3f}%',
+                        f'Volume surge: {volume_surge:.2f}x',
+                        f'EMA alignment bearish',
+                        f'Low volatility: {volatility_pct:.2f}%'
+                    ],
+                    'strategy': 'momentum_scalp'
+                })
+            
+            # 2. MEAN REVERSION SCALP (bounce from moving average)
+            distance_from_sma8 = (current_price - sma_8) / sma_8
+            if (abs(distance_from_sma8) > 0.003 and abs(distance_from_sma8) < 0.008 and 
+                volume_surge > 1.1):  # Price stretched from SMA8 but not too far
+                
+                if distance_from_sma8 < 0:  # Below SMA8, expect bounce up
+                    confidence = 0.7 + min(abs(distance_from_sma8) * 100, 0.2)
+                    scalping_signals.append({
+                        'direction': 'LONG',
+                        'confidence': min(confidence, 0.9),
+                        'entry_type': 'mean_reversion_scalp',
+                        'reasoning': [
+                            f'Mean reversion: {distance_from_sma8*100:.2f}% below SMA8',
+                            f'Volume confirmation: {volume_surge:.2f}x',
+                            'Expecting bounce to SMA8'
+                        ],
+                        'strategy': 'mean_reversion_scalp'
+                    })
+                    
+                else:  # Above SMA8, expect pullback
+                    confidence = 0.7 + min(distance_from_sma8 * 100, 0.2)
+                    scalping_signals.append({
+                        'direction': 'SHORT',
+                        'confidence': min(confidence, 0.9),
+                        'entry_type': 'mean_reversion_scalp',
+                        'reasoning': [
+                            f'Mean reversion: {distance_from_sma8*100:.2f}% above SMA8',
+                            f'Volume confirmation: {volume_surge:.2f}x',
+                            'Expecting pullback to SMA8'
+                        ],
+                        'strategy': 'mean_reversion_scalp'
+                    })
+            
+            # 3. BREAKOUT SCALP (micro breakouts with volume)
+            if pivot_highs and current_price > max(pivot_highs) * 1.001 and volume_surge > 1.2:
+                confidence = 0.8 + min((volume_surge - 1.2) * 0.1, 0.15)
+                scalping_signals.append({
+                    'direction': 'LONG',
+                    'confidence': min(confidence, 0.95),
+                    'entry_type': 'micro_breakout',
+                    'reasoning': [
+                        f'Micro breakout above {max(pivot_highs):.6f}',
+                        f'Strong volume: {volume_surge:.2f}x',
+                        'Range expansion detected'
+                    ],
+                    'strategy': 'micro_breakout'
+                })
+                
+            elif pivot_lows and current_price < min(pivot_lows) * 0.999 and volume_surge > 1.2:
+                confidence = 0.8 + min((volume_surge - 1.2) * 0.1, 0.15)
+                scalping_signals.append({
+                    'direction': 'SHORT',
+                    'confidence': min(confidence, 0.95),
+                    'entry_type': 'micro_breakdown',
+                    'reasoning': [
+                        f'Micro breakdown below {min(pivot_lows):.6f}',
+                        f'Strong volume: {volume_surge:.2f}x',
+                        'Range breakdown confirmed'
+                    ],
+                    'strategy': 'micro_breakdown'
+                })
+            
+            # 4. VOLUME SPIKE SCALP (unusual volume with price movement)
+            if (volume_surge > 1.5 and abs(momentum_1) > 0.0005 and 
+                abs(momentum_3) > 0.001 and volatility_pct < 5.0):
+                
+                direction = 'LONG' if momentum_1 > 0 else 'SHORT'
+                confidence = 0.65 + min((volume_surge - 1.5) * 0.05, 0.25)
+                
+                scalping_signals.append({
+                    'direction': direction,
+                    'confidence': min(confidence, 0.9),
+                    'entry_type': 'volume_spike_scalp',
+                    'reasoning': [
+                        f'Volume spike: {volume_surge:.2f}x average',
+                        f'Price momentum: {momentum_1*100:.3f}%',
+                        'Institutional activity detected'
+                    ],
+                    'strategy': 'volume_spike_scalp'
+                })
+            
+            # Select best scalping signal
+            if not scalping_signals:
+                return None
+                
+            best_signal = max(scalping_signals, key=lambda s: s['confidence'])
+            
+            # SCALPING-SPECIFIC POSITION SIZING (CAPITAL-BASED TARGETS)
+            # Target: 2.5-10% return on capital via leverage
+            target_capital_return = 0.05  # 5% target (middle of 2.5-10% range)
+            
+            # For scalping: small market moves (0.3-1.2%) with higher leverage
+            target_market_move = 0.007  # 0.7% market move (middle of 0.3-1.2% range)
+            
+            # Calculate leverage needed: capital_return = market_move * leverage
+            # So leverage = capital_return / market_move
+            calculated_leverage = target_capital_return / target_market_move  # 5% / 0.7% = ~7x
+            max_leverage = 25  # Maximum safe leverage for scalping
+            optimal_leverage = min(max_leverage, max(5, calculated_leverage))  # Between 5x and 25x
+            
+            required_market_move = target_market_move  # Use our scalping target
+            
+            # TIGHT SCALPING STOPS AND TARGETS
+            atr_multiplier = 0.5  # Tighter stops for scalping
+            
+            if best_signal['direction'] == 'LONG':
+                entry_price = current_price
+                # Target based on required market movement for capital return
+                take_profit = entry_price * (1 + required_market_move)
+                stop_loss = entry_price - (atr * atr_multiplier)
+                
+            else:  # SHORT
+                entry_price = current_price  
+                take_profit = entry_price * (1 - required_market_move)
+                stop_loss = entry_price + (atr * atr_multiplier)
+            
+            # Calculate actual risk/reward and capital returns
+            risk = abs(entry_price - stop_loss)
+            reward = abs(take_profit - entry_price)
+            risk_reward = reward / risk if risk > 0 else 0
+            
+            market_move_pct = (reward / entry_price) * 100
+            expected_capital_return = market_move_pct * optimal_leverage / 100
+            
+            # Only accept scalping signals with good risk/reward for capital targets
+            if risk_reward < 1.5:  # Minimum 1.5:1 for scalping
+                return None
+                
+            if expected_capital_return < 0.025:  # Minimum 2.5% capital return
+                return None
+            
+            # Calculate position sizing for different capital amounts
+            scalping_calcs = self._calculate_scalping_position_sizing(
+                entry_price, take_profit, stop_loss, optimal_leverage, expected_capital_return
+            )
+            
+            # Create scalping opportunity
+            opportunity = {
+                'symbol': symbol,
+                'direction': best_signal['direction'],
+                'entry_price': entry_price,
+                'entry': entry_price,
+                'take_profit': take_profit,
+                'stop_loss': stop_loss,
+                'confidence': best_signal['confidence'],
+                'confidence_score': best_signal['confidence'],
+                
+                # SCALPING-SPECIFIC FIELDS
+                'scalping_type': best_signal['entry_type'],
+                'optimal_leverage': optimal_leverage,
+                'required_market_move_pct': required_market_move * 100,
+                'expected_capital_return_pct': expected_capital_return * 100,
+                'market_move_pct': market_move_pct,
+                'timeframe': '15m',  # Scalping timeframe
+                
+                # Position sizing for different capital amounts
+                'capital_100': scalping_calcs['capital_100'],
+                'capital_500': scalping_calcs['capital_500'], 
+                'capital_1000': scalping_calcs['capital_1000'],
+                'capital_5000': scalping_calcs['capital_5000'],
+                
+                'risk_reward': risk_reward,
+                'current_volume': current_volume,  # Use 15m current volume instead of 24h
+                'volatility': volatility_pct,
+                'volume_surge': volume_surge,
+                'score': best_signal['confidence'],
+                'timestamp': int(current_time * 1000),
+                
+                # Strategy information
+                'strategy': f"scalping_{best_signal['strategy']}",
+                'strategy_type': 'precision_scalping',
+                'market_regime': self._determine_market_regime_simple(closes_15m, volumes_15m),
+                'regime': self._determine_market_regime_simple(closes_15m, volumes_15m).upper(),
+                
+                # Technical indicators for scalping
+                'indicators': {
+                    'ema_5': float(ema_5),
+                    'ema_13': float(ema_13),
+                    'sma_8': float(sma_8),
+                    'sma_21': float(sma_21),
+                    'atr': float(atr),
+                    'volatility_pct': float(volatility_pct),
+                    'volume_surge': float(volume_surge),
+                    'momentum_1': float(momentum_1),
+                    'momentum_3': float(momentum_3),
+                    'range_expansion': float(range_expansion)
+                },
+                
+                # Scalping reasoning
+                'reasoning': best_signal['reasoning'] + [
+                    f"Capital target: {expected_capital_return*100:.1f}% with {optimal_leverage:.1f}x leverage",
+                    f"Market move needed: {required_market_move*100:.2f}%",
+                    f"Risk/Reward: {risk_reward:.2f}:1",
+                    f"Scalping timeframe: 15m/1h"
+                ],
+                
+                # Market data
+                'book_depth': 0.0,
+                'oi_trend': 0.0,
+                'volume_trend': float(volume_surge - 1.0),
+                'slippage': 0.001,  # Lower slippage assumption for scalping
+                'spread': float(0.0005),  # Tighter spreads expected
+                'data_freshness': 1.0,
+                
+                # Scalping metadata
+                'is_scalping_signal': True,
+                'scalping_version': 'precision_v1',
+                'signal_type': 'precision_scalping',
+                'trading_mode': 'scalping',
+                'price': entry_price,
+                'volume': current_volume,  # Use 15m current volume for scalping
+                'trend_1h_direction': 'UP' if trend_1h_up else 'DOWN',  # Include 1h trend info
+                'trend_1h_strength': trend_1h_strength,
+                'data_source': market_data.get('data_source', 'REAL_FUTURES_DATA'),
+                'is_real_data': market_data.get('is_real_data', True),
+            }
+            
+            # Apply scalping-specific validation
+            opportunity = self._validate_scalping_signal(opportunity)
+            
+            return opportunity
+            
+        except Exception as e:
+            logger.error(f"Error generating scalping signal for {symbol}: {e}")
+            return None
+
+    def _calculate_ema(self, prices: List[float], period: int) -> float:
+        """Calculate Exponential Moving Average."""
+        if len(prices) < period:
+            return sum(prices) / len(prices)
+        
+        multiplier = 2 / (period + 1)
+        ema = prices[0]
+        
+        for price in prices[1:]:
+            ema = (price * multiplier) + (ema * (1 - multiplier))
+        
+        return ema
+
+    def _find_pivot_highs(self, highs: List[float], lookback: int = 2) -> List[float]:
+        """Find pivot high points for scalping entries."""
+        pivots = []
+        for i in range(lookback, len(highs) - lookback):
+            is_pivot = True
+            current = highs[i]
+            
+            # Check if current high is higher than surrounding highs
+            for j in range(i - lookback, i + lookback + 1):
+                if j != i and highs[j] >= current:
+                    is_pivot = False
+                    break
+            
+            if is_pivot:
+                pivots.append(current)
+        
+        return pivots
+
+    def _find_pivot_lows(self, lows: List[float], lookback: int = 2) -> List[float]:
+        """Find pivot low points for scalping entries."""
+        pivots = []
+        for i in range(lookback, len(lows) - lookback):
+            is_pivot = True
+            current = lows[i]
+            
+            # Check if current low is lower than surrounding lows
+            for j in range(i - lookback, i + lookback + 1):
+                if j != i and lows[j] <= current:
+                    is_pivot = False
+                    break
+            
+            if is_pivot:
+                pivots.append(current)
+        
+        return pivots
+
+    def _calculate_scalping_position_sizing(self, entry_price: float, take_profit: float, 
+                                          stop_loss: float, leverage: float, 
+                                          expected_return: float) -> Dict[str, Any]:
+        """Calculate position sizing for different capital amounts in scalping."""
+        try:
+            capital_amounts = [100, 500, 1000, 5000]
+            results = {}
+            
+            market_move_pct = abs(take_profit - entry_price) / entry_price
+            risk_pct = abs(entry_price - stop_loss) / entry_price
+            
+            for capital in capital_amounts:
+                # Position size calculation
+                position_value = capital * leverage
+                position_size = position_value / entry_price
+                
+                # Expected profit calculation
+                gross_profit = capital * expected_return
+                risk_amount = capital * (risk_pct * leverage)
+                
+                results[f'capital_{capital}'] = {
+                    'capital': capital,
+                    'leverage': leverage,
+                    'position_size': position_size,
+                    'position_value': position_value,
+                    'expected_profit': gross_profit,
+                    'expected_return_pct': expected_return * 100,
+                    'risk_amount': risk_amount,
+                    'risk_pct': (risk_amount / capital) * 100,
+                    'market_move_needed': market_move_pct * 100
+                }
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error calculating scalping position sizing: {e}")
+            # Return default values
+            return {
+                'capital_100': {'capital': 100, 'leverage': 10, 'expected_profit': 5, 'expected_return_pct': 5},
+                'capital_500': {'capital': 500, 'leverage': 10, 'expected_profit': 25, 'expected_return_pct': 5},
+                'capital_1000': {'capital': 1000, 'leverage': 10, 'expected_profit': 50, 'expected_return_pct': 5},
+                'capital_5000': {'capital': 5000, 'leverage': 10, 'expected_profit': 250, 'expected_return_pct': 5}
+            }
+
+    def _validate_scalping_signal(self, opportunity: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply scalping-specific validation focused on capital returns and tight execution."""
+        try:
+            symbol = opportunity['symbol']
+            entry_price = opportunity['entry_price']
+            take_profit = opportunity['take_profit']
+            stop_loss = opportunity['stop_loss']
+            leverage = opportunity.get('optimal_leverage', 10)
+            
+            # Calculate market movement percentages
+            market_move_pct = abs(take_profit - entry_price) / entry_price * 100
+            risk_pct = abs(entry_price - stop_loss) / entry_price * 100
+            
+            # Scalping validation criteria
+            validation_passed = True
+            rejection_reasons = []
+            
+            # 1. Market movement validation (should be small for scalping)
+            if market_move_pct > 2.0:  # More than 2.0% market move is not scalping (relaxed from 1.5%)
+                validation_passed = False
+                rejection_reasons.append(f"Market move too large: {market_move_pct:.2f}% (max 2.0%)")
+                
+            if market_move_pct < 0.15:  # Less than 0.15% might not cover costs (relaxed from 0.2%)
+                validation_passed = False  
+                rejection_reasons.append(f"Market move too small: {market_move_pct:.2f}% (min 0.15%)")
+            
+            # 2. Risk/Reward validation
+            risk_reward = (abs(take_profit - entry_price) / abs(entry_price - stop_loss)) if abs(entry_price - stop_loss) > 0 else 0
+            if risk_reward < 1.2:  # Relaxed from 1.5 to 1.2
+                validation_passed = False
+                rejection_reasons.append(f"Risk/reward too low: {risk_reward:.2f} (min 1.2)")
+            
+            # 3. Capital return validation  
+            expected_capital_return = market_move_pct * leverage / 100
+            if expected_capital_return < 0.02:  # Less than 2.0% capital return (relaxed from 2.5%)
+                validation_passed = False
+                rejection_reasons.append(f"Capital return too low: {expected_capital_return*100:.1f}% (min 2.0%)")
+                
+            if expected_capital_return > 0.20:  # More than 20% might be too risky (relaxed from 15%)
+                validation_passed = False
+                rejection_reasons.append(f"Capital return too high: {expected_capital_return*100:.1f}% (max 20%)")
+            
+            # 4. Leverage validation
+            if leverage > 30:  # Max leverage for safety (relaxed from 25x)
+                validation_passed = False
+                rejection_reasons.append(f"Leverage too high: {leverage:.1f}x (max 30x)")
+                
+            if leverage < 3:  # Minimum leverage to achieve capital targets (relaxed from 5x)
+                validation_passed = False
+                rejection_reasons.append(f"Leverage too low: {leverage:.1f}x (min 3x)")
+            
+            # 5. Volatility check (scalping needs controlled volatility)
+            volatility = opportunity.get('volatility', 0)
+            if volatility > 8.0:  # Too volatile for scalping (relaxed from 6% to 8%)
+                validation_passed = False
+                rejection_reasons.append(f"Volatility too high: {volatility:.1f}% (max 8%)")
+            
+            # 6. Volume surge validation (need volume for execution)
+            volume_surge = opportunity.get('volume_surge', 1)
+            if volume_surge < 1.05:  # Need some volume increase (relaxed from 1.1x to 1.05x)
+                validation_passed = False
+                rejection_reasons.append(f"Insufficient volume: {volume_surge:.2f}x (min 1.05x)")
+            
+            # Apply validation results
+            if validation_passed:
+                opportunity['scalping_validation'] = {
+                    'passed': True,
+                    'market_move_pct': market_move_pct,
+                    'expected_capital_return_pct': expected_capital_return * 100,
+                    'risk_reward': risk_reward,
+                    'leverage': leverage,
+                    'verdict': '✅ Scalping Ready',
+                    'quality_score': opportunity['confidence'] * (risk_reward / 2),
+                    'execution_priority': 'HIGH' if expected_capital_return > 0.07 else 'MEDIUM'
+                }
+                opportunity['tradable'] = True
+                opportunity['scalping_ready'] = True
+                
+            else:
+                opportunity['scalping_validation'] = {
+                    'passed': False,
+                    'rejection_reasons': rejection_reasons,
+                    'verdict': '❌ Scalping Rejected',
+                    'quality_score': 0
+                }
+                opportunity['tradable'] = False
+                opportunity['scalping_ready'] = False
+                opportunity['rejection_reason'] = "; ".join(rejection_reasons)
+            
+            opportunity['validation_applied'] = True
+            
+            return opportunity
+            
+        except Exception as e:
+            logger.error(f"Error validating scalping signal: {e}")
+            opportunity['scalping_validation'] = {
+                'passed': False,
+                'verdict': '❌ Validation Error',
+                'error': str(e)
+            }
+            opportunity['validation_applied'] = True
+            return opportunity
+
+    async def scan_scalping_opportunities(self) -> None:
+        """Scan for precision scalping opportunities targeting 2.5-10% capital returns."""
+        try:
+            logger.info("Starting PRECISION SCALPING scan for 2.5-10% capital returns...")
+            current_time = time.time()
+            self.last_scan_time = current_time
+            
+            processed_count = 0
+            
+            # Get ALL symbols for scalping (scan everything for maximum opportunities)
+            try:
+                all_symbols = await self.exchange_client.get_all_symbols()
+                if all_symbols:
+                    # Use ALL USDT pairs for scalping
+                    usdt_symbols = [s for s in all_symbols if s.endswith('USDT')]
+                    symbols_to_scan = usdt_symbols
+                    logger.info(f"✓ Scanning ALL {len(symbols_to_scan)} USDT pairs for scalping opportunities")
+                else:
+                    symbols_to_scan = self.fallback_symbols
+            except Exception as e:
+                logger.warning(f"Exchange symbol fetch failed: {e}, using fallback symbols")
+                symbols_to_scan = self.fallback_symbols
+                
+            self.symbols = symbols_to_scan
+            logger.info(f"SCALPING scan: processing {len(symbols_to_scan)} symbols for capital-focused trades")
+            
+            # Initialize scalping opportunities if not exists
+            if not hasattr(self, 'scalping_opportunities'):
+                self.scalping_opportunities = {}
+            
+            # Process symbols in batches to prevent hanging
+            batch_size = 20  # Process 20 symbols at a time
+            total_batches = (len(symbols_to_scan) + batch_size - 1) // batch_size
+            
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, len(symbols_to_scan))
+                batch_symbols = symbols_to_scan[start_idx:end_idx]
+                
+                logger.info(f"Processing scalping batch {batch_num + 1}/{total_batches}: symbols {start_idx}-{end_idx}")
+                
+                # Process this batch
+                for symbol in batch_symbols:
+                    try:
+                        # Get market data with 15m timeframe for scalping precision
+                        market_data = await self._get_market_data_for_scalping(symbol)
+                        if not market_data:
+                            logger.debug(f"No scalping market data for {symbol}")
+                            continue
+                            
+                        # Generate scalping signal
+                        opportunity = self._analyze_market_and_generate_scalping_signal(symbol, market_data, current_time)
+                        
+                        # DEBUG: Log what's happening with signals
+                        if opportunity:
+                            if opportunity.get('scalping_ready', False):
+                                logger.info(f"✅ SCALP SIGNAL: {symbol} passed validation")
+                            else:
+                                rejection_reason = opportunity.get('rejection_reason', 'Unknown reason')
+                                logger.info(f"❌ SCALP REJECTED: {symbol} - {rejection_reason}")
+                        else:
+                            logger.debug(f"🔍 No scalp signal generated for {symbol}")
+                            
+                        if opportunity and opportunity.get('scalping_ready', False):
+                            # Add scalping metadata
+                            opportunity['signal_timestamp'] = current_time
+                            opportunity['last_updated'] = current_time
+                            opportunity['signal_id'] = f"{symbol}_scalp_{int(current_time/60)}"  # Update every minute
+                            opportunity['trading_mode'] = 'scalping'
+                            
+                            # Log scalping signal
+                            try:
+                                market_context = {
+                                    'funding_rate': market_data.get('funding_rate'),
+                                    'open_interest': market_data.get('open_interest'),
+                                    'volume_24h': market_data.get('volume_24h'),
+                                    'market_regime': market_data.get('market_regime'),
+                                    'timeframe': '15m'
+                                }
+                                
+                                signal_id = await real_signal_tracker.log_signal(
+                                    signal=opportunity,
+                                    trading_mode="scalping",
+                                    market_context=market_context
+                                )
+                                
+                                if signal_id:
+                                    opportunity['tracked_signal_id'] = signal_id
+                                    logger.debug(f"📊 Scalping signal logged: {signal_id[:8]}...")
+                                    
+                            except Exception as e:
+                                logger.error(f"❌ Failed to log scalping signal for {symbol}: {e}")
+                            
+                            self.scalping_opportunities[symbol] = opportunity
+                            processed_count += 1
+                            
+                            # Log scalping details
+                            capital_return = opportunity.get('expected_capital_return_pct', 0)
+                            leverage = opportunity.get('optimal_leverage', 0)
+                            market_move = opportunity.get('market_move_pct', 0)
+                            
+                            logger.info(f"💰 SCALP [{processed_count}] {symbol}: {opportunity['direction']} "
+                                      f"Capital: {capital_return:.1f}%, Market: {market_move:.2f}%, "
+                                      f"Leverage: {leverage:.1f}x, Type: {opportunity.get('scalping_type', 'unknown')}")
+                        else:
+                            logger.debug(f"❌ No scalping signal for {symbol}")
+                            
+                    except Exception as e:
+                        logger.error(f"Error in scalping analysis for {symbol}: {e}")
+                        continue
+                
+                # Small delay between batches to prevent overwhelming the system
+                await asyncio.sleep(0.1)
+            
+            logger.info(f"✅ SCALPING scan completed. Found {len(self.scalping_opportunities)} precision scalping opportunities")
+                        
+        except Exception as e:
+            logger.error(f"Error in scalping scan: {e}")
+
+    async def _get_market_data_for_scalping(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get market data optimized for scalping analysis (15m primary, 1h confirmation)."""
+        try:
+            # Primary 15m data for scalping analysis
+            klines_15m = await self.direct_fetcher.get_klines(symbol, '15m', 100)
+            if not klines_15m or len(klines_15m) < 50:
+                return None
+            
+            # 1h data for trend confirmation
+            klines_1h = await self.direct_fetcher.get_klines(symbol, '1h', 24)
+            if not klines_1h or len(klines_1h) < 12:
+                return None
+            
+            # Calculate volume from 15m candles (NOT 24hr ticker!)
+            current_price = float(klines_15m[-1]['close'])
+            recent_volumes = [float(k['volume']) for k in klines_15m[-20:]]  # Last 20 candles (5 hours)
+            avg_volume = sum(recent_volumes) / len(recent_volumes)
+            current_volume = float(klines_15m[-1]['volume'])
+            
+            return {
+                'symbol': symbol,
+                'klines_15m': klines_15m,
+                'klines_1h': klines_1h,
+                'current_price': current_price,
+                'current_volume': current_volume,
+                'avg_volume_recent': avg_volume,
+                'timeframe': '15m',
+                'data_source': 'REAL_FUTURES_DATA',
+                'is_real_data': True,
+                'timestamp': int(time.time())
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting scalping market data for {symbol}: {e}")
+            return None
+
+    def get_scalping_opportunities(self) -> List[Dict[str, Any]]:
+        """
+        Get current scalping opportunities - NEVER triggers scanning.
+        Results are populated by independent background scanner.
+        """
+        opportunities = list(self.scalping_opportunities.values())
+        logger.debug(f"Returning {len(opportunities)} scalping opportunities from cache")
+        return opportunities

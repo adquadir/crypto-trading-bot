@@ -184,7 +184,7 @@ class RealSignalTracker:
             reward = abs(tp - entry) if tp != 0 else 0
             risk_reward = reward / risk if risk > 0 else 0
             
-            # Prepare signal record
+            # Prepare signal record with proper type conversions
             record = SignalRecord(
                 signal_id=signal_id,
                 symbol=str(signal.get('symbol', '')),
@@ -197,9 +197,9 @@ class RealSignalTracker:
                 confidence=float(signal.get('confidence', 0)),
                 risk_reward_ratio=risk_reward,
                 market_regime=market_context.get('market_regime'),
-                funding_rate=market_context.get('funding_rate'),
-                open_interest=market_context.get('open_interest'),
-                volume_24h=market_context.get('volume_24h'),
+                funding_rate=float(market_context.get('funding_rate')) if market_context.get('funding_rate') is not None else None,
+                open_interest=int(float(market_context.get('open_interest'))) if market_context.get('open_interest') is not None else None,
+                volume_24h=float(market_context.get('volume_24h')) if market_context.get('volume_24h') is not None else None,
                 trading_mode=trading_mode,
                 timestamp=datetime.now()
             )

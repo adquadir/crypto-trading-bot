@@ -250,6 +250,7 @@ class ExchangeClient:
 
         # Initialize running state
         self.running = False
+        self._reconnecting = False
 
         # Initialize cache TTLs
         self.cache_ttls = {
@@ -1050,37 +1051,78 @@ class ExchangeClient:
             if self.proxy_auth:
                 proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
             
-            async with aiohttp.ClientSession() as session:
+            # Use shorter timeout to prevent hanging
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(
                     f"{self.base_url}/api/v3/time",
-                    proxy=proxy_url,
-                    timeout=10
+                    proxy=proxy_url
                 ) as response:
                     if response.status == 200:
-                        logger.info("Proxy health check passed")
+                        logger.debug("Proxy health check passed")  # Changed to debug to reduce log spam
                         return True
                     else:
-                        logger.warning(f"Proxy health check failed: {response.status}")
+                        logger.warning(f"Proxy health check failed: HTTP {response.status}")
                         return False
                         
+        except asyncio.TimeoutError:
+            logger.warning("Proxy health check timed out")
+            return False
+        except aiohttp.ClientError as e:
+            logger.warning(f"Proxy health check failed: {type(e).__name__}: {str(e)}")
+            return False
         except Exception as e:
-            logger.error(f"Error checking proxy health: {e}")
+            logger.error(f"Proxy health check error: {type(e).__name__}: {str(e)}")
             return False
 
     async def _health_check_loop(self):
         """Monitor the health of the proxy and reconnect if necessary."""
+        consecutive_failures = 0
+        max_failures = 3  # Maximum consecutive failures before giving up
+        
         while self.running:
-            if not await self._check_proxy_health():
-                logger.warning(
-                    "Proxy health check failed. Attempting to reconnect...")
-                await self._handle_connection_error()
-            await asyncio.sleep(60)  # Check every minute
+            try:
+                if not await self._check_proxy_health():
+                    consecutive_failures += 1
+                    logger.warning(f"Proxy health check failed ({consecutive_failures}/{max_failures})")
+                    
+                    if consecutive_failures >= max_failures:
+                        logger.error(f"Proxy health check failed {max_failures} times consecutively. Stopping health checks.")
+                        break
+                    
+                    # Only attempt reconnection if not already reconnecting
+                    if not hasattr(self, '_reconnecting') or not self._reconnecting:
+                        logger.warning("Attempting to reconnect...")
+                        await self._handle_connection_error()
+                else:
+                    # Reset failure counter on successful health check
+                    if consecutive_failures > 0:
+                        logger.info("Proxy health check recovered")
+                        consecutive_failures = 0
+                
+                await asyncio.sleep(60)  # Check every minute
+                
+            except Exception as e:
+                logger.error(f"Error in health check loop: {type(e).__name__}: {str(e)}")
+                await asyncio.sleep(60)  # Continue checking despite errors
 
     async def _handle_connection_error(self):
         """Handle connection errors by reconnecting."""
-        logger.info("Handling connection error...")
-        await self.close()
-        await self.initialize()
+        if self._reconnecting:
+            logger.debug("Reconnection already in progress, skipping...")
+            return
+            
+        try:
+            self._reconnecting = True
+            logger.info("Handling connection error...")
+            await self.close()
+            await asyncio.sleep(2)  # Brief pause before reconnecting
+            await self.initialize()
+            logger.info("Connection error handled successfully")
+        except Exception as e:
+            logger.error(f"Failed to handle connection error: {type(e).__name__}: {str(e)}")
+        finally:
+            self._reconnecting = False
 
     async def _test_proxy_connection(self) -> bool:
         """Test the proxy connection."""

@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, List, Any
 import logging
 from sqlalchemy import func
+from datetime import datetime
 
 from src.utils.config import validate_config
 from src.database.database import Database
@@ -186,4 +187,114 @@ async def manual_scan():
         return {
             "status": "error",
             "message": f"Scan failed: {str(e)}"
+        }
+
+@router.get("/api/v1/trading/scalping-signals")
+async def get_scalping_signals():
+    """Get precision scalping signals targeting 3-10% capital returns."""
+    try:
+        if not opportunity_manager:
+            return {
+                "status": "initializing",
+                "message": "Opportunity manager is still initializing",
+                "data": []
+            }
+        
+        # Check if scalping opportunities exist
+        if hasattr(opportunity_manager, 'scalping_opportunities'):
+            scalping_signals = list(opportunity_manager.scalping_opportunities.values())
+        else:
+            # If no scalping opportunities cached, run a quick scan
+            await opportunity_manager.scan_scalping_opportunities()
+            scalping_signals = opportunity_manager.get_scalping_opportunities()
+        
+        if not scalping_signals:
+            return {
+                "status": "no_signals",
+                "message": "No scalping opportunities found",
+                "data": [],
+                "scan_info": {
+                    "strategy_type": "precision_scalping",
+                    "target_returns": "3-10% capital",
+                    "timeframe": "15m",
+                    "last_scan": datetime.now().isoformat()
+                }
+            }
+        
+        # Sort by expected capital return (highest first)
+        scalping_signals.sort(key=lambda x: x.get('expected_capital_return_pct', 0), reverse=True)
+        
+        # Calculate summary statistics
+        total_signals = len(scalping_signals)
+        avg_capital_return = sum(s.get('expected_capital_return_pct', 0) for s in scalping_signals) / total_signals if total_signals > 0 else 0
+        avg_leverage = sum(s.get('optimal_leverage', 0) for s in scalping_signals) / total_signals if total_signals > 0 else 0
+        
+        # Count by scalping type
+        scalping_types = {}
+        for signal in scalping_signals:
+            scalp_type = signal.get('scalping_type', 'unknown')
+            scalping_types[scalp_type] = scalping_types.get(scalp_type, 0) + 1
+        
+        # Enhanced response with scalping-specific metadata
+        return {
+            "status": "success",
+            "message": f"Found {total_signals} precision scalping opportunities",
+            "data": scalping_signals,
+            "scalping_summary": {
+                "total_signals": total_signals,
+                "avg_capital_return_pct": round(avg_capital_return, 2),
+                "avg_optimal_leverage": round(avg_leverage, 1),
+                "scalping_types": scalping_types,
+                "strategy_focus": "Capital returns via precise leverage",
+                "timeframe": "15m/1h",
+                "target_range": "3-10% capital returns"
+            },
+            "scan_info": {
+                "strategy_type": "precision_scalping",
+                "last_scan": datetime.now().isoformat(),
+                "data_freshness": "real_time"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting scalping signals: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to get scalping signals: {str(e)}",
+            "data": [],
+            "error_details": {
+                "error_type": "scalping_fetch_error",
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+
+@router.post("/api/v1/trading/refresh-scalping")
+async def refresh_scalping_signals():
+    """Manually refresh scalping signals scan."""
+    try:
+        if not opportunity_manager:
+            return {
+                "status": "error",
+                "message": "Opportunity manager not initialized"
+            }
+        
+        logger.info("Manual scalping refresh requested")
+        await opportunity_manager.scan_scalping_opportunities()
+        
+        scalping_signals = opportunity_manager.get_scalping_opportunities()
+        
+        return {
+            "status": "success",
+            "message": f"Scalping scan completed - found {len(scalping_signals)} opportunities",
+            "signals_found": len(scalping_signals),
+            "refresh_timestamp": datetime.now().isoformat(),
+            "next_auto_scan": "60 seconds"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error refreshing scalping signals: {e}")
+        return {
+            "status": "error", 
+            "message": f"Failed to refresh scalping signals: {str(e)}",
+            "timestamp": datetime.now().isoformat()
         }

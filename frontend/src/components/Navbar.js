@@ -7,18 +7,19 @@ import {
   Button,
   Box,
   Container,
-  useTheme,
   IconButton,
   Menu,
   MenuItem,
   ListItemIcon,
   ListItemText,
-  useMediaQuery,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import { useMediaQuery } from '@mui/system';
 import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import SpeedIcon from '@mui/icons-material/Speed';
 import SettingsIcon from '@mui/icons-material/Settings';
 
 const Navbar = () => {
@@ -31,6 +32,7 @@ const Navbar = () => {
     { path: '/', label: 'Dashboard', icon: <DashboardIcon /> },
     { path: '/signals', label: 'Signals', icon: <SignalCellularAltIcon /> },
     { path: '/opportunities', label: 'Opportunities', icon: <TrendingUpIcon /> },
+    { path: '/scalping', label: 'Scalping', icon: <SpeedIcon /> },
     { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
   ];
 
