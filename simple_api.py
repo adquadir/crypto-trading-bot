@@ -603,20 +603,22 @@ async def execute_manual_trade(trade_request: ManualTradeRequest):
                 stop_loss = trade_request.stop_loss
                 take_profit = trade_request.take_profit
                 
-                # Calculate risk per share
+                # Calculate risk per share for tracking purposes
                 risk_per_share = abs(entry_price - stop_loss)
                 reward_per_share = abs(take_profit - entry_price)
                 
                 if risk_per_share <= 0:
                     raise ValueError("Invalid stop loss - must be different from entry price")
                 
-                # Risk management: Use 1-2% of account balance for scalping
-                account_balance = 10000.0  # This should come from exchange API in real implementation
-                risk_amount = account_balance * 0.02  # 2% max risk for scalping
+                # FIXED CAPITAL APPROACH: Use exactly $200 per trade
+                fixed_capital = 200.0  # Fixed $200 capital per trade
                 
-                # Calculate position size
-                position_size = risk_amount / risk_per_share
-                position_value = position_size * entry_price
+                # Calculate position size based on fixed capital
+                position_size = fixed_capital / entry_price
+                position_value = fixed_capital  # Always $200
+                
+                # Calculate actual risk amount (what we could lose if SL hit)
+                actual_risk = position_size * risk_per_share
                 
                 # Scalping leverage calculation (based on signal's optimal leverage)
                 leverage = 1.0  # Default, should use signal's optimal leverage
@@ -625,7 +627,7 @@ async def execute_manual_trade(trade_request: ManualTradeRequest):
                 
                 # Calculate expected profit
                 expected_profit = reward_per_share * position_size
-                expected_return_pct = (expected_profit / risk_amount) * 100
+                expected_return_pct = (expected_profit / fixed_capital) * 100
                 
                 trade_data = {
                     "trade_id": f"scalp_{trade_request.symbol}_{int(time.time())}",
@@ -637,7 +639,8 @@ async def execute_manual_trade(trade_request: ManualTradeRequest):
                     "position_size": round(position_size, 6),
                     "position_value": round(position_value, 2),
                     "leverage": leverage,
-                    "risk_amount": round(risk_amount, 2),
+                    "capital_used": round(fixed_capital, 2),
+                    "actual_risk": round(actual_risk, 2),
                     "expected_profit": round(expected_profit, 2),
                     "expected_return_pct": round(expected_return_pct, 2),
                     "confidence": trade_request.confidence,
@@ -722,7 +725,7 @@ async def get_trading_status():
                 "real_trading_enabled": ENABLE_REAL_TRADING,
                 "trading_mode": "REAL" if ENABLE_REAL_TRADING else "SIMULATION",
                 "api_key_configured": bool(os.getenv('BINANCE_API_KEY')),
-                "risk_per_trade_pct": float(os.getenv('RISK_PER_TRADE_PCT', '2.0')),
+                "capital_per_trade": 200.0,
                 "max_leverage": float(os.getenv('MAX_LEVERAGE', '10.0')),
                 "account_balance": 10000.0,  # Would be fetched from exchange in real mode
                 "available_balance": 9500.0,
@@ -730,7 +733,8 @@ async def get_trading_status():
             },
             "message": f"Trading mode: {'REAL' if ENABLE_REAL_TRADING else 'SIMULATION'}",
             "configuration": {
-                "note": "Set ENABLE_REAL_TRADING=true to enable real trading",
+                "note": "Fixed $200 capital per trade",
+                "position_sizing": "Fixed capital approach - each trade uses exactly $200",
                 "safety": "Simulation mode active for safety by default"
             }
         }
@@ -1059,8 +1063,6 @@ async def check_signal_quality():
             emoji = "🔬"
         else:
             recommendation = "NO SIGNALS AVAILABLE"
-            risk_per_trade = "Wait for signal generation"
-            emoji = "⏳"
             risk_per_trade = "Wait for signal generation"
             emoji = "⏳"
         
