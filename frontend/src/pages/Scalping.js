@@ -150,7 +150,7 @@ const Scalping = () => {
     }
   };
 
-  const CapitalReturnDisplay = ({ signal }) => {
+  const CapitalReturnDisplay = ({ signal, compact = false }) => {
     const capitalReturn = signal.expected_capital_return_pct || 0;
     const leverage = signal.optimal_leverage || 1;
     const marketMove = signal.market_move_pct || 0;
@@ -160,6 +160,39 @@ const Scalping = () => {
       if (capitalReturn >= 5) return 'warning.main';
       return 'info.main';
     };
+
+    if (compact) {
+      return (
+        <Box sx={{ p: 1.5, bgcolor: 'background.paper', borderRadius: 1.5, border: '1px solid', borderColor: 'divider' }}>
+          <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+            <Box textAlign="center">
+              <Typography variant="h5" color={getReturnColor()} fontWeight="bold">
+                {capitalReturn.toFixed(1)}%
+              </Typography>
+              <Typography variant="caption" color="textSecondary">
+                Capital Return
+              </Typography>
+            </Box>
+            <Box textAlign="center">
+              <Typography variant="h6" color="primary.main">
+                {leverage.toFixed(1)}x
+              </Typography>
+              <Typography variant="caption" color="textSecondary">
+                Leverage
+              </Typography>
+            </Box>
+            <Box textAlign="center">
+              <Typography variant="h6" color="text.primary">
+                {marketMove.toFixed(2)}%
+              </Typography>
+              <Typography variant="caption" color="textSecondary">
+                Market
+              </Typography>
+            </Box>
+          </Stack>
+        </Box>
+      );
+    }
 
     return (
       <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
@@ -222,7 +255,10 @@ const Scalping = () => {
           boxShadow: 3,
           '&:hover': { boxShadow: 6 },
           border: '2px solid',
-          borderColor: capitalReturn >= 7 ? 'success.main' : 'divider',
+          borderColor: signal.status === 'stale' ? 'warning.main' : 
+                      capitalReturn >= 7 ? 'success.main' : 'divider',
+          bgcolor: signal.status === 'stale' ? 'warning.light' : 'background.paper',
+          opacity: signal.status === 'stale' ? 0.9 : 1,
           position: 'relative'
         }}
       >
@@ -246,128 +282,184 @@ const Scalping = () => {
           </Box>
         )}
         
-        <CardContent sx={{ p: 3 }}>
+        <CardContent sx={{ p: { xs: 1.5, sm: 2, md: 3 } }}>
           {/* Header */}
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Box display="flex" alignItems="center" gap={1}>
+          <Box mb={1.5}>
+            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
               <Typography variant="h5" fontWeight="bold" color="primary">
                 {signal.symbol}
               </Typography>
+              <Chip
+                icon={getScalpingTypeIcon(scalpType)}
+                label={scalpType.replace('_', ' ').toUpperCase()}
+                color={getScalpingTypeColor(scalpType)}
+                size="small"
+                variant="outlined"
+                sx={{ fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
+              />
+            </Box>
+            <Box display="flex" alignItems="center" gap={0.5} flexWrap="wrap">
               <Chip
                 icon={getDirectionIcon(signal.direction)}
                 label={signal.direction}
                 color={getDirectionColor(signal.direction)}
                 size="small"
-                sx={{ fontWeight: 'bold' }}
+                sx={{ fontWeight: 'bold', fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
               />
+              {/* Signal Status */}
+              {signal.status === 'stale' && (
+                <Chip
+                  label={isMobile ? 'STALE' : `STALE (${(signal.drift_pct || 0).toFixed(2)}% drift)`}
+                  color="warning"
+                  size="small"
+                  sx={{ fontWeight: 'bold', fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
+                />
+              )}
+              {signal.status === 'active' && (
+                <Chip
+                  label="ACTIVE"
+                  color="success"
+                  size="small"
+                  sx={{ fontWeight: 'bold', fontSize: { xs: '0.65rem', sm: '0.75rem' } }}
+                />
+              )}
             </Box>
-            <Chip
-              icon={getScalpingTypeIcon(scalpType)}
-              label={scalpType.replace('_', ' ').toUpperCase()}
-              color={getScalpingTypeColor(scalpType)}
-              size="small"
-              variant="outlined"
-            />
           </Box>
 
           {/* Capital Return Display */}
-          <Box mb={3}>
-            <CapitalReturnDisplay signal={signal} />
+          <Box mb={2}>
+            <CapitalReturnDisplay signal={signal} compact={isMobile} />
           </Box>
 
           {/* Price Levels */}
-          <Grid container spacing={2} mb={2}>
+          <Grid container spacing={isMobile ? 1 : 2} mb={1.5}>
             <Grid item xs={4}>
-              <Box textAlign="center" p={1} bgcolor="background.default" borderRadius={1}>
-                <Typography variant="caption" color="textSecondary">Entry</Typography>
-                <Typography variant="body2" fontWeight="bold">
-                  ${entry.toFixed(6)}
+              <Box textAlign="center" p={isMobile ? 0.5 : 1} bgcolor="background.default" borderRadius={1}>
+                <Typography variant="caption" color="textSecondary" fontSize={isMobile ? '0.65rem' : undefined}>
+                  Entry
+                </Typography>
+                <Typography variant={isMobile ? "caption" : "body2"} fontWeight="bold" display="block">
+                  ${entry.toFixed(isMobile ? 4 : 6)}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box textAlign="center" p={1} bgcolor="success.light" borderRadius={1}>
-                <Typography variant="caption" color="textSecondary">Take Profit</Typography>
-                <Typography variant="body2" fontWeight="bold" color="success.dark">
-                  ${tp.toFixed(6)}
+              <Box textAlign="center" p={isMobile ? 0.5 : 1} bgcolor="success.light" borderRadius={1}>
+                <Typography variant="caption" color="textSecondary" fontSize={isMobile ? '0.65rem' : undefined}>
+                  TP
+                </Typography>
+                <Typography variant={isMobile ? "caption" : "body2"} fontWeight="bold" color="success.dark" display="block">
+                  ${tp.toFixed(isMobile ? 4 : 6)}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={4}>
-              <Box textAlign="center" p={1} bgcolor="error.light" borderRadius={1}>
-                <Typography variant="caption" color="textSecondary">Stop Loss</Typography>
-                <Typography variant="body2" fontWeight="bold" color="error.dark">
-                  ${sl.toFixed(6)}
+              <Box textAlign="center" p={isMobile ? 0.5 : 1} bgcolor="error.light" borderRadius={1}>
+                <Typography variant="caption" color="textSecondary" fontSize={isMobile ? '0.65rem' : undefined}>
+                  SL
+                </Typography>
+                <Typography variant={isMobile ? "caption" : "body2"} fontWeight="bold" color="error.dark" display="block">
+                  ${sl.toFixed(isMobile ? 4 : 6)}
                 </Typography>
               </Box>
             </Grid>
           </Grid>
 
           {/* Metrics Row */}
-          <Stack direction="row" spacing={2} justifyContent="space-between" mb={2}>
+          <Stack direction="row" spacing={isMobile ? 1 : 2} justifyContent="space-between" mb={1.5}>
             <Box textAlign="center">
-              <Typography variant="caption" color="textSecondary">Confidence</Typography>
-              <Typography variant="body2" fontWeight="bold">
+              <Typography variant="caption" color="textSecondary" fontSize={isMobile ? '0.65rem' : undefined}>
+                Confidence
+              </Typography>
+              <Typography variant={isMobile ? "caption" : "body2"} fontWeight="bold" display="block">
                 {(confidence * 100).toFixed(1)}%
               </Typography>
             </Box>
             <Box textAlign="center">
-              <Typography variant="caption" color="textSecondary">Risk:Reward</Typography>
-              <Typography variant="body2" fontWeight="bold" color={riskReward >= 2 ? 'success.main' : 'text.primary'}>
+              <Typography variant="caption" color="textSecondary" fontSize={isMobile ? '0.65rem' : undefined}>
+                R:R
+              </Typography>
+              <Typography variant={isMobile ? "caption" : "body2"} fontWeight="bold" color={riskReward >= 2 ? 'success.main' : 'text.primary'} display="block">
                 {riskReward.toFixed(2)}:1
               </Typography>
             </Box>
             <Box textAlign="center">
-              <Typography variant="caption" color="textSecondary">Timeframe</Typography>
-              <Typography variant="body2" fontWeight="bold" color="primary.main">
+              <Typography variant="caption" color="textSecondary" fontSize={isMobile ? '0.65rem' : undefined}>
+                Time
+              </Typography>
+              <Typography variant={isMobile ? "caption" : "body2"} fontWeight="bold" color="primary.main" display="block">
                 {signal.timeframe || '15m'}
               </Typography>
             </Box>
           </Stack>
 
           {/* Capital Scenarios */}
-          <Box p={2} bgcolor="background.default" borderRadius={2} mb={2}>
-            <Typography variant="subtitle2" color="primary" gutterBottom>
-              💰 Capital Scenarios
-            </Typography>
-            <Grid container spacing={1}>
-              {['capital_100', 'capital_500', 'capital_1000', 'capital_5000'].map((key) => {
-                const scenario = signal[key] || {};
-                return (
-                  <Grid item xs={6} sm={3} key={key}>
-                    <Box textAlign="center">
-                      <Typography variant="body2" fontWeight="bold">
-                        ${scenario.capital || key.split('_')[1]}
+          {!isMobile && (
+            <Box p={2} bgcolor="background.default" borderRadius={2} mb={2}>
+              <Typography variant="subtitle2" color="primary" gutterBottom>
+                💰 Capital Scenarios
+              </Typography>
+              <Grid container spacing={1}>
+                {['capital_100', 'capital_500', 'capital_1000', 'capital_5000'].map((key) => {
+                  const scenario = signal[key] || {};
+                  return (
+                    <Grid item xs={6} sm={3} key={key}>
+                      <Box textAlign="center">
+                        <Typography variant="body2" fontWeight="bold">
+                          ${scenario.capital || key.split('_')[1]}
+                        </Typography>
+                        <Typography variant="caption" color="success.main">
+                          → ${(scenario.expected_profit || 0).toFixed(0)}
+                        </Typography>
+                      </Box>
+                    </Grid>
+                  );
+                })}
+              </Grid>
+            </Box>
+          )}
+
+          {/* Mobile Quick Scenarios */}
+          {isMobile && (
+            <Box p={1} bgcolor="background.default" borderRadius={1} mb={1.5}>
+              <Stack direction="row" spacing={1} justifyContent="space-between">
+                {[100, 500, 1000].map((capital) => {
+                  const scenario = signal[`capital_${capital}`] || {};
+                  return (
+                    <Box textAlign="center" key={capital}>
+                      <Typography variant="caption" fontWeight="bold" fontSize="0.65rem">
+                        ${capital}
                       </Typography>
-                      <Typography variant="caption" color="success.main">
-                        → ${(scenario.expected_profit || 0).toFixed(0)}
+                      <Typography variant="caption" color="success.main" display="block" fontSize="0.65rem">
+                        ${(scenario.expected_profit || 0).toFixed(0)}
                       </Typography>
                     </Box>
-                  </Grid>
-                );
-              })}
-            </Grid>
-          </Box>
+                  );
+                })}
+              </Stack>
+            </Box>
+          )}
 
           {/* Action Button */}
-          <Box textAlign="center">
+          <Box textAlign="center" mb={isMobile ? 1 : 0}>
             <Button
               variant="contained"
               color="primary"
-              startIcon={<AssessmentIcon />}
+              startIcon={!isMobile ? <AssessmentIcon /> : null}
               onClick={() => {
                 setSelectedSignal(signal);
                 setDetailsOpen(true);
               }}
               fullWidth={isMobile}
-              sx={{ minWidth: '140px' }}
+              size={isMobile ? "small" : "medium"}
+              sx={{ minWidth: isMobile ? 'auto' : '140px' }}
             >
-              View Details
+              {isMobile ? 'Details' : 'View Details'}
             </Button>
           </Box>
 
           {/* Timestamp */}
-          {signal.timestamp && (
+          {signal.timestamp && !isMobile && (
             <Typography variant="caption" color="textSecondary" display="block" textAlign="center" mt={1}>
               {new Date(signal.timestamp).toLocaleString()}
             </Typography>
@@ -501,15 +593,15 @@ const Scalping = () => {
   };
 
   return (
-    <Box sx={{ p: { xs: 1, sm: 2, md: 3 }, maxWidth: '100vw', overflow: 'hidden' }}>
+    <Box sx={{ p: { xs: 0.5, sm: 2, md: 3 }, maxWidth: '100vw', overflow: 'hidden' }}>
       {/* Header */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={isMobile ? 2 : 3} px={isMobile ? 1 : 0}>
         <Box>
-          <Typography variant="h4" color="primary" gutterBottom>
+          <Typography variant={isMobile ? "h5" : "h4"} color="primary" gutterBottom>
             Precision Scalping
           </Typography>
-          <Typography variant="body1" color="textSecondary">
-            3-10% Capital Returns via Precise Leverage • 15m/1h Timeframes
+          <Typography variant={isMobile ? "body2" : "body1"} color="textSecondary">
+            {isMobile ? '3-10% Capital Returns' : '3-10% Capital Returns via Precise Leverage • 15m/1h Timeframes'}
           </Typography>
         </Box>
         <Button
@@ -517,54 +609,55 @@ const Scalping = () => {
           startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshIcon />}
           onClick={handleRefresh}
           disabled={refreshing}
+          size={isMobile ? "small" : "medium"}
         >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
+          {isMobile ? (refreshing ? '...' : 'Refresh') : (refreshing ? 'Refreshing...' : 'Refresh')}
         </Button>
       </Box>
 
       {/* Summary Stats */}
       {summary && (
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" color="primary" gutterBottom>
+        <Paper sx={{ p: { xs: 1.5, sm: 2, md: 3 }, mb: { xs: 2, sm: 3 }, mx: { xs: 1, sm: 0 } }}>
+          <Typography variant={isMobile ? "subtitle1" : "h6"} color="primary" gutterBottom>
             Scalping Summary
           </Typography>
-          <Grid container spacing={3}>
+          <Grid container spacing={isMobile ? 2 : 3}>
             <Grid item xs={6} md={3}>
               <Box textAlign="center">
-                <Typography variant="h5" color="primary.main">
+                <Typography variant={isMobile ? "h6" : "h5"} color="primary.main">
                   {summary.total_signals}
                 </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  Active Signals
+                <Typography variant={isMobile ? "caption" : "body2"} color="textSecondary">
+                  {isMobile ? 'Signals' : 'Active Signals'}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={6} md={3}>
               <Box textAlign="center">
-                <Typography variant="h5" color="success.main">
+                <Typography variant={isMobile ? "h6" : "h5"} color="success.main">
                   {summary.avg_capital_return_pct}%
                 </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  Avg Capital Return
+                <Typography variant={isMobile ? "caption" : "body2"} color="textSecondary">
+                  {isMobile ? 'Avg Return' : 'Avg Capital Return'}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={6} md={3}>
               <Box textAlign="center">
-                <Typography variant="h5" color="warning.main">
+                <Typography variant={isMobile ? "h6" : "h5"} color="warning.main">
                   {summary.avg_optimal_leverage}x
                 </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  Avg Leverage
+                <Typography variant={isMobile ? "caption" : "body2"} color="textSecondary">
+                  {isMobile ? 'Leverage' : 'Avg Leverage'}
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={6} md={3}>
               <Box textAlign="center">
-                <Typography variant="h5" color="info.main">
+                <Typography variant={isMobile ? "h6" : "h5"} color="info.main">
                   15m
                 </Typography>
-                <Typography variant="body2" color="textSecondary">
+                <Typography variant={isMobile ? "caption" : "body2"} color="textSecondary">
                   Timeframe
                 </Typography>
               </Box>
@@ -575,40 +668,42 @@ const Scalping = () => {
 
       {/* Error Display */}
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert severity="error" sx={{ mb: { xs: 2, sm: 3 }, mx: { xs: 1, sm: 0 } }}>
           {error}
         </Alert>
       )}
 
       {/* Loading State */}
       {loading && (
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="300px">
-          <CircularProgress size={60} />
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight={isMobile ? "200px" : "300px"}>
+          <CircularProgress size={isMobile ? 40 : 60} />
         </Box>
       )}
 
       {/* No Signals */}
       {!loading && signals.length === 0 && (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <ScalpIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="textSecondary" gutterBottom>
+        <Paper sx={{ p: { xs: 2, sm: 4 }, textAlign: 'center', mx: { xs: 1, sm: 0 } }}>
+          <ScalpIcon sx={{ fontSize: { xs: 48, sm: 64 }, color: 'text.secondary', mb: 2 }} />
+          <Typography variant={isMobile ? "subtitle1" : "h6"} color="textSecondary" gutterBottom>
             No Scalping Opportunities
           </Typography>
           <Typography variant="body2" color="textSecondary">
-            Waiting for precision scalping setups targeting 3-10% capital returns
+            {isMobile ? 'Waiting for scalping setups' : 'Waiting for precision scalping setups targeting 3-10% capital returns'}
           </Typography>
         </Paper>
       )}
 
       {/* Signals Grid */}
       {!loading && signals.length > 0 && (
-        <Grid container spacing={2}>
-          {signals.map((signal, index) => (
-            <Grid item xs={12} md={6} xl={4} key={signal.signal_id || index}>
-              <ScalpingCard signal={signal} />
-            </Grid>
-          ))}
-        </Grid>
+        <Box px={isMobile ? 1 : 0}>
+          <Grid container spacing={isMobile ? 1 : 2}>
+            {signals.map((signal, index) => (
+              <Grid item xs={12} sm={12} md={6} lg={4} xl={4} key={signal.signal_id || index}>
+                <ScalpingCard signal={signal} />
+              </Grid>
+            ))}
+          </Grid>
+        </Box>
       )}
 
       {/* Details Dialog */}

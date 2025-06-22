@@ -46,8 +46,9 @@ class OpportunityManager:
         self.last_opportunities = []  # Cache last opportunities
         self.direct_fetcher = DirectMarketDataFetcher()  # Direct API access
         
-        # Scalping-specific attributes
-        self.scalping_opportunities = {}  # Populated by background scanner
+        # Scalping-specific attributes with market-aware lifecycle
+        self.scalping_opportunities = {}  # Stateful signal cache with market invalidation
+        self.scalping_signal_states = {}  # Track signal status: active/hit_tp/hit_sl/stale
         
     def get_opportunities(self) -> List[Dict[str, Any]]:
         """Get all current trading opportunities."""
@@ -3331,7 +3332,7 @@ class OpportunityManager:
                 'required_market_move_pct': required_market_move * 100,
                 'expected_capital_return_pct': expected_capital_return * 100,
                 'market_move_pct': market_move_pct,
-                'timeframe': '15m',  # Scalping timeframe
+                'timeframe': '15m/1h',  # Scalping: 15m primary + 1h trend confirmation
                 
                 # Position sizing for different capital amounts
                 'capital_100': scalping_calcs['capital_100'],
@@ -3371,7 +3372,7 @@ class OpportunityManager:
                     f"Capital target: {expected_capital_return*100:.1f}% with {optimal_leverage:.1f}x leverage",
                     f"Market move needed: {required_market_move*100:.2f}%",
                     f"Risk/Reward: {risk_reward:.2f}:1",
-                    f"Scalping timeframe: 15m/1h"
+                    f"Scalping timeframes: 15m entry + 1h trend confirmation"
                 ],
                 
                 # Market data
@@ -3601,22 +3602,38 @@ class OpportunityManager:
             return opportunity
 
     async def scan_scalping_opportunities(self) -> None:
-        """Scan for precision scalping opportunities targeting 2.5-10% capital returns."""
+        """Scan for precision scalping opportunities with market-aware signal lifecycle."""
         try:
-            logger.info("Starting PRECISION SCALPING scan for 2.5-10% capital returns...")
+            logger.info("🔄 SMART SCALPING SCAN: Market-aware signal lifecycle (partial updates)")
             current_time = time.time()
             self.last_scan_time = current_time
             
+            # Step 1: Validate existing signals against current market prices
+            await self._validate_existing_scalping_signals()
+            
+            # Step 2: Get symbols that need new signals (no active signal or old signal was invalidated)
+            existing_symbols = set()
+            for signal in self.scalping_opportunities.values():
+                if signal.get('status', 'active') == 'active':  # Only count active signals
+                    existing_symbols.add(signal.get('symbol'))
+            
+            logger.info(f"📊 Signal Status: {len(existing_symbols)} active signals maintained from previous scan")
+            
             processed_count = 0
             
-            # Get ALL symbols for scalping (scan everything for maximum opportunities)
+            # Step 3: Get symbols that need scanning (exclude symbols with active signals)
             try:
                 all_symbols = await self.exchange_client.get_all_symbols()
                 if all_symbols:
-                    # Use ALL USDT pairs for scalping
+                    # Use ALL USDT pairs for scalping, but prioritize symbols without active signals
                     usdt_symbols = [s for s in all_symbols if s.endswith('USDT')]
-                    symbols_to_scan = usdt_symbols
-                    logger.info(f"✓ Scanning ALL {len(symbols_to_scan)} USDT pairs for scalping opportunities")
+                    
+                    # Separate symbols that need new signals vs those with active signals
+                    symbols_needing_signals = [s for s in usdt_symbols if s not in existing_symbols]
+                    symbols_to_scan = symbols_needing_signals  # Focus on gaps first
+                    
+                    logger.info(f"🎯 SMART SCANNING: {len(symbols_needing_signals)} symbols need new signals, {len(existing_symbols)} have active signals")
+                    logger.info(f"✓ Scanning {len(symbols_to_scan)} USDT pairs for new scalping opportunities")
                 else:
                     symbols_to_scan = self.fallback_symbols
             except Exception as e:
@@ -3650,13 +3667,19 @@ class OpportunityManager:
                             logger.debug(f"No scalping market data for {symbol}")
                             continue
                             
-                        # Generate scalping signal
+                        # Generate scalping signal (only for symbols without active signals)
                         opportunity = self._analyze_market_and_generate_scalping_signal(symbol, market_data, current_time)
                         
                         # DEBUG: Log what's happening with signals
                         if opportunity:
                             if opportunity.get('scalping_ready', False):
-                                logger.info(f"✅ SCALP SIGNAL: {symbol} passed validation")
+                                # Add market-aware lifecycle tracking
+                                opportunity['status'] = 'active'
+                                opportunity['created_at'] = current_time
+                                opportunity['last_validated'] = current_time
+                                opportunity['signal_id'] = f"{symbol}_scalp_{int(current_time)}"
+                                
+                                logger.info(f"✅ NEW SCALP SIGNAL: {symbol} passed validation")
                             else:
                                 rejection_reason = opportunity.get('rejection_reason', 'Unknown reason')
                                 logger.info(f"❌ SCALP REJECTED: {symbol} - {rejection_reason}")
@@ -3677,7 +3700,7 @@ class OpportunityManager:
                                     'open_interest': market_data.get('open_interest'),
                                     'volume_24h': market_data.get('volume_24h'),
                                     'market_regime': market_data.get('market_regime'),
-                                    'timeframe': '15m'
+                                    'timeframe': '15m/1h'
                                 }
                                 
                                 signal_id = await real_signal_tracker.log_signal(
@@ -3693,7 +3716,14 @@ class OpportunityManager:
                             except Exception as e:
                                 logger.error(f"❌ Failed to log scalping signal for {symbol}: {e}")
                             
-                            self.scalping_opportunities[symbol] = opportunity
+                            # Store scalping signal with market-aware lifecycle
+                            signal_id = opportunity['signal_id']  # Use the ID we created above
+                            self.scalping_opportunities[signal_id] = opportunity
+                            self.scalping_signal_states[signal_id] = {
+                                'status': 'active',
+                                'created_at': current_time,
+                                'symbol': symbol
+                            }
                             processed_count += 1
                             
                             # Log scalping details
@@ -3701,7 +3731,7 @@ class OpportunityManager:
                             leverage = opportunity.get('optimal_leverage', 0)
                             market_move = opportunity.get('market_move_pct', 0)
                             
-                            logger.info(f"💰 SCALP [{processed_count}] {symbol}: {opportunity['direction']} "
+                            logger.info(f"💰 NEW SCALP [{processed_count}] {symbol}: {opportunity['direction']} "
                                       f"Capital: {capital_return:.1f}%, Market: {market_move:.2f}%, "
                                       f"Leverage: {leverage:.1f}x, Type: {opportunity.get('scalping_type', 'unknown')}")
                         else:
@@ -3714,7 +3744,14 @@ class OpportunityManager:
                 # Small delay between batches to prevent overwhelming the system
                 await asyncio.sleep(0.1)
             
-            logger.info(f"✅ SCALPING scan completed. Found {len(self.scalping_opportunities)} precision scalping opportunities")
+            # Step 4: Final summary with market-aware lifecycle
+            total_signals = len(self.scalping_opportunities)
+            active_signals = len([s for s in self.scalping_opportunities.values() if s.get('status') == 'active'])
+            stale_signals = len([s for s in self.scalping_opportunities.values() if s.get('status') == 'stale'])
+            
+            logger.info(f"✅ SMART SCALPING SCAN COMPLETE: {total_signals} total signals "
+                       f"({active_signals} active, {stale_signals} stale, {processed_count} new)")
+            logger.info(f"🎯 Market-aware lifecycle: Signals persist until TP/SL hit or price drift > 0.5%")
                         
         except Exception as e:
             logger.error(f"Error in scalping scan: {e}")
@@ -3732,7 +3769,7 @@ class OpportunityManager:
             if not klines_1h or len(klines_1h) < 12:
                 return None
             
-            # Calculate volume from 15m candles (NOT 24hr ticker!)
+            # Calculate volume from 15m candles (NOT 24hr ticker!) - using 15m for precision, 1h for trend
             current_price = float(klines_15m[-1]['close'])
             recent_volumes = [float(k['volume']) for k in klines_15m[-20:]]  # Last 20 candles (5 hours)
             avg_volume = sum(recent_volumes) / len(recent_volumes)
@@ -3745,7 +3782,7 @@ class OpportunityManager:
                 'current_price': current_price,
                 'current_volume': current_volume,
                 'avg_volume_recent': avg_volume,
-                'timeframe': '15m',
+                'timeframe': '15m/1h',
                 'data_source': 'REAL_FUTURES_DATA',
                 'is_real_data': True,
                 'timestamp': int(time.time())
@@ -3755,11 +3792,127 @@ class OpportunityManager:
             logger.error(f"Error getting scalping market data for {symbol}: {e}")
             return None
 
+    async def _validate_existing_scalping_signals(self) -> None:
+        """Market-aware validation of existing scalping signals - invalidate if TP/SL hit or stale."""
+        if not self.scalping_opportunities:
+            return
+            
+        logger.info("🔍 Validating existing scalping signals against current market prices...")
+        invalidated_signals = []
+        stale_signals = []
+        
+        for signal_id, signal in list(self.scalping_opportunities.items()):
+            try:
+                symbol = signal.get('symbol')
+                entry_price = signal.get('entry_price', 0)
+                stop_loss = signal.get('stop_loss', 0)
+                take_profit = signal.get('take_profit', 0)
+                direction = signal.get('direction', '')
+                
+                # Get current market price
+                try:
+                    ticker = await self.exchange_client.get_ticker_24h(symbol)
+                    current_price = float(ticker.get('lastPrice', 0))
+                except Exception as e:
+                    logger.warning(f"Failed to get current price for {symbol}: {e}")
+                    continue
+                
+                # Check if signal was invalidated by market
+                signal_invalidated = False
+                invalidation_reason = ""
+                
+                if direction.upper() == 'LONG':
+                    # LONG: invalidated if price hit SL (below) or TP (above)
+                    if current_price <= stop_loss:
+                        signal_invalidated = True
+                        invalidation_reason = f"LONG stop loss hit: {current_price:.6f} <= {stop_loss:.6f}"
+                    elif current_price >= take_profit:
+                        signal_invalidated = True
+                        invalidation_reason = f"LONG take profit hit: {current_price:.6f} >= {take_profit:.6f}"
+                        
+                elif direction.upper() == 'SHORT':
+                    # SHORT: invalidated if price hit SL (above) or TP (below)  
+                    if current_price >= stop_loss:
+                        signal_invalidated = True
+                        invalidation_reason = f"SHORT stop loss hit: {current_price:.6f} >= {stop_loss:.6f}"
+                    elif current_price <= take_profit:
+                        signal_invalidated = True
+                        invalidation_reason = f"SHORT take profit hit: {current_price:.6f} <= {take_profit:.6f}"
+                
+                # Check for price drift (±0.5% from entry)
+                price_drift_pct = abs(current_price - entry_price) / entry_price * 100
+                if price_drift_pct > 0.5:  # 0.5% drift threshold
+                    stale_signals.append({
+                        'signal_id': signal_id,
+                        'symbol': symbol,
+                        'drift_pct': price_drift_pct,
+                        'current_price': current_price,
+                        'entry_price': entry_price
+                    })
+                
+                if signal_invalidated:
+                    invalidated_signals.append({
+                        'signal_id': signal_id,
+                        'symbol': symbol,
+                        'reason': invalidation_reason,
+                        'current_price': current_price
+                    })
+                    
+                    # Mark as invalidated but don't delete yet (for logging)
+                    signal['status'] = 'hit_tp' if 'take profit' in invalidation_reason else 'hit_sl'
+                    signal['invalidated_at'] = time.time()
+                    signal['invalidation_reason'] = invalidation_reason
+                    signal['final_price'] = current_price
+                    
+            except Exception as e:
+                logger.error(f"Error validating scalping signal {signal_id}: {e}")
+        
+        # Remove invalidated signals
+        for invalid_signal in invalidated_signals:
+            signal_id = invalid_signal['signal_id']
+            symbol = invalid_signal['symbol']
+            reason = invalid_signal['reason']
+            
+            logger.info(f"🎯 SCALP INVALIDATED: {symbol} - {reason}")
+            
+            # Remove from active cache
+            if signal_id in self.scalping_opportunities:
+                del self.scalping_opportunities[signal_id]
+            if signal_id in self.scalping_signal_states:
+                del self.scalping_signal_states[signal_id]
+        
+        # Mark stale signals but keep them (for now)
+        for stale_signal in stale_signals:
+            signal_id = stale_signal['signal_id']
+            symbol = stale_signal['symbol']
+            drift = stale_signal['drift_pct']
+            
+            logger.warning(f"⚠️ SCALP STALE: {symbol} - {drift:.2f}% price drift from entry")
+            
+            if signal_id in self.scalping_opportunities:
+                self.scalping_opportunities[signal_id]['status'] = 'stale'
+                self.scalping_opportunities[signal_id]['drift_pct'] = drift
+        
+        if invalidated_signals:
+            logger.info(f"🗑️ Removed {len(invalidated_signals)} invalidated scalping signals")
+        if stale_signals:
+            logger.info(f"⏰ Marked {len(stale_signals)} scalping signals as stale due to price drift")
+
     def get_scalping_opportunities(self) -> List[Dict[str, Any]]:
         """
-        Get current scalping opportunities - NEVER triggers scanning.
-        Results are populated by independent background scanner.
+        Get current scalping opportunities with market-aware lifecycle.
+        Returns active signals first, followed by stale signals.
+        NEVER triggers scanning - results populated by independent background scanner.
         """
-        opportunities = list(self.scalping_opportunities.values())
-        logger.debug(f"Returning {len(opportunities)} scalping opportunities from cache")
+        all_opportunities = list(self.scalping_opportunities.values())
+        
+        # Separate active and stale signals
+        active_signals = [opp for opp in all_opportunities if opp.get('status', 'active') == 'active']
+        stale_signals = [opp for opp in all_opportunities if opp.get('status') == 'stale']
+        
+        # Return active signals first, then stale (for UI display)
+        opportunities = active_signals + stale_signals
+        
+        logger.debug(f"Returning {len(opportunities)} scalping opportunities: "
+                    f"{len(active_signals)} active, {len(stale_signals)} stale")
         return opportunities
