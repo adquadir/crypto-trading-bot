@@ -9,6 +9,7 @@ from src.market_data.exchange_client import ExchangeClient
 from src.strategy.strategy_manager import StrategyManager
 from src.risk.risk_manager import RiskManager
 from src.opportunity.opportunity_manager import OpportunityManager
+from src.signals.enhanced_signal_tracker import enhanced_signal_tracker
 from src.api.routes import router as base_router, set_components
 from src.api.trading_routes.trading import router as trading_router
 from src.api.websocket import router as ws_router, set_websocket_components
@@ -47,6 +48,14 @@ async def initialize_components():
         logger.info("Loading configuration...")
         config = load_config()
         logger.info("Configuration loaded successfully")
+        
+        # Initialize enhanced signal tracker FIRST
+        logger.info("Initializing enhanced signal tracker...")
+        try:
+            await enhanced_signal_tracker.initialize()
+            logger.info("Enhanced signal tracker initialized successfully")
+        except Exception as e:
+            logger.error(f"Enhanced signal tracker initialization failed: {e}")
         
         # Initialize exchange client with timeout
         logger.info("Initializing exchange client...")
@@ -94,11 +103,11 @@ async def initialize_components():
             logger.error(f"Strategy manager traceback: {traceback.format_exc()}")
             strategy_manager = None
         
-        # Initialize opportunity manager with timeout
+        # Initialize opportunity manager with timeout (now with enhanced signal tracker)
         logger.info("Initializing opportunity manager...")
         try:
             if exchange_client:
-                opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager)
+                opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker)
                 await asyncio.wait_for(opportunity_manager.initialize(), timeout=30.0)
                 logger.info("Opportunity manager initialized successfully")
             else:
@@ -113,9 +122,9 @@ async def initialize_components():
             logger.error(f"Opportunity manager traceback: {traceback.format_exc()}")
             opportunity_manager = None
         
-        # Pass components to WebSocket module
+        # Pass components to WebSocket module (now including enhanced signal tracker)
         logger.info("Setting WebSocket components...")
-        set_websocket_components(opportunity_manager, exchange_client)
+        set_websocket_components(opportunity_manager, exchange_client, enhanced_signal_tracker)
         logger.info("WebSocket components configured successfully")
         
         # Set components in routes so they can be accessed by API endpoints
@@ -151,6 +160,14 @@ async def lifespan(app: FastAPI):
     
     # Cleanup on shutdown
     logger.info("API server shutting down")
+    
+    # Close enhanced signal tracker
+    try:
+        if enhanced_signal_tracker and hasattr(enhanced_signal_tracker, 'close'):
+            logger.info("Closing enhanced signal tracker...")
+            await enhanced_signal_tracker.close()
+    except Exception as e:
+        logger.error(f"Error closing enhanced signal tracker: {e}")
 
 # Create FastAPI app with lifespan
 app = FastAPI(title="Crypto Trading Bot API", lifespan=lifespan)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -30,6 +30,7 @@ import {
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
+import { createWebSocket } from '../utils/websocket';
 
 const Performance = () => {
   const [loading, setLoading] = useState(true);
@@ -41,21 +42,30 @@ const Performance = () => {
   const [goldenSignals, setGoldenSignals] = useState([]);
   const [liveTracking, setLiveTracking] = useState(null);
   const [adaptiveAssessment, setAdaptiveAssessment] = useState(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = useRef(null);
 
   useEffect(() => {
-    fetchAllData();
-    const interval = setInterval(fetchAllData, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
+    // Initial data fetch for tabs that don't have real-time updates
+    fetchStaticData();
+    
+    // Setup WebSocket for real-time live tracking
+    setupWebSocket();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
   }, []);
 
-  const fetchAllData = async () => {
+  const fetchStaticData = async () => {
     try {
       setLoading(true);
       
-      const [performanceRes, goldenRes, liveRes, adaptiveRes] = await Promise.all([
+      const [performanceRes, goldenRes, adaptiveRes] = await Promise.all([
         axios.get(`${config.API_BASE_URL}/api/v1/signals/performance`),
         axios.get(`${config.API_BASE_URL}/api/v1/signals/golden`),
-        axios.get(`${config.API_BASE_URL}/api/v1/signals/live-tracking`),
         axios.get(`${config.API_BASE_URL}/api/v1/signals/adaptive-assessment`)
       ]);
 
@@ -83,10 +93,6 @@ const Performance = () => {
         setGoldenSignals(goldenRes.data.data || []);
       }
       
-      if (liveRes.data.status === 'success') {
-        setLiveTracking(liveRes.data.data || {});
-      }
-      
       if (adaptiveRes.data.status === 'success') {
         setAdaptiveAssessment(adaptiveRes.data);
       }
@@ -97,6 +103,62 @@ const Performance = () => {
       console.error('Error fetching performance data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const setupWebSocket = () => {
+    try {
+      const ws = createWebSocket('/ws/signals');
+      if (!ws) {
+        console.error('Failed to create WebSocket connection');
+        return;
+      }
+
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('📡 WebSocket connected for real-time live tracking');
+        setWsConnected(true);
+        setError(null);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          if (message.status === 'success' && message.data && message.data.live_tracking) {
+            // Update live tracking data in real-time
+            setLiveTracking(message.data.live_tracking);
+            
+            console.log('📊 Live tracking updated:', {
+              activeSignals: message.data.live_tracking.active_signals_count,
+              monitoredSymbols: message.data.live_tracking.price_cache_symbols
+            });
+          }
+        } catch (err) {
+          console.error('Error parsing WebSocket message:', err);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setWsConnected(false);
+      };
+
+      ws.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        setWsConnected(false);
+        
+        // Attempt to reconnect after 5 seconds
+        setTimeout(() => {
+          console.log('Attempting to reconnect WebSocket...');
+          setupWebSocket();
+        }, 5000);
+      };
+
+    } catch (error) {
+      console.error('Error setting up WebSocket:', error);
+      setWsConnected(false);
     }
   };
 
@@ -129,21 +191,35 @@ const Performance = () => {
           </Typography>
           <Typography variant="body1" color="textSecondary">
             Real-time signal tracking and adaptive learning insights
+            {wsConnected && (
+              <Chip 
+                label="🔴 LIVE" 
+                color="success" 
+                size="small" 
+                sx={{ ml: 2 }}
+              />
+            )}
           </Typography>
         </Box>
         <Button
           variant="outlined"
           startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
-          onClick={fetchAllData}
+          onClick={fetchStaticData}
           disabled={loading}
         >
-          Refresh
+          Refresh Static Data
         </Button>
       </Box>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
+        </Alert>
+      )}
+
+      {!wsConnected && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          📡 WebSocket disconnected - Live tracking updates unavailable. Attempting to reconnect...
         </Alert>
       )}
 
@@ -339,39 +415,77 @@ const Performance = () => {
         <Grid container spacing={3}>
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Live Signal Tracking
-              </Typography>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                <Typography variant="h6">
+                  Live Signal Tracking
+                </Typography>
+                <Box display="flex" alignItems="center" gap={1}>
+                  {wsConnected ? (
+                    <Chip 
+                      label="🟢 Real-time Connected" 
+                      color="success" 
+                      size="small"
+                    />
+                  ) : (
+                    <Chip 
+                      label="🔴 Offline" 
+                      color="error" 
+                      size="small"
+                    />
+                  )}
+                </Box>
+              </Box>
               <Grid container spacing={2} mb={3}>
                 <Grid item xs={12} sm={4}>
-                                      <Card>
-                      <CardContent sx={{ textAlign: 'center' }}>
-                        <Typography variant="h4" color="primary">
-                          {liveTracking?.active_signals_count || 0}
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          Active Signals
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                                      <Card>
-                      <CardContent sx={{ textAlign: 'center' }}>
-                        <Typography variant="h4" color="info.main">
-                          {liveTracking?.price_cache_symbols || 0}
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          Monitored Symbols
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <Card>
+                  <Card sx={{ 
+                    border: wsConnected ? '2px solid' : '1px solid', 
+                    borderColor: wsConnected ? 'success.main' : 'divider',
+                    transition: 'all 0.3s ease'
+                  }}>
                     <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="success.main">
-                        LIVE
+                      <Typography variant="h4" color="primary" sx={{
+                        transition: 'color 0.3s ease',
+                        color: wsConnected ? 'success.main' : 'primary.main'
+                      }}>
+                        {liveTracking?.active_signals_count || 0}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Active Signals
+                        {wsConnected && <Typography variant="caption" display="block" color="success.main">● Live</Typography>}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Card sx={{ 
+                    border: wsConnected ? '2px solid' : '1px solid', 
+                    borderColor: wsConnected ? 'info.main' : 'divider',
+                    transition: 'all 0.3s ease'
+                  }}>
+                    <CardContent sx={{ textAlign: 'center' }}>
+                      <Typography variant="h4" color="info.main" sx={{
+                        transition: 'color 0.3s ease'
+                      }}>
+                        {liveTracking?.price_cache_symbols || 0}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Monitored Symbols
+                        {wsConnected && <Typography variant="caption" display="block" color="info.main">● Live</Typography>}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Card sx={{ 
+                    border: wsConnected ? '2px solid' : '1px solid', 
+                    borderColor: wsConnected ? 'success.main' : 'divider',
+                    transition: 'all 0.3s ease'
+                  }}>
+                    <CardContent sx={{ textAlign: 'center' }}>
+                      <Typography variant="h4" color={wsConnected ? "success.main" : "grey.500"} sx={{
+                        transition: 'color 0.3s ease'
+                      }}>
+                        {wsConnected ? "LIVE" : "OFFLINE"}
                       </Typography>
                       <Typography variant="body2" color="textSecondary">
                         Real-time Monitoring
@@ -413,12 +527,36 @@ const Performance = () => {
                             <Typography 
                               color={signal.current_pnl_pct >= 0 ? 'success.main' : 'error.main'}
                               fontWeight="bold"
+                              sx={{
+                                transition: 'all 0.3s ease',
+                                animation: wsConnected ? 'pulse 2s infinite' : 'none',
+                                '@keyframes pulse': {
+                                  '0%': { opacity: 1 },
+                                  '50%': { opacity: 0.7 },
+                                  '100%': { opacity: 1 }
+                                }
+                              }}
                             >
                               {signal.current_pnl_pct >= 0 ? '+' : ''}{signal.current_pnl_pct}%
+                              {wsConnected && (
+                                <Typography 
+                                  component="span" 
+                                  variant="caption" 
+                                  sx={{ ml: 0.5, color: 'success.main' }}
+                                >
+                                  ●
+                                </Typography>
+                              )}
                             </Typography>
                           </TableCell>
                           <TableCell align="right">
-                            <Typography color="success.main" fontWeight="bold">
+                            <Typography 
+                              color="success.main" 
+                              fontWeight="bold"
+                              sx={{
+                                transition: 'all 0.3s ease'
+                              }}
+                            >
                               +{signal.max_profit_pct}%
                             </Typography>
                           </TableCell>
