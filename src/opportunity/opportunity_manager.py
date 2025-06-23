@@ -214,6 +214,29 @@ class OpportunityManager:
                         except Exception as e:
                             logger.error(f"❌ Failed to log signal for {symbol}: {e}")
                         
+                        # 🧠 AUTO-TRACK ALL SIGNALS FOR REAL-TIME PNL MONITORING
+                        try:
+                            # Calculate position size for tracking (using $200 fixed capital)
+                            position_size = 200.0 / opportunity['entry_price']
+                            
+                            # Auto-track for enhanced real-time monitoring
+                            if hasattr(self, 'enhanced_signal_tracker') and self.enhanced_signal_tracker:
+                                tracking_id = await self.enhanced_signal_tracker.track_signal(
+                                    opportunity, 
+                                    position_size,
+                                    auto_tracked=True  # Mark as automatically tracked
+                                )
+                                opportunity['auto_tracking_id'] = tracking_id
+                                opportunity['auto_tracked'] = True
+                                
+                                logger.info(f"🎯 AUTO-TRACKED signal {symbol} with ID: {tracking_id[:8] if tracking_id else 'failed'}...")
+                            else:
+                                logger.warning(f"Enhanced signal tracker not available for auto-tracking {symbol}")
+                        except Exception as track_error:
+                            logger.warning(f"Failed to auto-track signal for {symbol}: {track_error}")
+                            # Don't fail signal generation if tracking fails
+                            pass
+                        
                         self.opportunities[symbol] = opportunity
                         processed_count += 1
                         logger.info(f"✅ [{processed_count}/{len(symbols_to_scan)}] Generated/updated signal for {symbol}: {opportunity['direction']} (confidence: {opportunity['confidence']:.2f})")
@@ -337,6 +360,29 @@ class OpportunityManager:
                         except Exception as e:
                             logger.error(f"❌ Failed to log swing signal for {symbol}: {e}")
                         
+                        # 🧠 AUTO-TRACK SWING SIGNALS FOR REAL-TIME PNL MONITORING
+                        try:
+                            # Calculate position size for tracking (using $200 fixed capital)
+                            position_size = 200.0 / opportunity['entry_price']
+                            
+                            # Auto-track for enhanced real-time monitoring
+                            if hasattr(self, 'enhanced_signal_tracker') and self.enhanced_signal_tracker:
+                                tracking_id = await self.enhanced_signal_tracker.track_signal(
+                                    opportunity, 
+                                    position_size,
+                                    auto_tracked=True  # Mark as automatically tracked
+                                )
+                                opportunity['auto_tracking_id'] = tracking_id
+                                opportunity['auto_tracked'] = True
+                                
+                                logger.info(f"🎯 AUTO-TRACKED swing signal {symbol} with ID: {tracking_id[:8] if tracking_id else 'failed'}...")
+                            else:
+                                logger.warning(f"Enhanced signal tracker not available for auto-tracking {symbol}")
+                        except Exception as track_error:
+                            logger.warning(f"Failed to auto-track swing signal for {symbol}: {track_error}")
+                            # Don't fail signal generation if tracking fails
+                            pass
+                        
                         self.opportunities[symbol] = opportunity
                         processed_count += 1
                         
@@ -379,6 +425,29 @@ class OpportunityManager:
                                     
                             except Exception as e:
                                 logger.error(f"❌ Failed to log basic swing signal for {symbol}: {e}")
+                            
+                            # 🧠 AUTO-TRACK BASIC SWING SIGNALS FOR REAL-TIME PNL MONITORING
+                            try:
+                                # Calculate position size for tracking (using $200 fixed capital)
+                                position_size = 200.0 / basic_opportunity['entry_price']
+                                
+                                # Auto-track for enhanced real-time monitoring
+                                if hasattr(self, 'enhanced_signal_tracker') and self.enhanced_signal_tracker:
+                                    tracking_id = await self.enhanced_signal_tracker.track_signal(
+                                        basic_opportunity, 
+                                        position_size,
+                                        auto_tracked=True  # Mark as automatically tracked
+                                    )
+                                    basic_opportunity['auto_tracking_id'] = tracking_id
+                                    basic_opportunity['auto_tracked'] = True
+                                    
+                                    logger.info(f"🎯 AUTO-TRACKED basic swing signal {symbol} with ID: {tracking_id[:8] if tracking_id else 'failed'}...")
+                                else:
+                                    logger.warning(f"Enhanced signal tracker not available for auto-tracking {symbol}")
+                            except Exception as track_error:
+                                logger.warning(f"Failed to auto-track basic swing signal for {symbol}: {track_error}")
+                                # Don't fail signal generation if tracking fails
+                                pass
                             
                             self.opportunities[symbol] = basic_opportunity
                             processed_count += 1
