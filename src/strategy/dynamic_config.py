@@ -49,7 +49,8 @@ class StrategyConfig:
                 self.profiles = self._get_default_profiles()
         except Exception as e:
             logger.error(f"Error loading strategy profiles: {e}")
-        self.profiles = self._get_default_profiles()
+            # Only use defaults if loading failed
+            self.profiles = self._get_default_profiles()
         
     def set_profile(self, profile_name: str) -> None:
         """Set the current strategy profile."""

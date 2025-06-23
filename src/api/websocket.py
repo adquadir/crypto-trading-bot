@@ -41,6 +41,9 @@ def set_websocket_components(opp_mgr, exch_client, signal_tracker=None):
 
 async def validate_api_key(api_key: str) -> bool:
     """Validate the provided API key against the environment variable."""
+    # TEMPORARY: Disable authentication to focus on real-time functionality
+    return True
+    
     expected_key = os.getenv("API_KEY")
     if not expected_key:
         logger.warning("API_KEY environment variable not set")

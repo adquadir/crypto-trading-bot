@@ -26,6 +26,18 @@ class OpportunityManager:
         self.opportunities = {}
         self.symbols = []
         
+        # 🧠 LEARNING CRITERIA - Initialize as dataclass for consistency
+        from src.learning.automated_learning_manager import LearningCriteria
+        self.learning_criteria = LearningCriteria(
+            min_confidence=0.6,
+            min_risk_reward=1.2,
+            max_volatility=0.08,
+            stop_loss_tightness=0.02,
+            take_profit_distance=0.03,
+            min_volume_ratio=1.05,
+            disabled_strategies=[]
+        )
+        
         # Signal persistence and stability
         self.signal_cache = {}  # Cache signals with timestamps
         self.signal_lifetime = 300  # Signals valid for 5 minutes (300 seconds)
@@ -967,28 +979,38 @@ class OpportunityManager:
             # Signal generation logic
             signals = []
             
-            # Trend following signals (more liberal conditions)
-            if sma_5 > sma_10 > sma_20 and price_change_5 > 0.002:  # Uptrend (reduced from 0.5% to 0.2%)
-                confidence = 0.6 + (price_change_5 * 10) + (volume_ratio * 0.1)
-                confidence = min(0.95, max(0.5, confidence))
+            # 🧠 LEARNED CRITERIA: Get current learning criteria
+            min_confidence = self.learning_criteria.min_confidence
+            max_volatility = self.learning_criteria.max_volatility
+            min_volume_ratio = self.learning_criteria.min_volume_ratio
+            disabled_strategies = self.learning_criteria.disabled_strategies
+            
+            # Trend following signals (using learned criteria)
+            if sma_5 > sma_10 > sma_20 and price_change_5 > 0.002 and volatility <= max_volatility and volume_ratio >= min_volume_ratio:
+                strategy_name = 'trend_following'
+                if strategy_name not in disabled_strategies:
+                    confidence = min_confidence + (price_change_5 * 10) + (volume_ratio * 0.1)
+                    confidence = min(0.95, max(min_confidence, confidence))
                 
-                signals.append({
-                    'direction': 'LONG',
-                    'confidence': confidence,
-                    'reasoning': ['Uptrend detected', f'SMA alignment bullish', f'5-period momentum: {price_change_5:.1%}'],
-                    'strategy': 'trend_following'
-                })
+                    signals.append({
+                        'direction': 'LONG',
+                        'confidence': confidence,
+                        'reasoning': ['Uptrend detected', f'SMA alignment bullish', f'5-period momentum: {price_change_5:.1%}', f'Learned criteria applied'],
+                        'strategy': strategy_name
+                    })
                 
-            elif sma_5 < sma_10 < sma_20 and price_change_5 < -0.002:  # Downtrend (reduced from -0.5% to -0.2%)
-                confidence = 0.6 + (abs(price_change_5) * 10) + (volume_ratio * 0.1)
-                confidence = min(0.95, max(0.5, confidence))
-                
-                signals.append({
-                    'direction': 'SHORT',
-                    'confidence': confidence,
-                    'reasoning': ['Downtrend detected', f'SMA alignment bearish', f'5-period momentum: {price_change_5:.1%}'],
-                    'strategy': 'trend_following'
-                })
+            elif sma_5 < sma_10 < sma_20 and price_change_5 < -0.002 and volatility <= max_volatility and volume_ratio >= min_volume_ratio:
+                strategy_name = 'trend_following'
+                if strategy_name not in disabled_strategies:
+                    confidence = min_confidence + (abs(price_change_5) * 10) + (volume_ratio * 0.1)
+                    confidence = min(0.95, max(min_confidence, confidence))
+                    
+                    signals.append({
+                        'direction': 'SHORT',
+                        'confidence': confidence,
+                        'reasoning': ['Downtrend detected', f'SMA alignment bearish', f'5-period momentum: {price_change_5:.1%}', f'Learned criteria applied'],
+                        'strategy': strategy_name
+                    })
             
             # Mean reversion signals (more liberal conditions)
             distance_from_sma20 = (current_price - sma_20) / sma_20
@@ -1014,10 +1036,12 @@ class OpportunityManager:
                     'strategy': 'mean_reversion'
                 })
             
-            # Breakout signals (more liberal conditions)
-            if current_price > recent_high * 1.0005 and volume_ratio > 1.05:  # Breakout (reduced from 0.1% to 0.05% and volume from 20% to 5%)
-                confidence = 0.65 + (volume_ratio * 0.1)
-                confidence = min(0.9, max(0.5, confidence))
+                # Breakout signals (using learned criteria)
+            if current_price > recent_high * 1.0005 and volume_ratio >= min_volume_ratio and volatility <= max_volatility:
+                strategy_name = 'breakout'
+                if strategy_name not in disabled_strategies:
+                    confidence = min_confidence + 0.05 + (volume_ratio * 0.1)  # Small breakout bonus
+                    confidence = min(0.9, max(min_confidence, confidence))
                 
                 signals.append({
                     'direction': 'LONG',
@@ -1420,89 +1444,97 @@ class OpportunityManager:
             # Signal generation logic (more stable)
             signals = []
             
-            # Trend following signals (stable thresholds)
-            if sma_5 > sma_10 > sma_20 and price_change_5 > 0.003:  # Slightly higher threshold for stability
-                confidence = 0.65 + (price_change_5 * 8) + (volume_ratio * 0.05)  # Less sensitive
-                confidence = min(0.9, max(0.6, confidence))
+            # 🧠 LEARNED CRITERIA: Use dynamic thresholds from learning manager
+            min_confidence = self.learning_criteria.min_confidence
+            max_volatility = self.learning_criteria.max_volatility
+            min_volume_ratio = self.learning_criteria.min_volume_ratio
+            disabled_strategies = self.learning_criteria.disabled_strategies
+            
+            # Trend following signals (using learned thresholds)
+            if sma_5 > sma_10 > sma_20 and price_change_5 > 0.003 and volatility <= max_volatility:  # Use learned volatility
+                confidence = min_confidence + (price_change_5 * 8) + (volume_ratio * 0.05)  # Start from learned minimum
+                confidence = min(0.9, max(min_confidence, confidence))  # Respect learned minimum
                 
                 signals.append({
                     'direction': 'LONG',
                     'confidence': confidence,
-                    'reasoning': ['Stable uptrend detected', f'SMA alignment bullish', f'5-period momentum: {price_change_5:.1%}'],
+                    'reasoning': ['Stable uptrend detected', f'SMA alignment bullish', f'5-period momentum: {price_change_5:.1%}', '🧠 Learned criteria applied'],
                     'strategy': 'trend_following_stable'
                 })
                 
-            elif sma_5 < sma_10 < sma_20 and price_change_5 < -0.003:  # Stable downtrend
-                confidence = 0.65 + (abs(price_change_5) * 8) + (volume_ratio * 0.05)
-                confidence = min(0.9, max(0.6, confidence))
+            elif sma_5 < sma_10 < sma_20 and price_change_5 < -0.003 and volatility <= max_volatility:  # Use learned volatility
+                confidence = min_confidence + (abs(price_change_5) * 8) + (volume_ratio * 0.05)  # Start from learned minimum
+                confidence = min(0.9, max(min_confidence, confidence))  # Respect learned minimum
                 
                 signals.append({
                     'direction': 'SHORT',
                     'confidence': confidence,
-                    'reasoning': ['Stable downtrend detected', f'SMA alignment bearish', f'5-period momentum: {price_change_5:.1%}'],
+                    'reasoning': ['Stable downtrend detected', f'SMA alignment bearish', f'5-period momentum: {price_change_5:.1%}', '🧠 Learned criteria applied'],
                     'strategy': 'trend_following_stable'
                 })
             
-            # Mean reversion signals (stable)
+            # Mean reversion signals (using learned criteria)
             distance_from_sma20 = (current_price - sma_20) / sma_20
-            if distance_from_sma20 < -0.015 and volatility > 0.008:  # More conservative thresholds
-                confidence = 0.6 + (abs(distance_from_sma20) * 4) + (volatility * 1.5)
-                confidence = min(0.85, max(0.6, confidence))
+            if distance_from_sma20 < -0.015 and volatility <= max_volatility and volume_ratio >= min_volume_ratio:  # Use learned criteria
+                confidence = min_confidence + (abs(distance_from_sma20) * 4) + (volatility * 1.5)  # Start from learned minimum
+                confidence = min(0.85, max(min_confidence, confidence))  # Respect learned minimum
                 
                 signals.append({
                     'direction': 'LONG',
                     'confidence': confidence,
-                    'reasoning': ['Stable mean reversion', f'Price {distance_from_sma20:.1%} below SMA20', 'Oversold condition'],
+                    'reasoning': ['Stable mean reversion', f'Price {distance_from_sma20:.1%} below SMA20', 'Oversold condition', '🧠 Learned criteria applied'],
                     'strategy': 'mean_reversion_stable'
                 })
                 
-            elif distance_from_sma20 > 0.015 and volatility > 0.008:  # Stable overbought
-                confidence = 0.6 + (distance_from_sma20 * 4) + (volatility * 1.5)
-                confidence = min(0.85, max(0.6, confidence))
+            elif distance_from_sma20 > 0.015 and volatility <= max_volatility and volume_ratio >= min_volume_ratio:  # Use learned criteria  
+                confidence = min_confidence + (distance_from_sma20 * 4) + (volatility * 1.5)  # Start from learned minimum
+                confidence = min(0.85, max(min_confidence, confidence))  # Respect learned minimum
                 
                 signals.append({
                     'direction': 'SHORT',
                     'confidence': confidence,
-                    'reasoning': ['Stable mean reversion', f'Price {distance_from_sma20:.1%} above SMA20', 'Overbought condition'],
+                    'reasoning': ['Stable mean reversion', f'Price {distance_from_sma20:.1%} above SMA20', 'Overbought condition', '🧠 Learned criteria applied'],
                     'strategy': 'mean_reversion_stable'
                 })
             
-            # Breakout signals (stable)
-            if current_price > recent_high * 1.001 and volume_ratio > 1.1:  # Higher thresholds for stability
-                confidence = 0.7 + (volume_ratio * 0.05)
-                confidence = min(0.85, max(0.6, confidence))
+            # Breakout signals (using learned criteria)
+            if current_price > recent_high * 1.001 and volume_ratio >= min_volume_ratio and volatility <= max_volatility:  # Use learned criteria
+                confidence = min_confidence + 0.1 + (volume_ratio * 0.05)  # Start from learned minimum + breakout bonus
+                confidence = min(0.85, max(min_confidence, confidence))  # Respect learned minimum
                 
                 signals.append({
                     'direction': 'LONG',
                     'confidence': confidence,
-                    'reasoning': ['Stable breakout', f'Volume confirmation', f'Volume ratio: {volume_ratio:.1f}x'],
+                    'reasoning': ['Stable breakout', f'Volume confirmation', f'Volume ratio: {volume_ratio:.1f}x', '🧠 Learned criteria applied'],
                     'strategy': 'breakout_stable'
                 })
                 
-            elif current_price < recent_low * 0.999 and volume_ratio > 1.1:  # Stable breakdown
-                confidence = 0.7 + (volume_ratio * 0.05)
-                confidence = min(0.85, max(0.6, confidence))
+            elif current_price < recent_low * 0.999 and volume_ratio >= min_volume_ratio and volatility <= max_volatility:  # Use learned criteria
+                confidence = min_confidence + 0.1 + (volume_ratio * 0.05)  # Start from learned minimum + breakout bonus
+                confidence = min(0.85, max(min_confidence, confidence))  # Respect learned minimum
                 
                 signals.append({
                     'direction': 'SHORT',
                     'confidence': confidence,
-                    'reasoning': ['Stable breakdown', f'Volume confirmation', f'Volume ratio: {volume_ratio:.1f}x'],
+                    'reasoning': ['Stable breakdown', f'Volume confirmation', f'Volume ratio: {volume_ratio:.1f}x', '🧠 Learned criteria applied'],
                     'strategy': 'breakout_stable'
                 })
             
-            # Stable fallback signal (less random)
+            # Stable fallback signal (less random) - using learned criteria
             if not signals:
-                # Use stable symbol-based direction
-                direction = 'LONG' if hash(symbol) % 2 == 0 else 'SHORT'
-                confidence = 0.55 + (symbol_factor * 0.2) + (volatility * 3)
-                confidence = min(0.75, max(0.55, confidence))
-                
-                signals.append({
-                    'direction': direction,
-                    'confidence': confidence,
-                    'reasoning': ['Stable market signal', f'Symbol-based direction', 'Conservative signal'],
-                    'strategy': 'stable_fallback'
-                })
+                # Check if fallback strategy is disabled
+                if 'stable_fallback' not in disabled_strategies:
+                    # Use stable symbol-based direction
+                    direction = 'LONG' if hash(symbol) % 2 == 0 else 'SHORT'
+                    confidence = min_confidence + (symbol_factor * 0.2) + (volatility * 3)  # Start from learned minimum
+                    confidence = min(0.75, max(min_confidence, confidence))  # Respect learned minimum
+                    
+                    signals.append({
+                        'direction': direction,
+                        'confidence': confidence,
+                        'reasoning': ['Stable market signal', f'Symbol-based direction', 'Conservative signal', '🧠 Learned criteria applied'],
+                        'strategy': 'stable_fallback'
+                    })
             
             # Select best signal and apply orderbook pressure confirmation
             if not signals:
@@ -1547,21 +1579,41 @@ class OpportunityManager:
             
             if best_signal['direction'] == 'LONG':
                 entry_price = current_price
-                take_profit_distance = max(atr_estimate * tp_multiplier, min_price_movement * 2)
-                stop_loss_distance = max(atr_estimate * sl_multiplier, min_price_movement)
+                # 🧠 LEARNED CRITERIA: Use dynamic stop loss and take profit from learning manager
+                stop_loss_multiplier = self.learning_criteria.stop_loss_tightness * 100  # Convert to ATR multiplier
+                take_profit_multiplier = self.learning_criteria.take_profit_distance * 150  # Convert to ATR multiplier
+                
+                take_profit_distance = max(atr_estimate * take_profit_multiplier, min_price_movement * 2)
+                stop_loss_distance = max(atr_estimate * stop_loss_multiplier, min_price_movement)
                 take_profit = entry_price + take_profit_distance
                 stop_loss = entry_price - stop_loss_distance
             else:  # SHORT
                 entry_price = current_price
-                take_profit_distance = max(atr_estimate * tp_multiplier, min_price_movement * 2)
-                stop_loss_distance = max(atr_estimate * sl_multiplier, min_price_movement)
+                # 🧠 LEARNED CRITERIA: Use dynamic stop loss and take profit from learning manager
+                stop_loss_multiplier = self.learning_criteria.stop_loss_tightness * 100  # Convert to ATR multiplier
+                take_profit_multiplier = self.learning_criteria.take_profit_distance * 150  # Convert to ATR multiplier
+                
+                take_profit_distance = max(atr_estimate * take_profit_multiplier, min_price_movement * 2)
+                stop_loss_distance = max(atr_estimate * stop_loss_multiplier, min_price_movement)
                 take_profit = entry_price - take_profit_distance
                 stop_loss = entry_price + stop_loss_distance
             
             # Calculate risk/reward
             risk = abs(entry_price - stop_loss)
             reward = abs(take_profit - entry_price)
-            risk_reward = reward / risk if risk > 0 else 1.67
+            risk_reward = reward / risk if risk > 0 else 2.0
+            
+            # 🧠 LEARNED CRITERIA: Apply minimum risk/reward filter
+            min_risk_reward = self.learning_criteria.min_risk_reward
+            if risk_reward < min_risk_reward:
+                logger.debug(f"❌ Signal filtered out for {symbol}: R/R {risk_reward:.2f} < minimum {min_risk_reward:.2f}")
+                return None
+            
+            # 🧠 LEARNED CRITERIA: Check if strategy is disabled
+            strategy_name = best_signal.get('strategy', 'unknown')
+            if strategy_name in self.learning_criteria.disabled_strategies:
+                logger.debug(f"❌ Strategy {strategy_name} disabled by learning system for {symbol}")
+                return None
             
             # Ensure all values are valid
             entry_price = float(entry_price) if entry_price and not math.isnan(entry_price) else current_price
@@ -1895,9 +1947,10 @@ class OpportunityManager:
                 logger.debug(f"📊 SWING REJECTION LOG: {rejection_log}")
                 return None
             
-            # Calculate final consensus confidence (weighted average of winning votes)
+            # 🧠 LEARNED CRITERIA: Calculate final consensus confidence using learned minimum
+            min_confidence = self.learning_criteria.min_confidence
             consensus_confidence = sum(v['confidence'] for v in winning_votes) / len(winning_votes)
-            consensus_confidence = min(0.95, max(0.6, consensus_confidence))
+            consensus_confidence = min(0.95, max(min_confidence, consensus_confidence))  # Use learned minimum
             
             rejection_log["stage"] = "tp_sl_calculation"
             
@@ -3151,325 +3204,148 @@ class OpportunityManager:
             return opportunity
 
     def _analyze_market_and_generate_scalping_signal(self, symbol: str, market_data: Dict[str, Any], current_time: float) -> Optional[Dict[str, Any]]:
-        """
-        Generate precision scalping signals targeting 3-10% capital returns via leverage.
-        Focuses on small market moves (0.3-1.2%) with tight stops and high probability setups.
-        """
+        """Generate SCALPING signals with learned criteria integration."""
         try:
-            import math
-            klines_15m = market_data['klines_15m']
-            klines_1h = market_data['klines_1h']
-            if len(klines_15m) < 50 or len(klines_1h) < 12:  # Need more data for scalping analysis
+            # Handle both scalping (klines_15m) and regular (klines) data structures
+            klines = market_data.get('klines_15m') or market_data.get('klines')
+            if not klines or len(klines) < 30:
+                return None
+            
+            # 🧠 LEARNED CRITERIA: Get current learning criteria for scalping
+            min_confidence = self.learning_criteria.min_confidence
+            max_volatility = self.learning_criteria.max_volatility
+            min_volume_ratio = self.learning_criteria.min_volume_ratio
+            min_risk_reward = self.learning_criteria.min_risk_reward
+            disabled_strategies = self.learning_criteria.disabled_strategies
+            
+            # Extract price data for scalping analysis
+            opens = [float(k['open']) for k in klines[-30:]]
+            highs = [float(k['high']) for k in klines[-30:]]
+            lows = [float(k['low']) for k in klines[-30:]]
+            closes = [float(k['close']) for k in klines[-30:]]
+            volumes = [float(k['volume']) for k in klines[-30:]]
+            
+            current_price = closes[-1]
+            volatility = self._calculate_volatility(closes[-10:])  # Shorter period for scalping
+            volume_ratio = volumes[-1] / (sum(volumes[-5:]) / 5) if volumes else 1.0  # 5-period volume average
+            
+            # 🧠 LEARNED CRITERIA: Apply learned filters FIRST
+            if volatility > max_volatility:
+                logger.debug(f"❌ SCALP filtered out {symbol}: volatility {volatility:.3f} > {max_volatility:.3f}")
                 return None
                 
-            # Extract 15m price data for scalping precision
-            closes_15m = [float(k['close']) for k in klines_15m[-50:]]
-            highs_15m = [float(k['high']) for k in klines_15m[-50:]]
-            lows_15m = [float(k['low']) for k in klines_15m[-50:]]
-            volumes_15m = [float(k['volume']) for k in klines_15m[-50:]]
-            opens_15m = [float(k['open']) for k in klines_15m[-50:]]
-            
-            # Extract 1h data for trend confirmation
-            closes_1h = [float(k['close']) for k in klines_1h[-12:]]
-            highs_1h = [float(k['high']) for k in klines_1h[-12:]]
-            lows_1h = [float(k['low']) for k in klines_1h[-12:]]
-            
-            current_price = closes_15m[-1]
-            
-            # 1h trend confirmation (higher timeframe filter)
-            trend_1h_up = closes_1h[-1] > closes_1h[-3]  # Price above 3 hours ago
-            trend_1h_strength = (closes_1h[-1] - closes_1h[-6]) / closes_1h[-6] if len(closes_1h) >= 6 else 0
-            
-            # Scalping-specific indicators (15m timeframe for responsiveness)
-            sma_8 = sum(closes_15m[-8:]) / 8
-            sma_21 = sum(closes_15m[-21:]) / 21
-            ema_5 = self._calculate_ema(closes_15m, 5)
-            ema_13 = self._calculate_ema(closes_15m, 13)
-            
-            # Micro-momentum analysis (15m precision)
-            momentum_1 = (current_price - closes_15m[-2]) / closes_15m[-2] if len(closes_15m) > 1 else 0
-            momentum_3 = (current_price - closes_15m[-4]) / closes_15m[-4] if len(closes_15m) > 3 else 0
-            momentum_5 = (current_price - closes_15m[-6]) / closes_15m[-6] if len(closes_15m) > 5 else 0
-            
-            # Volume analysis using 15m data (NOT 24hr!)
-            current_volume = market_data.get('current_volume', 0)
-            avg_volume_recent = market_data.get('avg_volume_recent', 1)
-            volume_surge = current_volume / avg_volume_recent if avg_volume_recent > 0 else 1
-            
-            # Volatility (ATR) for tight stop calculations (15m timeframe)
-            atr = self._calculate_atr(highs_15m[-14:], lows_15m[-14:], closes_15m[-14:], 14)
-            volatility_pct = (atr / current_price) * 100
-            
-            # Range analysis for scalping conditions (15m)
-            current_range = (max(highs_15m[-5:]) - min(lows_15m[-5:])) / current_price
-            avg_range = sum([(highs_15m[i] - lows_15m[i]) / closes_15m[i] for i in range(-20, 0)]) / 20
-            range_expansion = current_range / avg_range if avg_range > 0 else 1
-            
-            # Support/Resistance for precise entries (15m data)
-            pivot_highs = self._find_pivot_highs(highs_15m[-20:], 2)
-            pivot_lows = self._find_pivot_lows(lows_15m[-20:], 2)
-            
-            # SCALPING SIGNAL GENERATION
-            scalping_signals = []
-            
-            # 1. MOMENTUM SCALP (quick trend continuation) with 1h trend confirmation
-            if (ema_5 > ema_13 and momentum_1 > 0.0003 and momentum_3 > 0.0008 and 
-                volume_surge > 1.1 and volatility_pct < 4.0 and trend_1h_up):  # Added 1h trend filter
-                
-                confidence = 0.75 + min(momentum_3 * 50, 0.15) + min((volume_surge - 1) * 0.1, 0.1)
-                
-                scalping_signals.append({
-                    'direction': 'LONG',
-                    'confidence': min(confidence, 0.95),
-                    'entry_type': 'momentum_scalp',
-                    'reasoning': [
-                        f'Momentum scalp: 3-period momentum {momentum_3*100:.3f}%',
-                        f'Volume surge: {volume_surge:.2f}x',
-                        f'EMA alignment bullish',
-                        f'Low volatility: {volatility_pct:.2f}%'
-                    ],
-                    'strategy': 'momentum_scalp'
-                })
-                
-            elif (ema_5 < ema_13 and momentum_1 < -0.0003 and momentum_3 < -0.0008 and 
-                  volume_surge > 1.1 and volatility_pct < 4.0 and not trend_1h_up):  # Added 1h trend filter
-                
-                confidence = 0.75 + min(abs(momentum_3) * 50, 0.15) + min((volume_surge - 1) * 0.1, 0.1)
-                
-                scalping_signals.append({
-                    'direction': 'SHORT',
-                    'confidence': min(confidence, 0.95),
-                    'entry_type': 'momentum_scalp',
-                    'reasoning': [
-                        f'Momentum scalp: 3-period momentum {momentum_3*100:.3f}%',
-                        f'Volume surge: {volume_surge:.2f}x',
-                        f'EMA alignment bearish',
-                        f'Low volatility: {volatility_pct:.2f}%'
-                    ],
-                    'strategy': 'momentum_scalp'
-                })
-            
-            # 2. MEAN REVERSION SCALP (bounce from moving average)
-            distance_from_sma8 = (current_price - sma_8) / sma_8
-            if (abs(distance_from_sma8) > 0.003 and abs(distance_from_sma8) < 0.008 and 
-                volume_surge > 1.1):  # Price stretched from SMA8 but not too far
-                
-                if distance_from_sma8 < 0:  # Below SMA8, expect bounce up
-                    confidence = 0.7 + min(abs(distance_from_sma8) * 100, 0.2)
-                    scalping_signals.append({
-                        'direction': 'LONG',
-                        'confidence': min(confidence, 0.9),
-                        'entry_type': 'mean_reversion_scalp',
-                        'reasoning': [
-                            f'Mean reversion: {distance_from_sma8*100:.2f}% below SMA8',
-                            f'Volume confirmation: {volume_surge:.2f}x',
-                            'Expecting bounce to SMA8'
-                        ],
-                        'strategy': 'mean_reversion_scalp'
-                    })
-                    
-                else:  # Above SMA8, expect pullback
-                    confidence = 0.7 + min(distance_from_sma8 * 100, 0.2)
-                    scalping_signals.append({
-                        'direction': 'SHORT',
-                        'confidence': min(confidence, 0.9),
-                        'entry_type': 'mean_reversion_scalp',
-                        'reasoning': [
-                            f'Mean reversion: {distance_from_sma8*100:.2f}% above SMA8',
-                            f'Volume confirmation: {volume_surge:.2f}x',
-                            'Expecting pullback to SMA8'
-                        ],
-                        'strategy': 'mean_reversion_scalp'
-                    })
-            
-            # 3. BREAKOUT SCALP (micro breakouts with volume)
-            if pivot_highs and current_price > max(pivot_highs) * 1.001 and volume_surge > 1.2:
-                confidence = 0.8 + min((volume_surge - 1.2) * 0.1, 0.15)
-                scalping_signals.append({
-                    'direction': 'LONG',
-                    'confidence': min(confidence, 0.95),
-                    'entry_type': 'micro_breakout',
-                    'reasoning': [
-                        f'Micro breakout above {max(pivot_highs):.6f}',
-                        f'Strong volume: {volume_surge:.2f}x',
-                        'Range expansion detected'
-                    ],
-                    'strategy': 'micro_breakout'
-                })
-                
-            elif pivot_lows and current_price < min(pivot_lows) * 0.999 and volume_surge > 1.2:
-                confidence = 0.8 + min((volume_surge - 1.2) * 0.1, 0.15)
-                scalping_signals.append({
-                    'direction': 'SHORT',
-                    'confidence': min(confidence, 0.95),
-                    'entry_type': 'micro_breakdown',
-                    'reasoning': [
-                        f'Micro breakdown below {min(pivot_lows):.6f}',
-                        f'Strong volume: {volume_surge:.2f}x',
-                        'Range breakdown confirmed'
-                    ],
-                    'strategy': 'micro_breakdown'
-                })
-            
-            # 4. VOLUME SPIKE SCALP (unusual volume with price movement)
-            if (volume_surge > 1.5 and abs(momentum_1) > 0.0005 and 
-                abs(momentum_3) > 0.001 and volatility_pct < 5.0):
-                
-                direction = 'LONG' if momentum_1 > 0 else 'SHORT'
-                confidence = 0.65 + min((volume_surge - 1.5) * 0.05, 0.25)
-                
-                scalping_signals.append({
-                    'direction': direction,
-                    'confidence': min(confidence, 0.9),
-                    'entry_type': 'volume_spike_scalp',
-                    'reasoning': [
-                        f'Volume spike: {volume_surge:.2f}x average',
-                        f'Price momentum: {momentum_1*100:.3f}%',
-                        'Institutional activity detected'
-                    ],
-                    'strategy': 'volume_spike_scalp'
-                })
-            
-            # Select best scalping signal
-            if not scalping_signals:
+            if volume_ratio < min_volume_ratio:
+                logger.debug(f"❌ SCALP filtered out {symbol}: volume ratio {volume_ratio:.2f} < {min_volume_ratio:.2f}")
                 return None
-                
-            best_signal = max(scalping_signals, key=lambda s: s['confidence'])
             
-            # SCALPING-SPECIFIC POSITION SIZING (CAPITAL-BASED TARGETS)
-            # Target: 2.5-10% return on capital via leverage
-            target_capital_return = 0.05  # 5% target (middle of 2.5-10% range)
+            # Generate scalping signal using micro-movements
+            # Look for breakout patterns on short timeframes
+            recent_highs = highs[-10:]
+            recent_lows = lows[-10:]
+            recent_closes = closes[-10:]
             
-            # For scalping: small market moves (0.3-1.2%) with higher leverage
-            target_market_move = 0.007  # 0.7% market move (middle of 0.3-1.2% range)
+            # Calculate EMAs for micro trends
+            ema_5 = self._calculate_ema(recent_closes, 5)
+            ema_10 = self._calculate_ema(recent_closes, 10)
             
-            # Calculate leverage needed: capital_return = market_move * leverage
-            # So leverage = capital_return / market_move
-            calculated_leverage = target_capital_return / target_market_move  # 5% / 0.7% = ~7x
-            max_leverage = 25  # Maximum safe leverage for scalping
-            optimal_leverage = min(max_leverage, max(5, calculated_leverage))  # Between 5x and 25x
+            # Micro breakout detection
+            resistance_level = max(recent_highs[-5:])
+            support_level = min(recent_lows[-5:])
             
-            required_market_move = target_market_move  # Use our scalping target
+            direction = None
+            entry_price = current_price
+            confidence = 0.5
+            scalping_type = "unknown"
             
-            # TIGHT SCALPING STOPS AND TARGETS
-            atr_multiplier = 0.5  # Tighter stops for scalping
-            
-            if best_signal['direction'] == 'LONG':
+            # LONG signal: price above EMA5, EMA5 > EMA10, breaking resistance
+            if (current_price > ema_5 and ema_5 > ema_10 and 
+                current_price > resistance_level * 1.001):  # 0.1% breakout
+                direction = "LONG"
                 entry_price = current_price
-                # Target based on required market movement for capital return
-                take_profit = entry_price * (1 + required_market_move)
-                stop_loss = entry_price - (atr * atr_multiplier)
+                take_profit = current_price * 1.005  # 0.5% profit target
+                stop_loss = current_price * 0.997   # 0.3% stop loss
+                confidence = min(0.8, min_confidence + 0.2)  # Boost confidence for breakouts
+                scalping_type = "micro_breakout"
                 
-            else:  # SHORT
-                entry_price = current_price  
-                take_profit = entry_price * (1 - required_market_move)
-                stop_loss = entry_price + (atr * atr_multiplier)
+            # SHORT signal: price below EMA5, EMA5 < EMA10, breaking support  
+            elif (current_price < ema_5 and ema_5 < ema_10 and
+                  current_price < support_level * 0.999):  # 0.1% breakdown
+                direction = "SHORT"
+                entry_price = current_price
+                take_profit = current_price * 0.995  # 0.5% profit target
+                stop_loss = current_price * 1.003   # 0.3% stop loss
+                confidence = min(0.8, min_confidence + 0.2)  # Boost confidence for breakouts
+                scalping_type = "micro_breakdown"
+                
+            # Momentum scalping: strong volume + price momentum
+            elif volume_ratio > 1.5:  # Strong volume
+                price_momentum = (current_price - closes[-5]) / closes[-5]
+                if abs(price_momentum) > 0.002:  # 0.2% momentum
+                    direction = "LONG" if price_momentum > 0 else "SHORT"
+                    entry_price = current_price
+                    if direction == "LONG":
+                        take_profit = current_price * 1.004  # 0.4% profit
+                        stop_loss = current_price * 0.998   # 0.2% stop
+                    else:
+                        take_profit = current_price * 0.996  # 0.4% profit
+                        stop_loss = current_price * 1.002   # 0.2% stop
+                    confidence = min(0.7, min_confidence + 0.1)
+                    scalping_type = "momentum_scalp"
             
-            # Calculate actual risk/reward and capital returns
-            risk = abs(entry_price - stop_loss)
-            reward = abs(take_profit - entry_price)
+            if not direction:
+                return None
+                
+            # Apply learned confidence filter
+            if confidence < min_confidence:
+                logger.debug(f"❌ SCALP filtered out {symbol}: confidence {confidence:.2f} < {min_confidence:.2f}")
+                return None
+            
+            # Calculate risk/reward
+            risk = abs(entry_price - stop_loss) / entry_price
+            reward = abs(take_profit - entry_price) / entry_price
             risk_reward = reward / risk if risk > 0 else 0
             
-            market_move_pct = (reward / entry_price) * 100
-            expected_capital_return = market_move_pct * optimal_leverage / 100
-            
-            # Only accept scalping signals with good risk/reward for capital targets
-            if risk_reward < 1.5:  # Minimum 1.5:1 for scalping
-                return None
-                
-            if expected_capital_return < 0.025:  # Minimum 2.5% capital return
+            # Apply learned risk/reward filter
+            if risk_reward < min_risk_reward:
+                logger.debug(f"❌ SCALP filtered out {symbol}: R/R {risk_reward:.2f} < {min_risk_reward:.2f}")
                 return None
             
-            # Calculate position sizing for different capital amounts
-            scalping_calcs = self._calculate_scalping_position_sizing(
-                entry_price, take_profit, stop_loss, optimal_leverage, expected_capital_return
-            )
+            # Calculate leverage for optimal capital returns (3-8% target)
+            target_return = 0.05  # 5% target capital return
+            optimal_leverage = target_return / reward if reward > 0 else 5
+            optimal_leverage = max(3, min(optimal_leverage, 20))  # Clamp between 3x-20x
             
             # Create scalping opportunity
             opportunity = {
                 'symbol': symbol,
-                'direction': best_signal['direction'],
+                'direction': direction,
                 'entry_price': entry_price,
-                'entry': entry_price,
                 'take_profit': take_profit,
                 'stop_loss': stop_loss,
-                'confidence': best_signal['confidence'],
-                'confidence_score': best_signal['confidence'],
-                
-                # SCALPING-SPECIFIC FIELDS
-                'scalping_type': best_signal['entry_type'],
-                'optimal_leverage': optimal_leverage,
-                'required_market_move_pct': required_market_move * 100,
-                'expected_capital_return_pct': expected_capital_return * 100,
-                'market_move_pct': market_move_pct,
-                'timeframe': '15m/1h',  # Scalping: 15m primary + 1h trend confirmation
-                
-                # Position sizing for different capital amounts
-                'capital_100': scalping_calcs['capital_100'],
-                'capital_500': scalping_calcs['capital_500'], 
-                'capital_1000': scalping_calcs['capital_1000'],
-                'capital_5000': scalping_calcs['capital_5000'],
-                
+                'confidence': confidence,
+                'strategy': f'scalping_{scalping_type}',
+                'scalping_type': scalping_type,
                 'risk_reward': risk_reward,
-                'current_volume': current_volume,  # Use 15m current volume instead of 24h
-                'volatility': volatility_pct,
-                'volume_surge': volume_surge,
-                'score': best_signal['confidence'],
-                'timestamp': int(current_time * 1000),
-                
-                # Strategy information
-                'strategy': f"scalping_{best_signal['strategy']}",
-                'strategy_type': 'precision_scalping',
-                'market_regime': self._determine_market_regime_simple(closes_15m, volumes_15m),
-                'regime': self._determine_market_regime_simple(closes_15m, volumes_15m).upper(),
-                
-                # Technical indicators for scalping
-                'indicators': {
-                    'ema_5': float(ema_5),
-                    'ema_13': float(ema_13),
-                    'sma_8': float(sma_8),
-                    'sma_21': float(sma_21),
-                    'atr': float(atr),
-                    'volatility_pct': float(volatility_pct),
-                    'volume_surge': float(volume_surge),
-                    'momentum_1': float(momentum_1),
-                    'momentum_3': float(momentum_3),
-                    'range_expansion': float(range_expansion)
-                },
-                
-                # Scalping reasoning
-                'reasoning': best_signal['reasoning'] + [
-                    f"Capital target: {expected_capital_return*100:.1f}% with {optimal_leverage:.1f}x leverage",
-                    f"Market move needed: {required_market_move*100:.2f}%",
-                    f"Risk/Reward: {risk_reward:.2f}:1",
-                    f"Scalping timeframes: 15m entry + 1h trend confirmation"
-                ],
-                
-                # Market data
-                'book_depth': 0.0,
-                'oi_trend': 0.0,
-                'volume_trend': float(volume_surge - 1.0),
-                'slippage': 0.001,  # Lower slippage assumption for scalping
-                'spread': float(0.0005),  # Tighter spreads expected
-                'data_freshness': 1.0,
-                
-                # Scalping metadata
-                'is_scalping_signal': True,
-                'scalping_version': 'precision_v1',
-                'signal_type': 'precision_scalping',
-                'trading_mode': 'scalping',
-                'price': entry_price,
-                'volume': current_volume,  # Use 15m current volume for scalping
-                'trend_1h_direction': 'UP' if trend_1h_up else 'DOWN',  # Include 1h trend info
-                'trend_1h_strength': trend_1h_strength,
-                'data_source': market_data.get('data_source', 'REAL_FUTURES_DATA'),
-                'is_real_data': market_data.get('is_real_data', True),
+                'optimal_leverage': optimal_leverage,
+                'expected_capital_return_pct': reward * optimal_leverage * 100,
+                'market_move_pct': reward * 100,
+                'volatility': volatility,
+                'volume_surge': volume_ratio,
+                'timeframe': '15m',
+                'timestamp': current_time,
+                'learning_applied': True,
+                'learned_criteria': {
+                    'min_confidence': min_confidence,
+                    'max_volatility': max_volatility,
+                    'min_volume_ratio': min_volume_ratio,
+                    'min_risk_reward': min_risk_reward
+                }
             }
             
             # Apply scalping-specific validation
-            opportunity = self._validate_scalping_signal(opportunity)
+            validated_opportunity = self._validate_scalping_signal(opportunity)
             
-            return opportunity
+            return validated_opportunity
             
         except Exception as e:
             logger.error(f"Error generating scalping signal for {symbol}: {e}")
@@ -4009,3 +3885,53 @@ class OpportunityManager:
         logger.debug(f"Returning {len(opportunities)} scalping opportunities: "
                     f"{len(active_signals)} active, {len(stale_signals)} stale")
         return opportunities
+
+    async def update_learning_criteria(self, criteria):
+        """🧠 APPLY LEARNED CRITERIA TO SIGNAL GENERATION - THE MISSING CONNECTION!"""
+        try:
+            from dataclasses import replace
+            
+            # Handle both dict and dataclass inputs for backward compatibility
+            if hasattr(self.learning_criteria, 'min_confidence'):
+                old_criteria = self.learning_criteria
+            else:
+                # Fallback if learning_criteria is somehow still a dict  
+                from src.learning.automated_learning_manager import LearningCriteria
+                old_criteria = LearningCriteria(
+                    min_confidence=getattr(self.learning_criteria, 'min_confidence', 0.6),
+                    min_risk_reward=getattr(self.learning_criteria, 'min_risk_reward', 1.2),
+                    max_volatility=getattr(self.learning_criteria, 'max_volatility', 0.08),
+                    stop_loss_tightness=getattr(self.learning_criteria, 'stop_loss_tightness', 0.02),
+                    take_profit_distance=getattr(self.learning_criteria, 'take_profit_distance', 0.03),
+                    min_volume_ratio=getattr(self.learning_criteria, 'min_volume_ratio', 1.05),
+                    disabled_strategies=getattr(self.learning_criteria, 'disabled_strategies', [])
+                )
+            
+            # Update criteria from learning manager - ensure it's always a dataclass
+            self.learning_criteria = criteria
+            
+            logger.info(f"🧠 LEARNING CRITERIA UPDATED:")
+            logger.info(f"   • Confidence: {old_criteria.min_confidence:.2f} → {self.learning_criteria.min_confidence:.2f}")
+            logger.info(f"   • Risk/Reward: {old_criteria.min_risk_reward:.1f} → {self.learning_criteria.min_risk_reward:.1f}")
+            logger.info(f"   • Max Volatility: {old_criteria.max_volatility:.2f} → {self.learning_criteria.max_volatility:.2f}")
+            logger.info(f"   • Stop Loss: {old_criteria.stop_loss_tightness:.3f} → {self.learning_criteria.stop_loss_tightness:.3f}")
+            logger.info(f"   • Volume Ratio: {old_criteria.min_volume_ratio:.2f} → {self.learning_criteria.min_volume_ratio:.2f}")
+            
+            if self.learning_criteria.disabled_strategies:
+                logger.info(f"   • Disabled Strategies: {self.learning_criteria.disabled_strategies}")
+            
+            # Clear cached signals to force regeneration with new criteria
+            self.opportunities.clear()
+            logger.info("🔄 Cleared signal cache - will regenerate with new learning criteria")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to update learning criteria: {e}")
+    
+    def get_current_learning_criteria(self):
+        """Get current learning criteria for debugging"""
+        try:
+            from dataclasses import replace
+            return replace(self.learning_criteria)
+        except Exception as e:
+            logger.error(f"Error copying learning criteria: {e}")
+            return self.learning_criteria

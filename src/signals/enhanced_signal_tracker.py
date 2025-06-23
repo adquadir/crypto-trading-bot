@@ -358,71 +358,75 @@ class EnhancedSignalTracker:
                 await asyncio.sleep(60)
     
     async def _update_price_cache(self):
-        """Update current prices for all monitored symbols"""
+        """Update current prices for all monitored symbols using robust proxy approach"""
         symbols = list(set(data['symbol'] for data in self.active_signals.values()))
         
         if not symbols:
             return
             
         try:
-            # Use Binance API to get current prices with proxy support
+            # Use the same robust proxy approach as DirectMarketDataFetcher
+            proxies = [
+                None,  # Direct connection first
+                'http://sp6qilmhb3:y2ok7Y3FEygM~rs7de@isp.decodo.com:10001',  # Working proxy
+            ]
+            
             symbol_prices = {}
             
-            # Get proxy configuration from environment (same as exchange client)
-            proxy_host = os.getenv('PROXY_HOST', '')
-            proxy_port = os.getenv('PROXY_PORT', '')
-            proxy_user = os.getenv('PROXY_USER', '')
-            proxy_pass = os.getenv('PROXY_PASS', '')
-            use_proxy = os.getenv('USE_PROXY', 'false').lower() == 'true'
-            
-            # Build proxy URL if configured
-            proxy_url = None
-            if use_proxy and proxy_host and proxy_port:
-                if proxy_user and proxy_pass:
-                    proxy_url = f"http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
-                else:
-                    proxy_url = f"http://{proxy_host}:{proxy_port}"
-            
-            # Create session with proxy support
-            connector = None
-            if proxy_url:
-                connector = aiohttp.TCPConnector()
-            
-            async with aiohttp.ClientSession(
-                connector=connector,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as session:
-                for symbol in symbols:
-                    try:
-                        url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
-                        headers = {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                        }
-                        
-                        # Make request with proxy if configured
-                        kwargs = {'headers': headers}
-                        if proxy_url:
-                            kwargs['proxy'] = proxy_url
-                        
-                        async with session.get(url, **kwargs) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                symbol_prices[symbol] = float(data['price'])
-                                logger.debug(f"📈 Updated price for {symbol}: ${data['price']}")
-                            else:
-                                logger.warning(f"⚠️ HTTP {response.status} for {symbol}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to get price for {symbol}: {e}")
-            
-            # Update cache and log results
+            for symbol in symbols:
+                price = await self._fetch_symbol_price_robust(symbol, proxies)
+                if price:
+                    symbol_prices[symbol] = price
+                    
+            # Update cache
             if symbol_prices:
                 self.price_cache.update(symbol_prices)
-                logger.info(f"💰 Price cache updated: {len(symbol_prices)} symbols")
+                self.last_price_update = datetime.now()
+                logger.debug(f"💰 Price cache updated: {len(symbol_prices)} symbols")
             else:
-                logger.warning(f"⚠️ No prices fetched for {len(symbols)} symbols")
-            
+                logger.warning("⚠️ No prices fetched for any symbols")
+                
         except Exception as e:
             logger.error(f"❌ Failed to update price cache: {e}")
+
+    async def _fetch_symbol_price_robust(self, symbol: str, proxies: list) -> Optional[float]:
+        """Fetch price for a symbol using robust proxy fallback"""
+        url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
+        
+        for proxy in proxies:
+            try:
+                timeout = aiohttp.ClientTimeout(total=5)
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                
+                async with aiohttp.ClientSession(
+                    timeout=timeout,
+                    headers=headers
+                ) as session:
+                    kwargs = {}
+                    if proxy:
+                        kwargs['proxy'] = proxy
+                    
+                    async with session.get(url, **kwargs) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            price = float(data['price'])
+                            logger.debug(f"✅ {symbol}: ${price:,.2f} (proxy: {proxy or 'direct'})")
+                            return price
+                        elif response.status == 451:
+                            logger.debug(f"🚫 {symbol}: Geo-blocked (HTTP 451) with {proxy or 'direct'}")
+                            continue
+                        else:
+                            logger.debug(f"❌ {symbol}: HTTP {response.status} with {proxy or 'direct'}")
+                            continue
+                            
+            except Exception as e:
+                logger.debug(f"❌ {symbol}: Error with {proxy or 'direct'} - {e}")
+                continue
+                
+        logger.warning(f"⚠️ Failed to fetch price for {symbol} with all proxies")
+        return None
     
     async def _check_signal_performance(self, signal_id: str, signal_data: Dict):
         """Check individual signal performance and update tracking"""

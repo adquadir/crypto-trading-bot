@@ -5,9 +5,11 @@ import asyncio
 import sys
 import os
 import time
-from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from datetime import datetime, timedelta
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from typing import Dict, List, Optional, Any
 import uvicorn
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -22,30 +24,36 @@ sys.path.append('src')
 # Setup logger
 logger = logging.getLogger(__name__)
 
-from market_data.exchange_client import ExchangeClient
-from strategy.strategy_manager import StrategyManager
-from risk.risk_manager import RiskManager
-from opportunity.opportunity_manager import OpportunityManager
-from utils.config import load_config
+# Import all components
+from src.market_data.exchange_client import ExchangeClient
+from src.strategy.strategy_manager import StrategyManager  
+from src.risk.risk_manager import RiskManager
+from src.opportunity.opportunity_manager import OpportunityManager
 from src.signals.enhanced_signal_tracker import enhanced_signal_tracker
+from src.learning.automated_learning_manager import AutomatedLearningManager
+from src.api.connection_manager import ConnectionManager
 
-# Import backtesting routes
-try:
-    from src.api.backtesting_routes import router as backtesting_router
-    BACKTESTING_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️ Backtesting routes not available: {e}")
-    backtesting_router = None
-    BACKTESTING_AVAILABLE = False
+# Import utilities
+from pydantic import BaseModel
+from src.utils.config import load_config
 
-# Import signal tracking routes
-try:
-    from src.api.trading_routes.signal_tracking_routes import router as signal_tracking_router
-    SIGNAL_TRACKING_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️ Signal tracking routes not available: {e}")
-    signal_tracking_router = None
-    SIGNAL_TRACKING_AVAILABLE = False
+# Setup logging
+import logging
+logger = logging.getLogger(__name__)
+
+# Import routing modules EXCEPT signal_tracking_routes
+from src.api.routes import router as base_router
+from src.api.websocket import router as websocket_router
+# backtesting_router will be imported conditionally below
+
+# Import signal tracking routes - DISABLED to fix duplicate performance endpoint
+# try:
+#     from src.api.trading_routes.signal_tracking_routes import router as signal_tracking_router
+#     SIGNAL_TRACKING_AVAILABLE = True
+# except ImportError as e:
+#     print(f"⚠️ Signal tracking routes not available: {e}")
+signal_tracking_router = None
+SIGNAL_TRACKING_AVAILABLE = False
 
 # Define strategy profiles (these would normally be loaded from database/config)
 DEFAULT_STRATEGY_PROFILES = [
@@ -163,6 +171,7 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://crypto_user:crypto_passwo
 
 # Global components
 opportunity_manager = None
+automated_learning_manager = None
 
 # Global variables for background processing
 _background_scan_task = None
@@ -210,6 +219,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Set BACKTESTING_AVAILABLE flag - Initialize before try block
+BACKTESTING_AVAILABLE = False
+backtesting_router = None
+
+try:
+    from src.api.backtesting_routes import router as backtesting_router
+    BACKTESTING_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Backtesting routes not available: {e}")
+    backtesting_router = None
+    BACKTESTING_AVAILABLE = False
+
 # Include backtesting routes if available
 if BACKTESTING_AVAILABLE and backtesting_router:
     app.include_router(backtesting_router)
@@ -217,12 +238,12 @@ if BACKTESTING_AVAILABLE and backtesting_router:
 else:
     print("⚠️ Backtesting routes disabled")
 
-# Include signal tracking routes if available
-if SIGNAL_TRACKING_AVAILABLE and signal_tracking_router:
-    app.include_router(signal_tracking_router)
-    print("✅ Signal tracking routes enabled")
-else:
-    print("⚠️ Signal tracking routes disabled")
+# Include signal tracking routes if available - DISABLED to fix duplicate performance endpoint
+# if SIGNAL_TRACKING_AVAILABLE and signal_tracking_router:
+#     app.include_router(signal_tracking_router)
+#     print("✅ Signal tracking routes enabled")
+# else:
+print("⚠️ Signal tracking routes disabled (duplicate performance endpoint fixed)")
 
 async def _background_scan_opportunities():
     """Background task to scan opportunities based on current mode."""
@@ -339,7 +360,7 @@ async def background_refresh():
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup."""
-    global opportunity_manager, _background_refresh_task
+    global opportunity_manager, automated_learning_manager, _background_refresh_task
     
     print("Initializing components...")
     
@@ -370,20 +391,39 @@ async def startup_event():
     opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker)
     await opportunity_manager.initialize()
     
+    # 🧠 INITIALIZE AUTOMATED LEARNING MANAGER - THE MISSING PIECE!
+    print("🧠 Initializing automated learning manager...")
+    try:
+        automated_learning_manager = AutomatedLearningManager(enhanced_signal_tracker, opportunity_manager)
+        await automated_learning_manager.start_learning_loop()
+        print("✅ Automated learning loop started - system will now learn from performance data!")
+        print("🔄 Learning checks every hour, adjusts criteria based on 0% win rate")
+    except Exception as e:
+        print(f"❌ Failed to initialize learning manager: {e}")
+        automated_learning_manager = None
+    
     # Start background refresh task and store reference for cleanup
     _background_refresh_task = asyncio.create_task(background_refresh())
     
     print("✓ All components initialized")
     print("🎯 Enhanced signal tracker monitoring real-time PnL")
+    if automated_learning_manager:
+        print("🧠 Automated learning manager optimizing signal criteria")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Proper cleanup on shutdown to prevent port binding issues."""
-    global _background_refresh_task, _background_scan_task, opportunity_manager
+    global _background_refresh_task, _background_scan_task, opportunity_manager, automated_learning_manager
     
     logger.info("🛑 Starting graceful shutdown...")
     
     try:
+        # Stop automated learning manager FIRST
+        if automated_learning_manager:
+            logger.info("🧠 Stopping automated learning manager...")
+            await automated_learning_manager.stop_learning_loop()
+            logger.info("✅ Automated learning manager stopped")
+        
         # Cancel background refresh task
         if _background_refresh_task and not _background_refresh_task.done():
             logger.info("🔄 Cancelling background refresh task...")
@@ -951,6 +991,25 @@ async def get_trading_status():
     try:
         ENABLE_REAL_TRADING = os.getenv('ENABLE_REAL_TRADING', 'false').lower() == 'true'
         
+        # Get current opportunity count for dashboard
+        try:
+            if opportunity_manager:
+                opportunities = opportunity_manager.get_opportunities()
+                total_opportunities = len(opportunities) if opportunities else 0
+            else:
+                total_opportunities = 0
+        except:
+            total_opportunities = 0
+        
+        # Get active signals count
+        try:
+            if enhanced_signal_tracker:
+                active_signals_count = len(enhanced_signal_tracker.active_signals)
+            else:
+                active_signals_count = 0
+        except:
+            active_signals_count = 0
+        
         return {
             "status": "success",
             "data": {
@@ -961,7 +1020,10 @@ async def get_trading_status():
                 "max_leverage": float(os.getenv('MAX_LEVERAGE', '10.0')),
                 "account_balance": 10000.0,  # Would be fetched from exchange in real mode
                 "available_balance": 9500.0,
-                "currency": "USDT"
+                "currency": "USDT",
+                "total_opportunities": total_opportunities,
+                "active_signals": active_signals_count,
+                "learning_enabled": automated_learning_manager.enabled if automated_learning_manager else False
             },
             "message": f"Trading mode: {'REAL' if ENABLE_REAL_TRADING else 'SIMULATION'}",
             "configuration": {
@@ -2218,33 +2280,211 @@ async def toggle_strategy(strategy_id: str):
 
 @app.get("/api/v1/trading/learning-insights")
 async def get_learning_insights():
-    """🧠 Get intelligent learning insights from dual-reality tracking"""
+    """🧠 Get dual-reality tracking insights - the truth about signal performance"""
+    if not enhanced_signal_tracker:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "message": "Enhanced signal tracker not available"}
+        )
+    
     try:
-        # Test basic response first
+        async with enhanced_signal_tracker.connection_pool.acquire() as conn:
+            # Dual-reality statistics
+            dual_reality_stats = await conn.fetchrow("""
+                SELECT 
+                    COUNT(*) as total_signals,
+                    COUNT(*) FILTER (WHERE stop_loss_hit = true) as sl_hits,
+                    COUNT(*) FILTER (WHERE fakeout_detected = true) as fakeouts,
+                    COUNT(*) FILTER (WHERE virtual_tp_hit = true) as virtual_tps,
+                    COUNT(*) FILTER (WHERE is_virtual_golden = true) as virtual_golden,
+                    COUNT(*) FILTER (WHERE learning_outcome = 'false_negative') as false_negatives,
+                    COUNT(*) FILTER (WHERE learning_outcome = 'would_have_won') as would_have_won,
+                    COALESCE(MAX(post_sl_peak_pct), 0) as max_post_sl_rebound
+                FROM enhanced_signals
+            """)
+            
+            # Fakeout examples 
+            fakeouts = await conn.fetch("""
+                SELECT signal_id, symbol, strategy, direction, 
+                       entry_price, stop_loss, take_profit,
+                       post_sl_peak_pct as rebound_pct,
+                       virtual_tp_hit, learning_outcome, created_at
+                FROM enhanced_signals 
+                WHERE fakeout_detected = true 
+                ORDER BY post_sl_peak_pct DESC
+                LIMIT 10
+            """)
+            
+            # Virtual golden signals
+            virtual_golden = await conn.fetch("""
+                SELECT signal_id, symbol, strategy, direction,
+                       virtual_max_profit_pct, created_at
+                FROM enhanced_signals 
+                WHERE is_virtual_golden = true
+                ORDER BY virtual_max_profit_pct DESC
+                LIMIT 10
+            """)
+            
+            # Virtual winners
+            virtual_winners = await conn.fetch("""
+                SELECT signal_id, symbol, strategy, direction,
+                       entry_price, virtual_max_profit_pct as would_have_made,
+                       actual_exit_reason, virtual_exit_reason, created_at
+                FROM enhanced_signals 
+                WHERE virtual_tp_hit = true
+                ORDER BY virtual_max_profit_pct DESC
+                LIMIT 10
+            """)
+        
+        stats = dict(dual_reality_stats)
+        
+        # Calculate corruption prevention percentage
+        corruption_prevention_rate = 0
+        if stats['sl_hits'] > 0:
+            corrupted_data_prevented = stats['fakeouts'] + stats['virtual_tps']
+            corruption_prevention_rate = (corrupted_data_prevented / stats['sl_hits']) * 100
+        
         return {
             "success": True,
             "dual_reality_enabled": True,
-            "debug_info": {
-                "database_url_exists": bool(DATABASE_URL),
-                "database_url_prefix": DATABASE_URL[:20] if DATABASE_URL else "None"
-            },
             "learning_insights": {
-                "fakeouts_detected": [],
-                "virtual_golden_signals": [],
-                "strategy_reality_comparison": [],
-                "learning_impact_metrics": {}
+                "fakeouts_detected": [
+                    {
+                        "signal_id": f["signal_id"][:8],
+                        "symbol": f["symbol"],
+                        "strategy": f["strategy"],
+                        "direction": f["direction"],
+                        "entry_price": float(f["entry_price"]) if f["entry_price"] else 0,
+                        "stop_loss": float(f["stop_loss"]) if f["stop_loss"] else 0,
+                        "rebound_pct": float(f["rebound_pct"]) if f["rebound_pct"] else 0,
+                        "virtual_tp_hit": f["virtual_tp_hit"],
+                        "learning_outcome": f["learning_outcome"],
+                        "created_at": f["created_at"].isoformat() if f["created_at"] else None
+                    } for f in fakeouts
+                ],
+                "virtual_golden_signals": [
+                    {
+                        "signal_id": v["signal_id"][:8],
+                        "symbol": v["symbol"],
+                        "strategy": v["strategy"],
+                        "direction": v["direction"],
+                        "profit_pct": float(v["virtual_max_profit_pct"]) if v["virtual_max_profit_pct"] else 0,
+                        "created_at": v["created_at"].isoformat() if v["created_at"] else None
+                    } for v in virtual_golden
+                ],
+                "virtual_winners": [
+                    {
+                        "signal_id": v["signal_id"][:8],
+                        "symbol": v["symbol"],
+                        "strategy": v["strategy"],
+                        "direction": v["direction"],
+                        "entry_price": float(v["entry_price"]) if v["entry_price"] else 0,
+                        "would_have_made_pct": float(v["would_have_made"]) if v["would_have_made"] else 0,
+                        "actual_exit": v["actual_exit_reason"],
+                        "virtual_exit": v["virtual_exit_reason"],
+                        "created_at": v["created_at"].isoformat() if v["created_at"] else None
+                    } for v in virtual_winners
+                ],
+                "learning_impact_metrics": {
+                    "corruption_prevention_rate_pct": round(corruption_prevention_rate, 1),
+                    "false_negatives_prevented": stats['fakeouts'] + stats['virtual_tps'],
+                    "learning_quality": "HIGH" if corruption_prevention_rate > 30 else "MEDIUM" if corruption_prevention_rate > 10 else "BUILDING"
+                }
             },
             "summary": {
-                "total_fakeouts": 0,
-                "total_virtual_golden": 0,
+                "total_signals": stats['total_signals'],
+                "total_fakeouts": stats['fakeouts'],
+                "total_virtual_golden": stats['virtual_golden'],
+                "total_virtual_tps": stats['virtual_tps'],
+                "false_negative_rate_pct": round(corruption_prevention_rate, 1),
+                "max_rebound_pct": float(stats['max_post_sl_rebound']) if stats['max_post_sl_rebound'] else 0,
                 "learning_mode_active": True,
-                "recommendation": "System is learning true market behavior, not just stop loss outcomes!"
+                "recommendation": f"System prevented {stats['fakeouts'] + stats['virtual_tps']} false negatives from corrupting learning data!"
             }
         }
-            
+        
     except Exception as e:
         logger.error(f"Error getting learning insights: {e}")
-        return {"success": False, "error": str(e), "debug": "learning_insights_endpoint"}
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+@app.get("/api/v1/learning/status")
+async def get_learning_status():
+    """Get current automated learning status"""
+    try:
+        if not automated_learning_manager:
+            return {
+                "status": "error",
+                "message": "Automated learning manager not initialized",
+                "data": {}
+            }
+        
+        learning_status = automated_learning_manager.get_learning_status()
+        
+        return {
+            "status": "success",
+            "message": "Learning status retrieved",
+            "data": learning_status
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to get learning status: {str(e)}",
+            "data": {}
+        }
+
+@app.post("/api/v1/learning/force-iteration")
+async def force_learning_iteration():
+    """Manually force a learning iteration for testing"""
+    try:
+        if not automated_learning_manager:
+            return {
+                "status": "error",
+                "message": "Automated learning manager not initialized"
+            }
+        
+        result = await automated_learning_manager.manual_force_learning_iteration()
+        
+        return {
+            "status": "success",
+            "message": "Learning iteration completed",
+            "data": result
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to force learning iteration: {str(e)}"
+        }
+
+@app.post("/api/v1/learning/emergency-recalibration")
+async def force_emergency_recalibration():
+    """Force emergency recalibration due to poor performance"""
+    try:
+        if not automated_learning_manager:
+            return {
+                "status": "error",
+                "message": "Automated learning manager not initialized"
+            }
+        
+        await automated_learning_manager.force_emergency_recalibration()
+        
+        return {
+            "status": "success",
+            "message": "Emergency recalibration completed - all criteria loosened and strategies re-enabled",
+            "data": automated_learning_manager.get_learning_status()
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to perform emergency recalibration: {str(e)}"
+        }
+
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 
