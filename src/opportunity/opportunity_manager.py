@@ -17,11 +17,12 @@ logger = logging.getLogger(__name__)
 class OpportunityManager:
     """Manages trading opportunities and their evaluation."""
     
-    def __init__(self, exchange_client: ExchangeClient, strategy_manager: StrategyManager, risk_manager: RiskManager):
+    def __init__(self, exchange_client: ExchangeClient, strategy_manager: StrategyManager, risk_manager: RiskManager, enhanced_signal_tracker=None):
         """Initialize the opportunity manager."""
         self.exchange_client = exchange_client
         self.strategy_manager = strategy_manager
         self.risk_manager = risk_manager
+        self.enhanced_signal_tracker = enhanced_signal_tracker
         self.opportunities = {}
         self.symbols = []
         
@@ -3715,6 +3716,29 @@ class OpportunityManager:
                                     
                             except Exception as e:
                                 logger.error(f"❌ Failed to log scalping signal for {symbol}: {e}")
+                            
+                            # 🚀 AUTO-TRACK EVERY VALIDATED SIGNAL IMMEDIATELY FOR LEARNING
+                            try:
+                                # Calculate position size for tracking (using $200 fixed capital)
+                                position_size = 200.0 / opportunity['entry_price']
+                                
+                                # Auto-track for learning without manual intervention
+                                if hasattr(self, 'enhanced_signal_tracker') and self.enhanced_signal_tracker:
+                                    tracking_id = await self.enhanced_signal_tracker.track_signal(
+                                        opportunity, 
+                                        position_size,
+                                        auto_tracked=True  # Mark as automatically tracked
+                                    )
+                                    opportunity['auto_tracking_id'] = tracking_id
+                                    opportunity['auto_tracked'] = True
+                                    
+                                    logger.info(f"🧠 AUTO-TRACKED scalping signal {symbol} with ID: {tracking_id}")
+                                else:
+                                    logger.warning(f"Enhanced signal tracker not available for auto-tracking {symbol}")
+                            except Exception as track_error:
+                                logger.warning(f"Failed to auto-track scalping signal for {symbol}: {track_error}")
+                                # Don't fail signal generation if tracking fails
+                                pass
                             
                             # Store scalping signal with market-aware lifecycle
                             signal_id = opportunity['signal_id']  # Use the ID we created above

@@ -50,10 +50,11 @@ const Scalping = () => {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [summary, setSummary] = useState(null);
-  const [executing, setExecuting] = useState(false);
+  const [executingSignals, setExecutingSignals] = useState(new Set());
   const [executedTrades, setExecutedTrades] = useState(new Set());
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [tradingStatus, setTradingStatus] = useState(null);
+  const [enteringAllTrades, setEnteringAllTrades] = useState(false);
 
   useEffect(() => {
     fetchScalpingSignals();
@@ -110,7 +111,8 @@ const Scalping = () => {
   };
 
   const handleEnterTrade = async (signal) => {
-    setExecuting(true);
+    const signalId = signal.signal_id || signal.symbol;
+    setExecutingSignals(prev => new Set([...prev, signalId]));
     
     try {
       const tradeRequest = {
@@ -123,7 +125,7 @@ const Scalping = () => {
         strategy: signal.scalping_type || 'scalping'
       };
 
-      const response = await fetch('/api/v1/trading/execute_manual_trade', {
+      const response = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.EXECUTE_MANUAL_TRADE}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -134,7 +136,7 @@ const Scalping = () => {
       const result = await response.json();
       
       if (result.status === 'success') {
-        setExecutedTrades(prev => new Set([...prev, signal.signal_id || signal.symbol]));
+        setExecutedTrades(prev => new Set([...prev, signalId]));
         setSnackbar({
           open: true,
           message: `Trade entered for ${signal.symbol}! ${result.message}`,
@@ -151,7 +153,43 @@ const Scalping = () => {
         severity: 'error'
       });
     } finally {
-      setExecuting(false);
+      setExecutingSignals(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(signalId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleEnterAllTrades = async () => {
+    setEnteringAllTrades(true);
+    try {
+      const response = await axios.post(`${config.API_BASE_URL}/api/v1/trading/enter-all-trades`);
+      
+      if (response.data.status === 'success') {
+        const { entered_trades, failed_trades, total_expected_capital, avg_expected_return } = response.data.data;
+        
+        // Mark all entered trades as executed
+        const enteredSymbols = response.data.data.entered_details.map(trade => trade.symbol);
+        setExecutedTrades(prev => new Set([...prev, ...enteredSymbols]));
+        
+        setSnackbar({
+          open: true,
+          message: `🎯 Bulk Entry Complete! ${entered_trades} trades entered, ${failed_trades} failed. Expected capital: $${total_expected_capital.toFixed(0)}, Avg return: ${avg_expected_return.toFixed(1)}%`,
+          severity: 'success'
+        });
+      } else {
+        throw new Error(response.data.message || 'Bulk entry failed');
+      }
+    } catch (error) {
+      console.error('Error entering all trades:', error);
+      setSnackbar({
+        open: true,
+        message: `Failed to enter all trades: ${error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setEnteringAllTrades(false);
     }
   };
 
@@ -509,9 +547,9 @@ const Scalping = () => {
               variant="contained"
               color={signal.direction === 'LONG' ? 'success' : 'error'}
               size="small"
-              startIcon={executing ? <CircularProgress size={16} color="inherit" /> : getDirectionIcon(signal.direction)}
+              startIcon={executingSignals.has(signal.signal_id || signal.symbol) ? <CircularProgress size={16} color="inherit" /> : getDirectionIcon(signal.direction)}
               onClick={() => handleEnterTrade(signal)}
-              disabled={executing || executedTrades.has(signal.signal_id || signal.symbol)}
+              disabled={executingSignals.has(signal.signal_id || signal.symbol) || executedTrades.has(signal.signal_id || signal.symbol)}
               sx={{ 
                 flex: 1,
                 fontWeight: 'bold',
@@ -520,7 +558,7 @@ const Scalping = () => {
             >
               {executedTrades.has(signal.signal_id || signal.symbol) 
                 ? 'Trade Entered' 
-                : executing 
+                : executingSignals.has(signal.signal_id || signal.symbol) 
                   ? 'Entering...' 
                   : `Enter ${signal.direction} Trade`
               }
@@ -693,23 +731,41 @@ const Scalping = () => {
             )}
           </Box>
           <Typography variant={isMobile ? "body2" : "body1"} color="textSecondary">
-            {isMobile ? '3-10% Capital Returns' : '3-10% Capital Returns via Precise Leverage • 15m/1h Timeframes'}
+            {isMobile ? 'Auto-Learning Mode Active' : 'Auto-Learning Mode: All signals tracked automatically • Click "Enter Trade" for actual trading intent'}
           </Typography>
           {tradingStatus && !tradingStatus.real_trading_enabled && (
             <Typography variant="caption" color="warning.main" display="block" mt={0.5}>
-              ⚠️ Simulation Mode Active - No real money at risk
+              ⚠️ Demo Mode: "Enter Trade" = Trading intent tracking only (no real money)
+            </Typography>
+          )}
+          {tradingStatus && tradingStatus.real_trading_enabled && (
+            <Typography variant="caption" color="success.main" display="block" mt={0.5}>
+              🚨 Real Trading Mode: "Enter Trade" = ACTUAL ORDERS with real money!
             </Typography>
           )}
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshIcon />}
-          onClick={handleRefresh}
-          disabled={refreshing}
-          size={isMobile ? "small" : "medium"}
-        >
-          {isMobile ? (refreshing ? '...' : 'Refresh') : (refreshing ? 'Refreshing...' : 'Refresh')}
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="contained"
+            color="success" 
+            startIcon={enteringAllTrades ? <CircularProgress size={16} color="inherit" /> : <FlashIcon />}
+            onClick={handleEnterAllTrades}
+            disabled={enteringAllTrades || !signals.length}
+            size={isMobile ? "small" : "medium"}
+            sx={{ fontWeight: 'bold' }}
+          >
+            {isMobile ? (enteringAllTrades ? '...' : 'Enter All') : (enteringAllTrades ? 'Entering All...' : 'Enter All Trades')}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={refreshing ? <CircularProgress size={16} /> : <RefreshIcon />}
+            onClick={handleRefresh}
+            disabled={refreshing}
+            size={isMobile ? "small" : "medium"}
+          >
+            {isMobile ? (refreshing ? '...' : 'Refresh') : (refreshing ? 'Refreshing...' : 'Refresh')}
+          </Button>
+        </Stack>
       </Box>
 
       {/* Summary Stats */}

@@ -57,6 +57,12 @@ class EnhancedSignalTracker:
         self.connection_pool = None
         self.enabled = os.getenv('ENABLE_SIGNAL_TRACKING', 'true').lower() == 'true'
         
+        # Dual Reality Tracking Configuration
+        self.learning_ignore_stop_loss = os.getenv('LEARNING_IGNORE_STOP_LOSS', 'true').lower() == 'true'
+        self.dual_reality_tracking = os.getenv('DUAL_REALITY_TRACKING', 'true').lower() == 'true'
+        self.virtual_trade_max_duration = int(os.getenv('VIRTUAL_TRADE_MAX_DURATION', '120'))  # minutes
+        self.track_post_sl_performance = os.getenv('TRACK_POST_SL_PERFORMANCE', 'true').lower() == 'true'
+        
         # Active signal monitoring
         self.active_signals = {}  # signal_id -> signal_data
         self.monitoring_task = None
@@ -120,13 +126,27 @@ class EnhancedSignalTracker:
                     risk_reward_ratio DECIMAL(10,4),
                     position_size DECIMAL(20,8),
                     
-                    -- Performance Targets
+                    -- 🧠 DUAL REALITY TRACKING - Performance Targets
                     target_3pct_hit BOOLEAN DEFAULT FALSE,
                     target_5pct_hit BOOLEAN DEFAULT FALSE,
                     stop_loss_hit BOOLEAN DEFAULT FALSE,
                     time_to_3pct_minutes INTEGER,
                     time_to_5pct_minutes INTEGER,
                     time_to_stop_minutes INTEGER,
+                    
+                    -- 🎯 VIRTUAL PERFORMANCE (True Learning Data)
+                    virtual_3pct_hit BOOLEAN DEFAULT FALSE,
+                    virtual_5pct_hit BOOLEAN DEFAULT FALSE,
+                    virtual_tp_hit BOOLEAN DEFAULT FALSE,
+                    virtual_max_profit_pct DECIMAL(10,6),
+                    virtual_time_to_tp_minutes INTEGER,
+                    post_sl_peak_pct DECIMAL(10,6),  -- How high did it go AFTER stop loss?
+                    fakeout_detected BOOLEAN DEFAULT FALSE,  -- SL hit but then went to TP
+                    
+                    -- 📊 REALITY vs VIRTUAL COMPARISON
+                    actual_exit_reason VARCHAR(20),  -- 'stop_loss', 'take_profit', 'expired'
+                    virtual_exit_reason VARCHAR(20), -- What would have happened
+                    learning_outcome VARCHAR(50),    -- 'false_negative', 'true_positive', etc.
                     
                     -- Max Performance
                     max_profit_pct DECIMAL(10,6),
@@ -136,6 +156,7 @@ class EnhancedSignalTracker:
                     -- Status
                     status VARCHAR(20) DEFAULT 'active',
                     is_golden_signal BOOLEAN DEFAULT FALSE,
+                    is_virtual_golden BOOLEAN DEFAULT FALSE,  -- Would have been golden without SL
                     final_pnl_pct DECIMAL(10,6),
                     
                     -- Metadata
@@ -216,7 +237,9 @@ class EnhancedSignalTracker:
         self,
         signal: Dict[str, Any],
         position_size: float = None,
-        market_context: Dict[str, Any] = None
+        market_context: Dict[str, Any] = None,
+        auto_tracked: bool = False,
+        manual_execution: bool = False
     ) -> str:
         """
         Start tracking a new signal with real-time monitoring
@@ -236,7 +259,7 @@ class EnhancedSignalTracker:
             reward = abs(tp - entry) if tp != 0 else 0
             risk_reward = reward / risk if risk > 0 else 0
             
-            # Store in database
+            # Store in database with auto-tracking info
             async with self.connection_pool.acquire() as conn:
                 await conn.execute("""
                     INSERT INTO enhanced_signals (
@@ -256,6 +279,14 @@ class EnhancedSignalTracker:
                     risk_reward,
                     position_size or 0
                 )
+                
+                # Log auto-tracking status
+                if auto_tracked:
+                    logger.info(f"🤖 AUTO-TRACKED: {signal.get('symbol')} {signal.get('direction')} (ID: {signal_id[:8]}...)")
+                elif manual_execution:
+                    logger.info(f"👤 MANUAL EXECUTION: {signal.get('symbol')} {signal.get('direction')} (ID: {signal_id[:8]}...)")
+                else:
+                    logger.info(f"📊 TRACKED: {signal.get('symbol')} {signal.get('direction')} (ID: {signal_id[:8]}...)")
             
             # Add to active monitoring
             self.active_signals[signal_id] = {
@@ -386,7 +417,7 @@ class EnhancedSignalTracker:
         await self._check_golden_signal(signal_id, signal_data, pnl_pct)
     
     async def _check_targets(self, signal_id: str, signal_data: Dict, pnl_pct: float, current_price: float):
-        """Check if signal hit any targets"""
+        """Check if signal hit any targets - WITH DUAL REALITY TRACKING"""
         targets = signal_data['targets_hit']
         entry_time = signal_data['entry_time']
         current_time = datetime.now()
@@ -394,22 +425,41 @@ class EnhancedSignalTracker:
         
         async with self.connection_pool.acquire() as conn:
             updates = []
+            virtual_updates = []
             
+            # 🎯 ACTUAL PERFORMANCE (What really happened with SL)
             # Check 3% target
             if not targets['3pct'] and pnl_pct >= 0.03:
                 targets['3pct'] = True
                 updates.append(("target_3pct_hit = TRUE", f"time_to_3pct_minutes = {minutes_elapsed}"))
+                virtual_updates.append(("virtual_3pct_hit = TRUE", f"virtual_time_to_tp_minutes = {minutes_elapsed}"))
                 logger.info(f"🎯 3% target hit: {signal_data['symbol']} in {minutes_elapsed}m")
             
             # Check 5% target
             if not targets['5pct'] and pnl_pct >= 0.05:
                 targets['5pct'] = True
                 updates.append(("target_5pct_hit = TRUE", f"time_to_5pct_minutes = {minutes_elapsed}"))
+                virtual_updates.append(("virtual_5pct_hit = TRUE", f"virtual_time_to_tp_minutes = {minutes_elapsed}"))
                 logger.info(f"🚀 5% target hit: {signal_data['symbol']} in {minutes_elapsed}m")
             
-            # Check stop loss
-            stop_loss = signal_data['stop_loss']
+            # Check take profit
+            take_profit = signal_data['take_profit']
             direction = signal_data['direction']
+            
+            tp_hit = False
+            if direction == 'LONG' and current_price >= take_profit:
+                tp_hit = True
+            elif direction == 'SHORT' and current_price <= take_profit:
+                tp_hit = True
+                
+            if not targets.get('take_profit', False) and tp_hit:
+                targets['take_profit'] = True
+                updates.append(("actual_exit_reason = 'take_profit'", f"time_to_3pct_minutes = {minutes_elapsed}"))
+                virtual_updates.append(("virtual_tp_hit = TRUE", "virtual_exit_reason = 'take_profit'"))
+                logger.info(f"💰 Take profit hit: {signal_data['symbol']} in {minutes_elapsed}m")
+            
+            # 🧠 INTELLIGENT STOP LOSS HANDLING
+            stop_loss = signal_data['stop_loss']
             
             stop_hit = False
             if direction == 'LONG' and current_price <= stop_loss:
@@ -420,24 +470,73 @@ class EnhancedSignalTracker:
             if not targets['stop_loss'] and stop_hit:
                 targets['stop_loss'] = True
                 updates.append(("stop_loss_hit = TRUE", f"time_to_stop_minutes = {minutes_elapsed}"))
-                signal_data['completed'] = True
-                logger.info(f"🛑 Stop loss hit: {signal_data['symbol']} in {minutes_elapsed}m")
+                updates.append(("actual_exit_reason = 'stop_loss'", ""))
+                
+                # 🎯 DUAL REALITY: Don't mark as completed if learning mode enabled
+                if self.learning_ignore_stop_loss:
+                    logger.info(f"🧠 LEARNING MODE: SL hit on {signal_data['symbol']} but continuing virtual tracking...")
+                    signal_data['stop_loss_time'] = current_time
+                    signal_data['learning_mode'] = True
+                    # DON'T set completed = True - keep tracking!
+                else:
+                    signal_data['completed'] = True
+                    logger.info(f"🛑 Stop loss hit: {signal_data['symbol']} in {minutes_elapsed}m - TRADE CLOSED")
             
-            # Apply updates
-            if updates:
+            # 🔍 POST-STOP-LOSS FAKEOUT DETECTION
+            if signal_data.get('learning_mode', False) and signal_data.get('stop_loss_time'):
+                sl_time = signal_data['stop_loss_time']
+                time_since_sl = (current_time - sl_time).total_seconds() / 60
+                
+                # Check if price rebounded after stop loss (FAKEOUT!)
+                if direction == 'LONG' and current_price > signal_data['entry_price']:
+                    rebound_pct = (current_price - stop_loss) / signal_data['entry_price']
+                    virtual_updates.append((f"post_sl_peak_pct = {rebound_pct}", "fakeout_detected = TRUE"))
+                    virtual_updates.append(("learning_outcome = 'false_negative'", ""))
+                    logger.info(f"🔥 FAKEOUT DETECTED: {signal_data['symbol']} rebounded {rebound_pct:.1%} after SL!")
+                    
+                elif direction == 'SHORT' and current_price < signal_data['entry_price']:
+                    rebound_pct = (stop_loss - current_price) / signal_data['entry_price']
+                    virtual_updates.append((f"post_sl_peak_pct = {rebound_pct}", "fakeout_detected = TRUE"))
+                    virtual_updates.append(("learning_outcome = 'false_negative'", ""))
+                    logger.info(f"🔥 FAKEOUT DETECTED: {signal_data['symbol']} rebounded {rebound_pct:.1%} after SL!")
+                
+                # Check if virtual take profit would have been hit
+                if tp_hit:
+                    virtual_updates.append(("virtual_tp_hit = TRUE", "virtual_exit_reason = 'take_profit'"))
+                    virtual_updates.append(("learning_outcome = 'would_have_won'", ""))
+                    logger.info(f"💡 VIRTUAL TP: {signal_data['symbol']} would have hit TP after SL - LEARNING!")
+                
+                # Complete virtual tracking after max duration
+                if time_since_sl > self.virtual_trade_max_duration:
+                    signal_data['completed'] = True
+                    virtual_updates.append(("virtual_exit_reason = 'expired'", ""))
+                    logger.info(f"⏰ Virtual tracking completed for {signal_data['symbol']} after {self.virtual_trade_max_duration}m")
+            
+            # 🎯 VIRTUAL GOLDEN SIGNAL DETECTION (Without SL interference)
+            if signal_data.get('learning_mode', False) and pnl_pct >= 0.03 and minutes_elapsed <= 60:
+                virtual_updates.append(("is_virtual_golden = TRUE", ""))
+                logger.info(f"🌟 VIRTUAL GOLDEN: {signal_data['symbol']} would be golden without SL!")
+            
+            # Apply all updates
+            all_updates = updates + virtual_updates
+            if all_updates:
                 update_clauses = []
-                for update_pair in updates:
-                    update_clauses.extend(update_pair)
+                for update_pair in all_updates:
+                    if isinstance(update_pair, tuple) and len(update_pair) >= 1:
+                        update_clauses.append(update_pair[0])
+                        if len(update_pair) > 1 and update_pair[1]:
+                            update_clauses.append(update_pair[1])
                 
                 update_sql = f"""
                     UPDATE enhanced_signals 
                     SET {', '.join(update_clauses)},
                         max_profit_pct = $2,
+                        virtual_max_profit_pct = $3,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE signal_id = $1
                 """
                 
-                await conn.execute(update_sql, signal_id, signal_data['max_profit'])
+                await conn.execute(update_sql, signal_id, signal_data['max_profit'], pnl_pct)
     
     async def _take_interval_snapshots(self, signal_id: str, signal_data: Dict, current_price: float, pnl_pct: float):
         """Take performance snapshots at specific intervals"""

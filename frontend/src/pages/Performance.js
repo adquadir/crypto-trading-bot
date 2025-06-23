@@ -59,16 +59,32 @@ const Performance = () => {
         axios.get(`${config.API_BASE_URL}/api/v1/signals/adaptive-assessment`)
       ]);
 
-      if (performanceRes.data.status === 'success') {
-        setPerformanceData(performanceRes.data.data);
+      // Handle performance data - check if it has performance_metrics or different structure
+      if (performanceRes.data.success || performanceRes.data.status === 'success') {
+        const perfData = performanceRes.data.data;
+        if (perfData && perfData.performance_metrics) {
+          // Transform the actual API response to expected format
+          const transformedData = {
+            overall: {
+              total_signals: perfData.performance_metrics.total_signals,
+              signals_3pct: Math.round(perfData.performance_metrics.total_signals * perfData.performance_metrics.win_rate),
+              golden_signals: perfData.performance_metrics.winning_signals || 0,
+              avg_time_to_3pct: perfData.performance_metrics.avg_duration_minutes || 0
+            },
+            by_strategy: [] // Will be populated if available
+          };
+          setPerformanceData(transformedData);
+        } else if (perfData) {
+          setPerformanceData(perfData);
+        }
       }
       
       if (goldenRes.data.status === 'success') {
-        setGoldenSignals(goldenRes.data.data);
+        setGoldenSignals(goldenRes.data.data || []);
       }
       
       if (liveRes.data.status === 'success') {
-        setLiveTracking(liveRes.data.data);
+        setLiveTracking(liveRes.data.data || {});
       }
       
       if (adaptiveRes.data.status === 'success') {
@@ -166,7 +182,7 @@ const Performance = () => {
                   <Card>
                     <CardContent sx={{ textAlign: 'center' }}>
                       <Typography variant="h4" color="success.main">
-                        {(((performanceData.overall?.signals_3pct || 0) / Math.max(performanceData.overall?.total_signals || 1, 1)) * 100).toFixed(1)}%
+                        {((performanceData.overall?.signals_3pct || 0) / Math.max(performanceData.overall?.total_signals || 1, 1) * 100).toFixed(1)}%
                       </Typography>
                       <Typography variant="body2" color="textSecondary">
                         3% Hit Rate
@@ -319,7 +335,7 @@ const Performance = () => {
       )}
 
       {/* Live Tracking Tab */}
-      {activeTab === 2 && liveTracking && (
+      {activeTab === 2 && (
         <Grid container spacing={3}>
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
@@ -328,28 +344,28 @@ const Performance = () => {
               </Typography>
               <Grid container spacing={2} mb={3}>
                 <Grid item xs={12} sm={4}>
-                  <Card>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="primary">
-                        {liveTracking.active_signals_count}
-                      </Typography>
-                      <Typography variant="body2" color="textSecondary">
-                        Active Signals
-                      </Typography>
-                    </CardContent>
-                  </Card>
+                                      <Card>
+                      <CardContent sx={{ textAlign: 'center' }}>
+                        <Typography variant="h4" color="primary">
+                          {liveTracking?.active_signals_count || 0}
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          Active Signals
+                        </Typography>
+                      </CardContent>
+                    </Card>
                 </Grid>
                 <Grid item xs={12} sm={4}>
-                  <Card>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="info.main">
-                        {liveTracking.price_cache_symbols}
-                      </Typography>
-                      <Typography variant="body2" color="textSecondary">
-                        Monitored Symbols
-                      </Typography>
-                    </CardContent>
-                  </Card>
+                                      <Card>
+                      <CardContent sx={{ textAlign: 'center' }}>
+                        <Typography variant="h4" color="info.main">
+                          {liveTracking?.price_cache_symbols || 0}
+                        </Typography>
+                        <Typography variant="body2" color="textSecondary">
+                          Monitored Symbols
+                        </Typography>
+                      </CardContent>
+                    </Card>
                 </Grid>
                 <Grid item xs={12} sm={4}>
                   <Card>
@@ -366,7 +382,7 @@ const Performance = () => {
               </Grid>
 
               {/* Active Signals */}
-              {liveTracking.active_signals?.length > 0 && (
+              {liveTracking?.active_signals?.length > 0 && (
                 <TableContainer>
                   <Table>
                     <TableHead>
@@ -381,7 +397,7 @@ const Performance = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {liveTracking.active_signals.map((signal, index) => (
+                      {(liveTracking?.active_signals || []).map((signal, index) => (
                         <TableRow key={index}>
                           <TableCell>{signal.symbol}</TableCell>
                           <TableCell>{signal.strategy}</TableCell>
@@ -431,7 +447,7 @@ const Performance = () => {
       )}
 
       {/* Adaptive Assessment Tab */}
-      {activeTab === 3 && adaptiveAssessment && (
+      {activeTab === 3 && (
         <Grid container spacing={3}>
           <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
@@ -439,7 +455,7 @@ const Performance = () => {
                 Adaptive Market Assessment
               </Typography>
               
-              {adaptiveAssessment.market_regime && (
+              {adaptiveAssessment?.market_regime && (
                 <Grid container spacing={3} mb={3}>
                   <Grid item xs={12} md={6}>
                     <Card>
@@ -448,31 +464,31 @@ const Performance = () => {
                           Current Market Regime
                         </Typography>
                         <Chip 
-                          label={adaptiveAssessment.market_regime.market_type}
+                          label={adaptiveAssessment?.market_regime?.market_type || 'Unknown'}
                           color="primary"
                           sx={{ mb: 2, fontWeight: 'bold' }}
                         />
                         <Typography variant="body2" color="textSecondary">
-                          {adaptiveAssessment.market_regime.characteristics}
+                          {adaptiveAssessment?.market_regime?.characteristics || 'No data'}
                         </Typography>
                         <Divider sx={{ my: 2 }} />
                         <Stack spacing={1}>
                           <Box display="flex" justifyContent="space-between">
                             <Typography variant="body2">Volatility:</Typography>
                             <Typography variant="body2" fontWeight="bold">
-                              {adaptiveAssessment.market_regime.avg_volatility}%
+                              {adaptiveAssessment?.market_regime?.avg_volatility || 0}%
                             </Typography>
                           </Box>
                           <Box display="flex" justifyContent="space-between">
                             <Typography variant="body2">Volume Ratio:</Typography>
                             <Typography variant="body2" fontWeight="bold">
-                              {adaptiveAssessment.market_regime.avg_volume_ratio}x
+                              {adaptiveAssessment?.market_regime?.avg_volume_ratio || 0}x
                             </Typography>
                           </Box>
                           <Box display="flex" justifyContent="space-between">
                             <Typography variant="body2">Learning Potential:</Typography>
                             <Chip 
-                              label={adaptiveAssessment.market_regime.learning_potential}
+                              label={adaptiveAssessment?.market_regime?.learning_potential || 'Unknown'}
                               color="success"
                               size="small"
                             />
@@ -489,17 +505,17 @@ const Performance = () => {
                           Adaptive Strategy
                         </Typography>
                         <Box display="flex" alignItems="center" gap={1} mb={2}>
-                          <Typography variant="h4">{adaptiveAssessment.adaptive_strategy?.emoji}</Typography>
-                          <Typography variant="h6">{adaptiveAssessment.adaptive_strategy?.action}</Typography>
+                          <Typography variant="h4">{adaptiveAssessment?.adaptive_strategy?.emoji || '🔄'}</Typography>
+                          <Typography variant="h6">{adaptiveAssessment?.adaptive_strategy?.action || 'Analyzing'}</Typography>
                         </Box>
                         <Typography variant="body2" color="textSecondary" mb={2}>
-                          {adaptiveAssessment.adaptive_strategy?.reasoning}
+                          {adaptiveAssessment?.adaptive_strategy?.reasoning || 'Loading adaptive assessment...'}
                         </Typography>
                         <Divider sx={{ my: 2 }} />
                         <Box display="flex" justifyContent="space-between">
                           <Typography variant="body2">Risk per Trade:</Typography>
-                          <Typography variant="body2" fontWeight="bold" color="success.main">
-                            {adaptiveAssessment.adaptive_strategy?.risk_per_trade}
+                          <Typography variant="body2" fontWeight="bold">
+                            {adaptiveAssessment?.adaptive_strategy?.risk_per_trade || 'N/A'}
                           </Typography>
                         </Box>
                       </CardContent>
@@ -508,50 +524,11 @@ const Performance = () => {
                 </Grid>
               )}
 
-              {/* Learning Opportunities */}
-              {adaptiveAssessment.learning_opportunities && (
-                <Paper sx={{ p: 3 }}>
-                  <Typography variant="h6" gutterBottom>
-                    Current Learning Opportunities
-                  </Typography>
-                  <Grid container spacing={2}>
-                    {adaptiveAssessment.learning_opportunities.map((opportunity, index) => (
-                      <Grid item xs={12} sm={6} md={4} key={index}>
-                        <Card>
-                          <CardContent>
-                            <Typography variant="h6" gutterBottom>{opportunity.symbol}</Typography>
-                            <Chip 
-                              label={`${opportunity.learning_value} Learning Value`}
-                              color={opportunity.learning_value === 'HIGH' ? 'success' : 'warning'}
-                              size="small"
-                              sx={{ mb: 2 }}
-                            />
-                            <Stack spacing={1}>
-                              <Typography variant="body2">
-                                <strong>Strategy:</strong> {opportunity.strategy}
-                              </Typography>
-                              <Typography variant="body2">
-                                <strong>Confidence:</strong> {opportunity.confidence_pct}%
-                              </Typography>
-                              <Typography variant="body2">
-                                <strong>Learning Aspects:</strong>
-                              </Typography>
-                              {opportunity.learning_aspects?.map((aspect, i) => (
-                                <Chip 
-                                  key={i}
-                                  label={aspect}
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{ mr: 0.5, mb: 0.5 }}
-                                />
-                              ))}
-                            </Stack>
-                          </CardContent>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
-                </Paper>
+              {/* Show message when no adaptive data */}
+              {!adaptiveAssessment?.market_regime && (
+                <Alert severity="info">
+                  Loading adaptive assessment data...
+                </Alert>
               )}
             </Paper>
           </Grid>

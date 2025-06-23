@@ -273,7 +273,7 @@ async def get_trading_signals():
         
         # Get signals from strategy manager
         if hasattr(strategy_manager, 'get_current_signals'):
-        signals = await strategy_manager.get_current_signals()
+            signals = await strategy_manager.get_current_signals()
         else:
             # Fallback to opportunities if get_current_signals doesn't exist
             signals = opportunity_manager.get_opportunities() if opportunity_manager else []
@@ -350,7 +350,7 @@ async def start_strategy():
             raise HTTPException(status_code=503, detail="Strategy manager not available")
         
         if hasattr(strategy_manager, 'start'):
-        await strategy_manager.start()
+            await strategy_manager.start()
         
         return {
             "status": "success",
@@ -368,7 +368,7 @@ async def stop_strategy():
             raise HTTPException(status_code=503, detail="Strategy manager not available")
         
         if hasattr(strategy_manager, 'stop'):
-        await strategy_manager.stop()
+            await strategy_manager.stop()
         
         return {
             "status": "success",

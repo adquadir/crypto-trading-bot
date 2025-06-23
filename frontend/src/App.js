@@ -10,6 +10,8 @@ import Opportunities from './pages/Opportunities';
 import Scalping from './pages/Scalping';
 import Settings from './pages/Settings';
 import Performance from './pages/Performance';
+import Backtesting from './pages/Backtesting';
+import Learning from './pages/Learning';
 
 // Layout components
 import DashboardLayout from './layouts/DashboardLayout';
@@ -48,6 +50,8 @@ function App() {
             <Route path="/scalping" element={<Scalping />} />
             <Route path="/positions" element={<Positions />} />
             <Route path="/performance" element={<Performance />} />
+                          <Route path="/backtesting" element={<Backtesting />} />
+              <Route path="/learning" element={<Learning />} />
             <Route path="/strategies" element={<Strategies />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

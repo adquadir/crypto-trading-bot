@@ -10,9 +10,9 @@ from src.strategy.strategy_manager import StrategyManager
 from src.risk.risk_manager import RiskManager
 from src.opportunity.opportunity_manager import OpportunityManager
 from src.api.routes import router as base_router, set_components
-from src.api.routes.trading import router as trading_router
+from src.api.trading_routes.trading import router as trading_router
 from src.api.websocket import router as ws_router, set_websocket_components
-from src.api.routes.trading import set_trading_components
+from src.api.trading_routes.trading import set_trading_components
 from src.utils.config import load_config
 
 load_dotenv()

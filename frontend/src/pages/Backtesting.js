@@ -1,14 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Input } from '../components/ui/input';
-import { Badge } from '../components/ui/badge';
-import { Alert, AlertDescription } from '../components/ui/alert';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Progress } from '../components/ui/progress';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+import {
+  Container,
+  Typography,
+  Card,
+  CardContent,
+  CardHeader,
+  Button,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Chip,
+  Alert,
+  Tabs,
+  Tab,
+  Box,
+  Grid,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  CircularProgress
+} from '@mui/material';
+import config from '../config';
 
 const Backtesting = () => {
   const [strategies, setStrategies] = useState([]);
@@ -20,15 +38,15 @@ const Backtesting = () => {
   const [results, setResults] = useState(null);
   const [comparison, setComparison] = useState(null);
   const [error, setError] = useState('');
-  const [runningTasks, setRunningTasks] = useState({});
+  const [activeTab, setActiveTab] = useState(0);
 
   // Load available strategies and symbols
   useEffect(() => {
     const loadOptions = async () => {
       try {
         const [strategiesRes, symbolsRes] = await Promise.all([
-          fetch(`${API_URL}/api/v1/backtesting/strategies`),
-          fetch(`${API_URL}/api/v1/backtesting/symbols`)
+          fetch(`${config.API_BASE_URL}/api/v1/backtesting/strategies`),
+          fetch(`${config.API_BASE_URL}/api/v1/backtesting/symbols`)
         ]);
 
         if (strategiesRes.ok) {
@@ -59,7 +77,7 @@ const Backtesting = () => {
     setResults(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/v1/backtesting/run`, {
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/backtesting/run`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -98,7 +116,7 @@ const Backtesting = () => {
 
     try {
       const allStrategies = strategies.map(s => s.name);
-      const response = await fetch(`${API_URL}/api/v1/backtesting/compare`, {
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/backtesting/compare`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -124,15 +142,6 @@ const Backtesting = () => {
     }
   };
 
-  const getRatingColor = (rating) => {
-    if (rating.includes('⭐⭐⭐⭐⭐')) return 'bg-green-500';
-    if (rating.includes('⭐⭐⭐⭐')) return 'bg-blue-500';
-    if (rating.includes('⭐⭐⭐')) return 'bg-yellow-500';
-    if (rating.includes('⭐⭐')) return 'bg-orange-500';
-    if (rating.includes('⭐')) return 'bg-red-500';
-    return 'bg-gray-500';
-  };
-
   const formatPercentage = (value) => {
     return `${(value * 100).toFixed(1)}%`;
   };
@@ -141,265 +150,349 @@ const Backtesting = () => {
     return `$${value.toFixed(2)}`;
   };
 
+  const SingleStrategyTab = () => (
+    <Card>
+      <CardHeader
+        title={
+          <Typography variant="h6" component="div">
+            🚀 Single Strategy Backtest
+          </Typography>
+        }
+      />
+      <CardContent>
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Strategy</InputLabel>
+              <Select
+                value={selectedStrategy}
+                onChange={(e) => setSelectedStrategy(e.target.value)}
+                label="Strategy"
+              >
+                {strategies.map((strategy) => (
+                  <MenuItem key={strategy.name} value={strategy.name}>
+                    {strategy.name} - {strategy.risk_level}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Symbol</InputLabel>
+              <Select
+                value={selectedSymbol}
+                onChange={(e) => setSelectedSymbol(e.target.value)}
+                label="Symbol"
+              >
+                {symbols.map((symbol) => (
+                  <MenuItem key={symbol.symbol} value={symbol.symbol}>
+                    {symbol.symbol} - {symbol.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            <TextField
+              fullWidth
+              label="Days Back"
+              type="number"
+              value={daysBack}
+              onChange={(e) => setDaysBack(parseInt(e.target.value))}
+              inputProps={{ min: 1, max: 365 }}
+            />
+          </Grid>
+        </Grid>
+
+        <Button
+          variant="contained"
+          size="large"
+          fullWidth
+          onClick={runSingleBacktest}
+          disabled={loading || !selectedStrategy || !selectedSymbol}
+          sx={{ mb: 3 }}
+        >
+          {loading ? (
+            <>
+              <CircularProgress size={20} sx={{ mr: 1 }} />
+              Running Backtest...
+            </>
+          ) : (
+            '🚀 Run Backtest'
+          )}
+        </Button>
+
+        {results && (
+          <Card sx={{ mt: 3, bgcolor: 'background.paper' }}>
+            <CardHeader
+              title={
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Typography variant="h6">📊 Backtest Results</Typography>
+                  <Chip label={`${results.strategy} on ${results.symbol}`} />
+                </Box>
+              }
+            />
+            <CardContent>
+              <Grid container spacing={3} sx={{ mb: 3 }}>
+                <Grid item xs={6} md={3}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h4" color="success.main" fontWeight="bold">
+                      {formatPercentage(results.performance.total_return)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Total Return
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h4" color="primary.main" fontWeight="bold">
+                      {formatPercentage(results.performance.win_rate)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Win Rate
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h4" color="secondary.main" fontWeight="bold">
+                      {results.performance.total_trades}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Total Trades
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6} md={3}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h4" color="warning.main" fontWeight="bold">
+                      {results.performance.sharpe_ratio.toFixed(2)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Sharpe Ratio
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+
+              <Grid container spacing={3}>
+                <Grid item xs={4}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" fontWeight="bold">
+                      {formatPercentage(results.performance.max_drawdown)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Max Drawdown
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" fontWeight="bold">
+                      {results.performance.profit_factor.toFixed(2)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Profit Factor
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" fontWeight="bold">
+                      {formatCurrency(results.performance.best_trade)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Best Trade
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const StrategyComparisonTab = () => (
+    <Card>
+      <CardHeader
+        title={
+          <Typography variant="h6" component="div">
+            ⚔️ Strategy Comparison
+          </Typography>
+        }
+      />
+      <CardContent>
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth>
+              <InputLabel>Symbol</InputLabel>
+              <Select
+                value={selectedSymbol}
+                onChange={(e) => setSelectedSymbol(e.target.value)}
+                label="Symbol"
+              >
+                {symbols.map((symbol) => (
+                  <MenuItem key={symbol.symbol} value={symbol.symbol}>
+                    {symbol.symbol} - {symbol.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              label="Days Back"
+              type="number"
+              value={daysBack}
+              onChange={(e) => setDaysBack(parseInt(e.target.value))}
+              inputProps={{ min: 1, max: 365 }}
+            />
+          </Grid>
+        </Grid>
+
+        <Button
+          variant="contained"
+          size="large"
+          fullWidth
+          onClick={runStrategyComparison}
+          disabled={loading || !selectedSymbol}
+          sx={{ mb: 3 }}
+        >
+          {loading ? (
+            <>
+              <CircularProgress size={20} sx={{ mr: 1 }} />
+              Comparing Strategies...
+            </>
+          ) : (
+            '⚔️ Compare All Strategies'
+          )}
+        </Button>
+
+        {comparison && (
+          <Card sx={{ mt: 3 }}>
+            <CardHeader
+              title={
+                <Typography variant="h6">📊 Strategy Comparison Results</Typography>
+              }
+            />
+            <CardContent>
+              <TableContainer component={Paper}>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Strategy</TableCell>
+                      <TableCell>Win Rate</TableCell>
+                      <TableCell>Total Return</TableCell>
+                      <TableCell>Sharpe Ratio</TableCell>
+                      <TableCell>Max Drawdown</TableCell>
+                      <TableCell>Total Trades</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {comparison.comparison.map((row, index) => (
+                      <TableRow key={index} hover>
+                        <TableCell>
+                          <Typography fontWeight="medium">{row.Strategy}</Typography>
+                        </TableCell>
+                        <TableCell>{row['Win Rate']}</TableCell>
+                        <TableCell>
+                          <Typography
+                            color={row['Total Return'].startsWith('-') ? 'error' : 'success.main'}
+                          >
+                            {row['Total Return']}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>{row['Sharpe Ratio']}</TableCell>
+                        <TableCell>{row['Max Drawdown']}</TableCell>
+                        <TableCell>{row['Total Trades']}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
+        )}
+      </CardContent>
+    </Card>
+  );
+
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Strategy Backtesting</h1>
-        <Badge variant="outline" className="text-green-600">
-          🎯 Production Ready
-        </Badge>
-      </div>
+    <Container maxWidth="lg" sx={{ py: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" component="h1" fontWeight="bold">
+          Strategy Backtesting
+        </Typography>
+        <Chip label="🎯 Production Ready" variant="outlined" color="success" />
+      </Box>
 
       {error && (
-        <Alert className="border-red-200 bg-red-50">
-          <AlertDescription className="text-red-800">
-            {error}
-          </AlertDescription>
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
         </Alert>
       )}
 
-      <Tabs defaultValue="single" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="single">Single Strategy Test</TabsTrigger>
-          <TabsTrigger value="compare">Strategy Comparison</TabsTrigger>
-        </TabsList>
+      <Box sx={{ width: '100%', mb: 3 }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs value={activeTab} onChange={(e, value) => setActiveTab(value)}>
+            <Tab label="Single Strategy Test" />
+            <Tab label="Strategy Comparison" />
+          </Tabs>
+        </Box>
 
-        <TabsContent value="single" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>🚀 Single Strategy Backtest</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Strategy</label>
-                  <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select strategy" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {strategies.map((strategy) => (
-                        <SelectItem key={strategy.name} value={strategy.name}>
-                          {strategy.name} - {strategy.risk_level}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Symbol</label>
-                  <Select value={selectedSymbol} onValueChange={setSelectedSymbol}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select symbol" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {symbols.map((symbol) => (
-                        <SelectItem key={symbol.symbol} value={symbol.symbol}>
-                          {symbol.symbol} - {symbol.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Days Back</label>
-                  <Input
-                    type="number"
-                    value={daysBack}
-                    onChange={(e) => setDaysBack(parseInt(e.target.value))}
-                    min="1"
-                    max="365"
-                  />
-                </div>
-              </div>
-
-              <Button 
-                onClick={runSingleBacktest} 
-                disabled={loading || !selectedStrategy || !selectedSymbol}
-                className="w-full"
-              >
-                {loading ? 'Running Backtest...' : '🚀 Run Backtest'}
-              </Button>
-
-              {results && (
-                <Card className="mt-6">
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      📊 Backtest Results
-                      <Badge className="ml-2">
-                        {results.strategy} on {results.symbol}
-                      </Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-green-600">
-                          {formatPercentage(results.performance.total_return)}
-                        </div>
-                        <div className="text-sm text-gray-600">Total Return</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-blue-600">
-                          {formatPercentage(results.performance.win_rate)}
-                        </div>
-                        <div className="text-sm text-gray-600">Win Rate</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-purple-600">
-                          {results.performance.total_trades}
-                        </div>
-                        <div className="text-sm text-gray-600">Total Trades</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-orange-600">
-                          {results.performance.sharpe_ratio.toFixed(2)}
-                        </div>
-                        <div className="text-sm text-gray-600">Sharpe Ratio</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="text-center">
-                        <div className="text-lg font-semibold">
-                          {formatPercentage(results.performance.max_drawdown)}
-                        </div>
-                        <div className="text-sm text-gray-600">Max Drawdown</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-lg font-semibold">
-                          {results.performance.profit_factor.toFixed(2)}
-                        </div>
-                        <div className="text-sm text-gray-600">Profit Factor</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-lg font-semibold">
-                          {formatCurrency(results.performance.best_trade)}
-                        </div>
-                        <div className="text-sm text-gray-600">Best Trade</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="compare" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>⚔️ Strategy Comparison</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Symbol</label>
-                  <Select value={selectedSymbol} onValueChange={setSelectedSymbol}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select symbol" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {symbols.map((symbol) => (
-                        <SelectItem key={symbol.symbol} value={symbol.symbol}>
-                          {symbol.symbol} - {symbol.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Days Back</label>
-                  <Input
-                    type="number"
-                    value={daysBack}
-                    onChange={(e) => setDaysBack(parseInt(e.target.value))}
-                    min="1"
-                    max="365"
-                  />
-                </div>
-              </div>
-
-              <Button 
-                onClick={runStrategyComparison} 
-                disabled={loading || !selectedSymbol}
-                className="w-full"
-              >
-                {loading ? 'Comparing Strategies...' : '⚔️ Compare All Strategies'}
-              </Button>
-
-              {comparison && (
-                <Card className="mt-6">
-                  <CardHeader>
-                    <CardTitle>📊 Strategy Comparison Results</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="overflow-x-auto">
-                      <table className="w-full table-auto">
-                        <thead>
-                          <tr className="border-b">
-                            <th className="text-left p-2">Strategy</th>
-                            <th className="text-left p-2">Win Rate</th>
-                            <th className="text-left p-2">Total Return</th>
-                            <th className="text-left p-2">Sharpe Ratio</th>
-                            <th className="text-left p-2">Max Drawdown</th>
-                            <th className="text-left p-2">Total Trades</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {comparison.comparison.map((row, index) => (
-                            <tr key={index} className="border-b hover:bg-gray-50">
-                              <td className="p-2 font-medium">{row.Strategy}</td>
-                              <td className="p-2">{row['Win Rate']}</td>
-                              <td className="p-2">
-                                <span className={row['Total Return'].startsWith('-') ? 'text-red-600' : 'text-green-600'}>
-                                  {row['Total Return']}
-                                </span>
-                              </td>
-                              <td className="p-2">{row['Sharpe Ratio']}</td>
-                              <td className="p-2">{row['Max Drawdown']}</td>
-                              <td className="p-2">{row['Total Trades']}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        <Box sx={{ pt: 3 }}>
+          {activeTab === 0 && <SingleStrategyTab />}
+          {activeTab === 1 && <StrategyComparisonTab />}
+        </Box>
+      </Box>
 
       <Card>
-        <CardHeader>
-          <CardTitle>📚 Available Strategies</CardTitle>
-        </CardHeader>
+        <CardHeader
+          title={
+            <Typography variant="h6" component="div">
+              📚 Available Strategies
+            </Typography>
+          }
+        />
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Grid container spacing={2}>
             {strategies.map((strategy) => (
-              <Card key={strategy.name} className="border-l-4 border-blue-500">
-                <CardContent className="p-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold">{strategy.name}</h3>
-                    <Badge variant="outline">{strategy.risk_level}</Badge>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-2">{strategy.description}</p>
-                  <div className="text-xs text-gray-500">
-                    <div>Win Rate: {strategy.typical_win_rate}</div>
-                    <div>Best Markets: {strategy.best_market_conditions}</div>
-                  </div>
-                </CardContent>
-              </Card>
+              <Grid item xs={12} md={6} key={strategy.name}>
+                <Card variant="outlined" sx={{ borderLeft: 4, borderLeftColor: 'primary.main' }}>
+                  <CardContent>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                      <Typography variant="h6" component="h3">
+                        {strategy.name}
+                      </Typography>
+                      <Chip label={strategy.risk_level} variant="outlined" size="small" />
+                    </Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      {strategy.description}
+                    </Typography>
+                    <Box sx={{ fontSize: '0.75rem', color: 'text.disabled' }}>
+                      <Typography variant="caption" display="block">
+                        Win Rate: {strategy.typical_win_rate}
+                      </Typography>
+                      <Typography variant="caption" display="block">
+                        Best Markets: {strategy.best_market_conditions}
+                      </Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
             ))}
-          </div>
+          </Grid>
         </CardContent>
       </Card>
-    </div>
+    </Container>
   );
 };
 

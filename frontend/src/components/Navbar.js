@@ -20,6 +20,11 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SpeedIcon from '@mui/icons-material/Speed';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import ViewListIcon from '@mui/icons-material/ViewList';
+import TimelineIcon from '@mui/icons-material/Timeline';
+import PsychologyIcon from '@mui/icons-material/Psychology';
 import SettingsIcon from '@mui/icons-material/Settings';
 
 const Navbar = () => {
@@ -33,6 +38,11 @@ const Navbar = () => {
     { path: '/signals', label: 'Signals', icon: <SignalCellularAltIcon /> },
     { path: '/opportunities', label: 'Opportunities', icon: <TrendingUpIcon /> },
     { path: '/scalping', label: 'Scalping', icon: <SpeedIcon /> },
+    { path: '/positions', label: 'Positions', icon: <AccountBalanceWalletIcon /> },
+    { path: '/strategies', label: 'Strategies', icon: <ViewListIcon /> },
+    { path: '/backtesting', label: 'Backtesting', icon: <TimelineIcon /> },
+    { path: '/learning', label: 'Learning', icon: <PsychologyIcon /> },
+    { path: '/performance', label: 'Performance', icon: <AssessmentIcon /> },
     { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
   ];
 
