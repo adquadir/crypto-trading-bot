@@ -365,22 +365,61 @@ class EnhancedSignalTracker:
             return
             
         try:
-            # Use Binance API to get current prices
+            # Use Binance API to get current prices with proxy support
             symbol_prices = {}
             
-            # Simple price fetch - replace with your market data source
-            async with aiohttp.ClientSession() as session:
+            # Get proxy configuration from environment (same as exchange client)
+            proxy_host = os.getenv('PROXY_HOST', '')
+            proxy_port = os.getenv('PROXY_PORT', '')
+            proxy_user = os.getenv('PROXY_USER', '')
+            proxy_pass = os.getenv('PROXY_PASS', '')
+            use_proxy = os.getenv('USE_PROXY', 'false').lower() == 'true'
+            
+            # Build proxy URL if configured
+            proxy_url = None
+            if use_proxy and proxy_host and proxy_port:
+                if proxy_user and proxy_pass:
+                    proxy_url = f"http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
+                else:
+                    proxy_url = f"http://{proxy_host}:{proxy_port}"
+            
+            # Create session with proxy support
+            connector = None
+            if proxy_url:
+                connector = aiohttp.TCPConnector()
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as session:
                 for symbol in symbols:
                     try:
                         url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
-                        async with session.get(url) as response:
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        }
+                        
+                        # Make request with proxy if configured
+                        kwargs = {'headers': headers}
+                        if proxy_url:
+                            kwargs['proxy'] = proxy_url
+                        
+                        async with session.get(url, **kwargs) as response:
                             if response.status == 200:
                                 data = await response.json()
                                 symbol_prices[symbol] = float(data['price'])
+                                logger.debug(f"📈 Updated price for {symbol}: ${data['price']}")
+                            else:
+                                logger.warning(f"⚠️ HTTP {response.status} for {symbol}")
                     except Exception as e:
                         logger.warning(f"⚠️ Failed to get price for {symbol}: {e}")
             
-            self.price_cache.update(symbol_prices)
+            # Update cache and log results
+            if symbol_prices:
+                self.price_cache.update(symbol_prices)
+                logger.info(f"💰 Price cache updated: {len(symbol_prices)} symbols")
+            else:
+                logger.warning(f"⚠️ No prices fetched for {len(symbols)} symbols")
             
         except Exception as e:
             logger.error(f"❌ Failed to update price cache: {e}")
