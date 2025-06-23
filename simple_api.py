@@ -166,6 +166,7 @@ opportunity_manager = None
 
 # Global variables for background processing
 _background_scan_task = None
+_background_refresh_task = None
 _last_scan_start = 0
 _scan_in_progress = False
 _trading_mode = "stable"  # Default mode: "stable", "swing_trading"
@@ -338,7 +339,7 @@ async def background_refresh():
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup."""
-    global opportunity_manager
+    global opportunity_manager, _background_refresh_task
     
     print("Initializing components...")
     
@@ -369,11 +370,54 @@ async def startup_event():
     opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker)
     await opportunity_manager.initialize()
     
-    # Start background refresh task
-    asyncio.create_task(background_refresh())
+    # Start background refresh task and store reference for cleanup
+    _background_refresh_task = asyncio.create_task(background_refresh())
     
     print("✓ All components initialized")
     print("🎯 Enhanced signal tracker monitoring real-time PnL")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Proper cleanup on shutdown to prevent port binding issues."""
+    global _background_refresh_task, _background_scan_task, opportunity_manager
+    
+    logger.info("🛑 Starting graceful shutdown...")
+    
+    try:
+        # Cancel background refresh task
+        if _background_refresh_task and not _background_refresh_task.done():
+            logger.info("🔄 Cancelling background refresh task...")
+            _background_refresh_task.cancel()
+            try:
+                await _background_refresh_task
+            except asyncio.CancelledError:
+                logger.info("✅ Background refresh task cancelled")
+        
+        # Cancel background scan task if running
+        if _background_scan_task and not _background_scan_task.done():
+            logger.info("🔄 Cancelling background scan task...")
+            _background_scan_task.cancel()
+            try:
+                await _background_scan_task
+            except asyncio.CancelledError:
+                logger.info("✅ Background scan task cancelled")
+        
+        # Shutdown opportunity manager
+        if opportunity_manager and hasattr(opportunity_manager, 'shutdown'):
+            logger.info("🔄 Shutting down opportunity manager...")
+            await opportunity_manager.shutdown()
+            logger.info("✅ Opportunity manager shutdown complete")
+        
+        # Close enhanced signal tracker
+        if enhanced_signal_tracker and hasattr(enhanced_signal_tracker, 'close'):
+            logger.info("🔄 Closing enhanced signal tracker...")
+            await enhanced_signal_tracker.close()
+            logger.info("✅ Enhanced signal tracker closed")
+    
+    except Exception as e:
+        logger.error(f"⚠️ Error during shutdown cleanup: {e}")
+    
+    logger.info("✅ Graceful shutdown complete - port 8000 should be free")
 
 @app.get("/")
 async def root():
