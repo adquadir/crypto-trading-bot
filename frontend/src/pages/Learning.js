@@ -218,7 +218,7 @@ export default function Learning() {
                 color="warning.main" 
                 fontWeight="bold"
               >
-                {learningData?.learning_insights?.learning_impact_metrics?.false_negative_pct?.toFixed(1) || 0}%
+                {learningData?.summary?.false_negative_rate_pct?.toFixed(1) || 0}%
               </Typography>
               <Typography 
                 variant="caption" 
@@ -246,7 +246,7 @@ export default function Learning() {
                 color="info.main" 
                 fontWeight="bold"
               >
-                {learningData?.learning_insights?.learning_impact_metrics?.max_rebound_after_sl?.toFixed(1) || 0}%
+                {((learningData?.summary?.max_rebound_pct || 0) * 100)?.toFixed(2)}%
               </Typography>
               <Typography 
                 variant="caption" 
@@ -347,18 +347,23 @@ export default function Learning() {
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          ${fakeout.entry_price?.toFixed(4)}
+                          ${fakeout.entry_price && !isNaN(fakeout.entry_price) ? 
+                            fakeout.entry_price.toFixed(8) : 'N/A'}
                         </Typography>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">
-                          ${fakeout.stop_loss?.toFixed(4)}
+                          ${fakeout.stop_loss && !isNaN(fakeout.stop_loss) ? 
+                            fakeout.stop_loss.toFixed(8) : 'N/A'}
                         </Typography>
                       </TableCell>
                       <TableCell>
                         <Chip 
-                          label={`+${(fakeout.post_sl_peak_pct * 100)?.toFixed(1)}%`}
-                          color="success"
+                          label={fakeout.rebound_pct && !isNaN(fakeout.rebound_pct) ? 
+                            `+${(fakeout.rebound_pct * 100).toFixed(2)}%` : 
+                            'N/A'
+                          }
+                          color={fakeout.rebound_pct && !isNaN(fakeout.rebound_pct) ? "success" : "default"}
                           size="small"
                         />
                       </TableCell>
@@ -378,7 +383,10 @@ export default function Learning() {
                       {!isMobile && (
                         <TableCell>
                           <Typography variant="caption">
-                            {new Date(fakeout.timestamp).toLocaleString()}
+                            {fakeout.created_at ? 
+                              new Date(fakeout.created_at).toLocaleString() : 
+                              'N/A'
+                            }
                           </Typography>
                         </TableCell>
                       )}
@@ -521,76 +529,154 @@ export default function Learning() {
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 'bold' }}>Strategy</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Total Signals</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Actual SL Hits</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Virtual TP Hits</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Fakeouts</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Actual Avg Return</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Virtual Avg Return</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Virtual TP Hits</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Virtual Golden</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Avg Virtual Return</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Learning Outcome</TableCell>
+                  {!isMobile && <TableCell sx={{ fontWeight: 'bold' }}>Insights</TableCell>}
                 </TableRow>
               </TableHead>
               <TableBody>
-                {learningData?.learning_insights?.strategy_reality_comparison?.length > 0 ? 
-                  learningData.learning_insights.strategy_reality_comparison.map((strategy, index) => (
-                    <TableRow key={index} hover>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="bold">
-                          {strategy.strategy}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {strategy.total_signals}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {strategy.actual_sl_hits}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {strategy.virtual_tp_hits}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Chip 
-                          label={strategy.fakeouts_detected}
-                          color={strategy.fakeouts_detected > 0 ? 'warning' : 'default'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Chip 
-                          label={`${strategy.actual_avg_return?.toFixed(1)}%`}
-                          color={strategy.actual_avg_return > 0 ? 'success' : 'error'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Chip 
-                          label={`${strategy.virtual_avg_return?.toFixed(1)}%`}
-                          color={strategy.virtual_avg_return > 0 ? 'success' : 'error'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {strategy.virtual_golden_count}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  )) : (
+                {(() => {
+                  // Process available data to create strategy comparison
+                  const strategyData = {};
+                  
+                  // Process fakeouts
+                  if (learningData?.learning_insights?.fakeouts_detected) {
+                    learningData.learning_insights.fakeouts_detected.forEach(fakeout => {
+                      const strategy = fakeout.strategy || 'unknown';
+                      if (!strategyData[strategy]) {
+                        strategyData[strategy] = {
+                          strategy,
+                          fakeouts: 0,
+                          virtualTPs: 0,
+                          virtualGolden: 0,
+                          virtualReturns: [],
+                          insights: []
+                        };
+                      }
+                      strategyData[strategy].fakeouts++;
+                      if (fakeout.virtual_tp_hit) {
+                        strategyData[strategy].virtualTPs++;
+                      }
+                      if (fakeout.rebound_pct) {
+                        strategyData[strategy].virtualReturns.push(fakeout.rebound_pct * 100);
+                      }
+                    });
+                  }
+                  
+                  // Process virtual winners  
+                  if (learningData?.learning_insights?.virtual_winners) {
+                    learningData.learning_insights.virtual_winners.forEach(winner => {
+                      const strategy = winner.strategy || 'unknown';
+                      if (!strategyData[strategy]) {
+                        strategyData[strategy] = {
+                          strategy,
+                          fakeouts: 0,
+                          virtualTPs: 0,
+                          virtualGolden: 0,
+                          virtualReturns: [],
+                          insights: []
+                        };
+                      }
+                      strategyData[strategy].virtualTPs++;
+                      if (winner.would_have_made_pct) {
+                        strategyData[strategy].virtualReturns.push(winner.would_have_made_pct * 100);
+                      }
+                    });
+                  }
+                  
+                  // Process virtual golden signals
+                  if (learningData?.learning_insights?.virtual_golden_signals) {
+                    learningData.learning_insights.virtual_golden_signals.forEach(golden => {
+                      const strategy = golden.strategy || 'unknown';
+                      if (!strategyData[strategy]) {
+                        strategyData[strategy] = {
+                          strategy,
+                          fakeouts: 0,
+                          virtualTPs: 0,
+                          virtualGolden: 0,
+                          virtualReturns: [],
+                          insights: []
+                        };
+                      }
+                      strategyData[strategy].virtualGolden++;
+                    });
+                  }
+                  
+                  const strategies = Object.values(strategyData);
+                  
+                  return strategies.length > 0 ? strategies.map((strategy, index) => {
+                    const avgReturn = strategy.virtualReturns.length > 0 ? 
+                      strategy.virtualReturns.reduce((a, b) => a + b, 0) / strategy.virtualReturns.length : 0;
+                    
+                    const totalActivity = strategy.fakeouts + strategy.virtualTPs + strategy.virtualGolden;
+                    const learningOutcome = strategy.fakeouts > strategy.virtualTPs ? 'High Fakeout Risk' : 
+                                          strategy.virtualTPs > 0 ? 'Learning Potential' : 'Needs More Data';
+                    
+                    return (
+                      <TableRow key={index} hover>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="bold">
+                            {strategy.strategy.replace('scalping_', '')}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={strategy.fakeouts}
+                            color={strategy.fakeouts > 0 ? 'error' : 'default'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={strategy.virtualTPs}
+                            color={strategy.virtualTPs > 0 ? 'success' : 'default'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={strategy.virtualGolden}
+                            color={strategy.virtualGolden > 0 ? 'warning' : 'default'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={avgReturn > 0 ? `+${avgReturn.toFixed(2)}%` : 'N/A'}
+                            color={avgReturn > 0 ? 'success' : 'default'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={learningOutcome}
+                            color={learningOutcome === 'High Fakeout Risk' ? 'error' : 
+                                   learningOutcome === 'Learning Potential' ? 'success' : 'default'}
+                            size="small"
+                          />
+                        </TableCell>
+                        {!isMobile && (
+                          <TableCell>
+                            <Typography variant="caption" color="text.secondary">
+                              {totalActivity} total events
+                            </Typography>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    );
+                  }) : (
                     <TableRow>
-                      <TableCell colSpan={8} align="center">
+                      <TableCell colSpan={isMobile ? 6 : 7} align="center">
                         <Typography color="text.secondary" py={2}>
                           No strategy comparison data yet. System is learning...
                         </Typography>
                       </TableCell>
                     </TableRow>
-                  )
-                }
+                  );
+                })()}
               </TableBody>
             </Table>
           </TableContainer>
@@ -611,19 +697,19 @@ export default function Learning() {
                   <Box sx={{ mb: 2 }}>
                     <Typography variant="body2" color="text.secondary">Total Learning Signals</Typography>
                     <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
-                      {learningData?.learning_insights?.learning_impact_metrics?.total_learning_signals || 0}
+                      {learningData?.summary?.total_signals || 0}
                     </Typography>
                   </Box>
                   <Box sx={{ mb: 2 }}>
                     <Typography variant="body2" color="text.secondary">False Negative Rate</Typography>
                     <Typography variant={isMobile ? "h5" : "h4"} color="error.main" fontWeight="bold">
-                      {learningData?.learning_insights?.learning_impact_metrics?.false_negative_pct?.toFixed(1) || 0}%
+                      {learningData?.summary?.false_negative_rate_pct?.toFixed(1) || 0}%
                     </Typography>
                   </Box>
                   <Box>
-                    <Typography variant="body2" color="text.secondary">Would Have Won Rate</Typography>
+                    <Typography variant="body2" color="text.secondary">Virtual TP Hit Rate</Typography>
                     <Typography variant={isMobile ? "h5" : "h4"} color="success.main" fontWeight="bold">
-                      {learningData?.learning_insights?.learning_impact_metrics?.would_have_won_pct?.toFixed(1) || 0}%
+                      {learningData?.summary?.total_virtual_tps || 0} signals
                     </Typography>
                   </Box>
                 </CardContent>
@@ -636,15 +722,61 @@ export default function Learning() {
                     📈 Rebound Analysis
                   </Typography>
                   <Box sx={{ mb: 2 }}>
-                    <Typography variant="body2" color="text.secondary">Average Rebound After SL</Typography>
-                    <Typography variant={isMobile ? "h5" : "h4"} color="info.main" fontWeight="bold">
-                      {learningData?.learning_insights?.learning_impact_metrics?.avg_rebound_after_sl?.toFixed(1) || 0}%
+                    <Typography variant="body2" color="text.secondary">Fakeouts Detected</Typography>
+                    <Typography variant={isMobile ? "h5" : "h4"} color="warning.main" fontWeight="bold">
+                      {learningData?.summary?.total_fakeouts || 0}
                     </Typography>
                   </Box>
                   <Box>
                     <Typography variant="body2" color="text.secondary">Maximum Rebound After SL</Typography>
                     <Typography variant={isMobile ? "h5" : "h4"} color="success.main" fontWeight="bold">
-                      {learningData?.learning_insights?.learning_impact_metrics?.max_rebound_after_sl?.toFixed(1) || 0}%
+                      {((learningData?.summary?.max_rebound_pct || 0) * 100).toFixed(2)}%
+                    </Typography>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+          
+          {/* Learning Quality Metrics */}
+          <Grid container spacing={{ xs: 2, sm: 3 }} sx={{ mt: 2 }}>
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+                  <Typography variant="h6" gutterBottom>
+                    🛡️ Data Corruption Prevention
+                  </Typography>
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="body2" color="text.secondary">Corruption Prevention Rate</Typography>
+                    <Typography variant={isMobile ? "h5" : "h4"} color="success.main" fontWeight="bold">
+                      {learningData?.learning_insights?.learning_impact_metrics?.corruption_prevention_rate_pct?.toFixed(1) || 0}%
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">False Negatives Prevented</Typography>
+                    <Typography variant={isMobile ? "h5" : "h4"} color="info.main" fontWeight="bold">
+                      {learningData?.learning_insights?.learning_impact_metrics?.false_negatives_prevented || 0}
+                    </Typography>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+                  <Typography variant="h6" gutterBottom>
+                    🎯 Learning Quality
+                  </Typography>
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="body2" color="text.secondary">System Learning Status</Typography>
+                    <Typography variant={isMobile ? "h5" : "h4"} color="primary.main" fontWeight="bold">
+                      {learningData?.learning_insights?.learning_impact_metrics?.learning_quality || 'UNKNOWN'}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">Learning Mode</Typography>
+                    <Typography variant={isMobile ? "h5" : "h4"} color="success.main" fontWeight="bold">
+                      {learningData?.summary?.learning_mode_active ? 'ACTIVE' : 'INACTIVE'}
                     </Typography>
                   </Box>
                 </CardContent>
@@ -660,7 +792,8 @@ export default function Learning() {
               <strong>• Fakeout Detection:</strong> Identifies when tight stop losses are getting hit by market noise, not real trends<br/>
               <strong>• Virtual Golden Signals:</strong> Discovers high-quality signals that were stopped out too early<br/>
               <strong>• Adaptive Stop Placement:</strong> System learns optimal stop loss distances for each strategy<br/>
-              <strong>• True Performance:</strong> Learns from actual market behavior, not artificial exit points
+              <strong>• True Performance:</strong> Learns from actual market behavior, not artificial exit points<br/>
+              <strong>• Data Protection:</strong> Prevents {learningData?.learning_insights?.learning_impact_metrics?.false_negatives_prevented || 0} false negatives from corrupting learning data
             </Typography>
           </Alert>
         </TabPanel>
