@@ -22,6 +22,45 @@ trading:
   scalping_mode: true
   risk_per_trade: ${RISK_PER_TRADE}
 
+flow_trading:
+  enabled: true
+  scalping:
+    profit_target_pct: 0.5
+    stop_loss_pct: 0.3
+    trailing_stop: true
+    min_trend_strength: 25  # ADX threshold
+    max_trade_duration_minutes: 30
+    re_entry_cooldown_minutes: 5
+  grid:
+    levels: 5
+    spacing_multiplier: 1.0  # x ATR
+    max_spread_pct: 2.0
+    breakout_threshold_pct: 3.0
+    min_order_size_usd: 10.0
+    grid_rebalance_threshold_pct: 1.0
+  adaptive:
+    switch_cooldown_minutes: 15
+    trend_threshold_adx: 25
+    ranging_threshold_bb_width: 0.02
+    volatility_threshold_atr_pct: 3.0
+    min_performance_score: -5.0
+    strategy_timeout_hours: 4
+    regime_confirmation_periods: 3
+  risk:
+    max_concurrent_grids: 3
+    max_portfolio_exposure_pct: 20.0
+    max_single_position_pct: 5.0
+    daily_loss_limit_pct: 5.0
+    position_size_pct: 0.5
+    correlation_limit: 0.7
+    var_limit_pct: 2.0
+    min_margin_buffer_pct: 10.0
+  monitoring:
+    update_interval_seconds: 5
+    performance_tracking_enabled: true
+    risk_alerts_enabled: true
+    regime_detection_interval_seconds: 60
+
 strategy:
   default_profile: "moderate"
   profiles:

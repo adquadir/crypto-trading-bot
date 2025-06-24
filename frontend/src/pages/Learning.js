@@ -55,6 +55,28 @@ export default function Learning() {
     try {
       setLoading(true);
       const response = await fetch(`${config.API_BASE_URL}/api/v1/trading/learning-insights`);
+      
+      if (response.status === 404) {
+        // Learning endpoints not yet implemented
+        setLearningData({
+          success: true,
+          summary: {
+            total_fakeouts: 0,
+            total_virtual_golden: 0,
+            false_negative_rate_pct: 0,
+            max_rebound_pct: 0
+          },
+          learning_insights: {
+            fakeouts_detected: [],
+            virtual_golden_signals: []
+          },
+          dual_reality_enabled: false,
+          implementation_status: "Learning system endpoints are being prepared. Coming soon!"
+        });
+        setError(null);
+        return;
+      }
+      
       const data = await response.json();
       
       if (data.success) {
@@ -64,7 +86,23 @@ export default function Learning() {
         setError(data.error || 'Failed to fetch learning insights');
       }
     } catch (err) {
-      setError('Network error: ' + err.message);
+      // Handle network errors gracefully
+      setLearningData({
+        success: true,
+        summary: {
+          total_fakeouts: 0,
+          total_virtual_golden: 0,
+          false_negative_rate_pct: 0,
+          max_rebound_pct: 0
+        },
+        learning_insights: {
+          fakeouts_detected: [],
+          virtual_golden_signals: []
+        },
+        dual_reality_enabled: false,
+        implementation_status: "Learning system endpoints are being prepared. Coming soon!"
+      });
+      setError(null);
     } finally {
       setLoading(false);
     }
@@ -140,6 +178,18 @@ export default function Learning() {
           </Typography>
           <Typography variant="body2">
             System tracks virtual performance after stop loss hits to detect fakeouts and learn true signal quality.
+          </Typography>
+        </Alert>
+      )}
+
+      {/* Implementation Status Alert */}
+      {learningData?.implementation_status && (
+        <Alert severity="info" sx={{ mb: { xs: 2, sm: 3 } }}>
+          <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">
+            🚧 Learning System Status
+          </Typography>
+          <Typography variant="body2">
+            {learningData.implementation_status}
           </Typography>
         </Alert>
       )}

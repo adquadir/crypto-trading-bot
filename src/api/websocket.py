@@ -7,6 +7,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from src.api.connection_manager import ConnectionManager
 from urllib.parse import parse_qs
+from src.opportunity.opportunity_manager import OpportunityManager
+from src.signals.realtime_scalping_manager import RealtimeScalpingManager
+from typing import Dict, List
 
 load_dotenv()
 
@@ -28,18 +31,22 @@ router = APIRouter()
 manager = ConnectionManager()
 
 # Global components (will be set from main.py)
-opportunity_manager = None
+opportunity_manager: OpportunityManager = None
 exchange_client = None
 enhanced_signal_tracker = None
-realtime_scalping_manager = None
+realtime_scalping_manager: RealtimeScalpingManager = None
+flow_manager = None
+grid_engine = None
 
-def set_websocket_components(opp_mgr, exch_client, signal_tracker=None, scalping_manager=None):
+def set_websocket_components(opp_mgr, exch_client, signal_tracker=None, scalping_manager=None, flow_mgr=None, grid_eng=None):
     """Set the component instances for WebSocket use."""
-    global opportunity_manager, exchange_client, enhanced_signal_tracker, realtime_scalping_manager
+    global opportunity_manager, exchange_client, enhanced_signal_tracker, realtime_scalping_manager, flow_manager, grid_engine
     opportunity_manager = opp_mgr
     exchange_client = exch_client
     enhanced_signal_tracker = signal_tracker
     realtime_scalping_manager = scalping_manager
+    flow_manager = flow_mgr
+    grid_engine = grid_eng
 
 async def validate_api_key(api_key: str) -> bool:
     """Validate the provided API key against the environment variable."""
@@ -246,3 +253,185 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.close(code=1011, reason="Internal server error")
         except:
             pass
+
+@router.websocket("/ws/flow-trading")
+async def flow_trading_websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for flow trading real-time updates"""
+    await manager.connect(websocket)
+    try:
+        while True:
+            await asyncio.sleep(3)  # Update every 3 seconds for flow trading
+            await send_flow_trading_update(websocket)
+            
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"Flow trading WebSocket error: {e}")
+        manager.disconnect(websocket)
+
+async def send_update(websocket: WebSocket):
+    """Send general trading updates"""
+    try:
+        opportunities = []
+        scalping_signals = []
+        scalping_summary = {}
+        flow_trading_status = {}
+        
+        # Get opportunities
+        if opportunity_manager:
+            try:
+                opportunities = opportunity_manager.get_active_opportunities()[:10]
+            except Exception as e:
+                logger.warning(f"Error getting opportunities: {e}")
+        
+        # Get scalping data
+        if realtime_scalping_manager:
+            try:
+                scalping_signals = realtime_scalping_manager.get_active_signals()
+                scalping_summary = realtime_scalping_manager.get_summary()
+            except Exception as e:
+                logger.warning(f"Error getting scalping data: {e}")
+        
+        # Get flow trading data
+        if flow_manager:
+            try:
+                strategies = flow_manager.get_all_strategies_status()
+                active_grids = len([s for s in strategies if s.get('current_strategy') == 'grid_trading'])
+                active_scalping = len([s for s in strategies if s.get('current_strategy') == 'scalping'])
+                
+                flow_trading_status = {
+                    "enabled": True,
+                    "active_strategies": len(strategies),
+                    "active_grids": active_grids,
+                    "active_scalping": active_scalping,
+                    "strategies": strategies[:5]  # Send first 5 strategies
+                }
+            except Exception as e:
+                logger.warning(f"Error getting flow trading data: {e}")
+        
+        data = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "opportunities": opportunities,
+            "scalping_signals": scalping_signals,
+            "scalping_summary": scalping_summary,
+            "flow_trading": flow_trading_status,
+            "type": "update"
+        }
+        
+        await websocket.send_text(json.dumps(data))
+        
+    except Exception as e:
+        logger.error(f"Error sending update: {e}")
+
+async def send_scalping_update(websocket: WebSocket):
+    """Send scalping-specific updates"""
+    try:
+        if not realtime_scalping_manager:
+            return
+        
+        signals = realtime_scalping_manager.get_active_signals()
+        summary = realtime_scalping_manager.get_summary()
+        
+        # Get recent signal events
+        recent_events = []
+        try:
+            recent_events = realtime_scalping_manager.get_recent_events(limit=5)
+        except Exception as e:
+            logger.warning(f"Error getting recent events: {e}")
+        
+        data = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "signals": signals,
+            "summary": summary,
+            "recent_events": recent_events,
+            "type": "scalping_update"
+        }
+        
+        await websocket.send_text(json.dumps(data))
+        
+    except Exception as e:
+        logger.error(f"Error sending scalping update: {e}")
+
+async def send_flow_trading_update(websocket: WebSocket):
+    """Send flow trading specific updates"""
+    try:
+        if not flow_manager:
+            data = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "enabled": False,
+                "message": "Flow trading not initialized",
+                "type": "flow_trading_update"
+            }
+            await websocket.send_text(json.dumps(data))
+            return
+        
+        # Get all strategy statuses
+        strategies = flow_manager.get_all_strategies_status()
+        
+        # Get grid statuses
+        grids = []
+        if grid_engine:
+            try:
+                grids = grid_engine.get_all_grids_status()
+            except Exception as e:
+                logger.warning(f"Error getting grid statuses: {e}")
+        
+        # Calculate summary metrics
+        active_grids = len([s for s in strategies if s.get('current_strategy') == 'grid_trading'])
+        active_scalping = len([s for s in strategies if s.get('current_strategy') == 'scalping'])
+        
+        # Get recent strategy switches (mock data for now)
+        recent_switches = []
+        
+        data = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "enabled": True,
+            "active_strategies": len(strategies),
+            "active_grids": active_grids,
+            "active_scalping": active_scalping,
+            "strategies": strategies,
+            "grids": grids,
+            "recent_switches": recent_switches,
+            "total_exposure_usd": 0.0,  # Would calculate from risk manager
+            "daily_pnl": 0.0,  # Would calculate from performance
+            "type": "flow_trading_update"
+        }
+        
+        await websocket.send_text(json.dumps(data))
+        
+    except Exception as e:
+        logger.error(f"Error sending flow trading update: {e}")
+
+async def broadcast_flow_trading_event(event_type: str, event_data: Dict):
+    """Broadcast flow trading events to all connected clients"""
+    try:
+        message = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "event_type": event_type,
+            "data": event_data,
+            "type": "flow_trading_event"
+        }
+        
+        await manager.broadcast(json.dumps(message))
+        
+    except Exception as e:
+        logger.error(f"Error broadcasting flow trading event: {e}")
+
+async def broadcast_strategy_switch(symbol: str, from_strategy: str, to_strategy: str, reason: str):
+    """Broadcast strategy switch events"""
+    await broadcast_flow_trading_event("strategy_switch", {
+        "symbol": symbol,
+        "from_strategy": from_strategy,
+        "to_strategy": to_strategy,
+        "reason": reason
+    })
+
+async def broadcast_grid_event(event_type: str, symbol: str, grid_data: Dict):
+    """Broadcast grid trading events"""
+    await broadcast_flow_trading_event(f"grid_{event_type}", {
+        "symbol": symbol,
+        "grid_data": grid_data
+    })
+
+# Store reference for other modules to use
+websocket_manager = manager

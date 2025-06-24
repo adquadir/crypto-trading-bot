@@ -20,6 +20,8 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import SpeedIcon from '@mui/icons-material/Speed';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import ViewListIcon from '@mui/icons-material/ViewList';
@@ -38,6 +40,8 @@ const Navbar = () => {
     { path: '/signals', label: 'Signals', icon: <SignalCellularAltIcon /> },
     { path: '/opportunities', label: 'Opportunities', icon: <TrendingUpIcon /> },
     { path: '/scalping', label: 'Scalping', icon: <SpeedIcon /> },
+    { path: '/flow-trading', label: 'Flow Trading', icon: <GridOnIcon /> },
+    { path: '/profit-scraping', label: 'Profit Scraping', icon: <MonetizationOnIcon /> },
     { path: '/positions', label: 'Positions', icon: <AccountBalanceWalletIcon /> },
     { path: '/strategies', label: 'Strategies', icon: <ViewListIcon /> },
     { path: '/backtesting', label: 'Backtesting', icon: <TimelineIcon /> },

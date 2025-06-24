@@ -6,7 +6,7 @@
   "take_profit_distance": 0.03,
   "min_volume_ratio": 0.8,
   "disabled_strategies": [],
-  "last_updated": "2025-06-24T10:18:42.584746",
+  "last_updated": "2025-06-24T13:18:52.909528",
   "learning_iterations": 0,
-  "total_actions": 7
+  "total_actions": 13
 }

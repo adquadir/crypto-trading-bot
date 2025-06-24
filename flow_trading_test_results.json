@@ -1,0 +1,68 @@
+[
+  {
+    "test": "API /health",
+    "success": true,
+    "message": "Status: 200",
+    "timestamp": "2025-06-24T13:25:08.026717"
+  },
+  {
+    "test": "Flow Trading Status",
+    "success": true,
+    "message": "All fields present: ['enabled', 'active_strategies', 'active_grids', 'active_scalping', 'total_exposure_usd', 'daily_pnl']",
+    "timestamp": "2025-06-24T13:25:08.029508"
+  },
+  {
+    "test": "Get Strategies",
+    "success": true,
+    "message": "Retrieved 0 strategies",
+    "timestamp": "2025-06-24T13:25:08.031639"
+  },
+  {
+    "test": "Add Strategy",
+    "success": true,
+    "message": "Added strategy for BTCUSDT",
+    "timestamp": "2025-06-24T13:25:08.033933"
+  },
+  {
+    "test": "Stop Strategy",
+    "success": true,
+    "message": "Stopped strategy for BTCUSDT",
+    "timestamp": "2025-06-24T13:25:08.036491"
+  },
+  {
+    "test": "Get Grids",
+    "success": true,
+    "message": "Retrieved 0 grids",
+    "timestamp": "2025-06-24T13:25:08.039184"
+  },
+  {
+    "test": "Start Grid",
+    "success": true,
+    "message": "Started grid for ETHUSDT",
+    "timestamp": "2025-06-24T13:25:08.041930"
+  },
+  {
+    "test": "Stop Grid",
+    "success": true,
+    "message": "Stopped grid for ETHUSDT",
+    "timestamp": "2025-06-24T13:25:08.044708"
+  },
+  {
+    "test": "Risk Metrics",
+    "success": true,
+    "message": "Retrieved risk data: ['total_exposure_usd', 'total_exposure_pct', 'max_drawdown_pct', 'var_1d_pct', 'correlation_concentration', 'active_strategies']",
+    "timestamp": "2025-06-24T13:25:08.046945"
+  },
+  {
+    "test": "Performance Metrics",
+    "success": true,
+    "message": "Retrieved performance data",
+    "timestamp": "2025-06-24T13:25:08.049870"
+  },
+  {
+    "test": "Emergency Stop",
+    "success": true,
+    "message": "Emergency stop executed",
+    "timestamp": "2025-06-24T13:25:08.052953"
+  }
+]

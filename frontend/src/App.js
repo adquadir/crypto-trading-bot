@@ -10,6 +10,8 @@ import Dashboard from './pages/Dashboard';
 import Signals from './pages/Signals';
 import Opportunities from './pages/Opportunities';
 import Scalping from './pages/Scalping';
+import FlowTrading from './pages/FlowTrading';
+import ProfitScraping from './pages/ProfitScraping';
 import Settings from './pages/Settings';
 import Performance from './pages/Performance';
 import Backtesting from './pages/Backtesting';
@@ -425,6 +427,8 @@ function App() {
             <Route path="/signals" element={<Signals />} />
             <Route path="/opportunities" element={<Opportunities />} />
             <Route path="/scalping" element={<Scalping />} />
+            <Route path="/flow-trading" element={<FlowTrading />} />
+            <Route path="/profit-scraping" element={<ProfitScraping />} />
             <Route path="/positions" element={<Positions />} />
             <Route path="/performance" element={<Performance />} />
             <Route path="/backtesting" element={<Backtesting />} />
