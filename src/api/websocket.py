@@ -31,13 +31,15 @@ manager = ConnectionManager()
 opportunity_manager = None
 exchange_client = None
 enhanced_signal_tracker = None
+realtime_scalping_manager = None
 
-def set_websocket_components(opp_mgr, exch_client, signal_tracker=None):
+def set_websocket_components(opp_mgr, exch_client, signal_tracker=None, scalping_manager=None):
     """Set the component instances for WebSocket use."""
-    global opportunity_manager, exchange_client, enhanced_signal_tracker
+    global opportunity_manager, exchange_client, enhanced_signal_tracker, realtime_scalping_manager
     opportunity_manager = opp_mgr
     exchange_client = exch_client
     enhanced_signal_tracker = signal_tracker
+    realtime_scalping_manager = scalping_manager
 
 async def validate_api_key(api_key: str) -> bool:
     """Validate the provided API key against the environment variable."""
@@ -106,6 +108,7 @@ async def get_live_tracking_data():
 
 @router.websocket("/ws")
 @router.websocket("/ws/signals")
+@router.websocket("/ws/scalping")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time trading signals and live tracking data."""
     try:
@@ -139,7 +142,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 payload = {
                     "timestamp": datetime.now().isoformat(),
                     "opportunities": [],
-                    "live_tracking": {}
+                    "live_tracking": {},
+                    "scalping_signals": [],
+                    "scalping_summary": {}
                 }
                 
                 # Check if components are ready
@@ -193,10 +198,29 @@ async def websocket_endpoint(websocket: WebSocket):
                         "active_signals": []
                     }
                 
+                # Get real-time scalping signals
+                try:
+                    if realtime_scalping_manager:
+                        payload["scalping_signals"] = realtime_scalping_manager.get_active_signals()
+                        payload["scalping_summary"] = realtime_scalping_manager.get_signal_summary()
+                    else:
+                        payload["scalping_signals"] = []
+                        payload["scalping_summary"] = {
+                            "total_signals": 0,
+                            "avg_expected_return": 0,
+                            "high_priority_count": 0,
+                            "stale_signals_count": 0,
+                            "avg_age_minutes": 0
+                        }
+                except Exception as e:
+                    logger.error(f"Error getting scalping signals: {e}")
+                    payload["scalping_signals"] = []
+                    payload["scalping_summary"] = {}
+                
                 # Send the complete payload
                 await websocket.send_json({
                     "status": "success",
-                    "message": f"Live data: {len(payload['opportunities'])} opportunities, {payload['live_tracking']['active_signals_count']} active signals",
+                    "message": f"Live data: {len(payload['opportunities'])} opportunities, {payload['live_tracking']['active_signals_count']} active signals, {len(payload['scalping_signals'])} scalping signals",
                     "data": payload
                 })
                 

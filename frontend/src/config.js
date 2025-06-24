@@ -14,9 +14,16 @@ const getApiBaseUrl = () => {
     return `http://${hostname}:8000`; // Or window.location.origin if backend is on same port
 };
 
-// WebSocket functionality disabled
+// WebSocket configuration - ENABLED
 export const getWsBaseUrl = () => {
-    return null;
+    const hostname = window.location.hostname;
+    const isDevelopment = process.env.NODE_ENV === 'development';
+
+    // Use WebSocket protocol instead of HTTP
+    if (isDevelopment || hostname === 'localhost' || hostname === '127.0.0.1') {
+        return `ws://${hostname}:8000`; // WebSocket port 8000 for local dev
+    }
+    return `ws://${hostname}:8000`; // Production WebSocket URL
 };
 
 const config = {

@@ -1186,8 +1186,19 @@ class OpportunityManager:
             
             # Ensure all values are properly formatted and not NaN/null
             entry_price = float(entry_price) if entry_price and not math.isnan(entry_price) else current_price
-            take_profit = float(take_profit) if take_profit and not math.isnan(take_profit) else entry_price * 1.02
-            stop_loss = float(stop_loss) if stop_loss and not math.isnan(stop_loss) else entry_price * 0.98
+            
+            # Calculate distinct TP and SL values to prevent identical values
+            if best_signal['direction'] == 'LONG':
+                take_profit = float(take_profit) if take_profit and not math.isnan(take_profit) else round(entry_price * 1.025, 8)  # 2.5% profit
+                stop_loss = float(stop_loss) if stop_loss and not math.isnan(stop_loss) else round(entry_price * 0.975, 8)   # 2.5% stop
+            else:  # SHORT
+                take_profit = float(take_profit) if take_profit and not math.isnan(take_profit) else round(entry_price * 0.975, 8)  # 2.5% profit
+                stop_loss = float(stop_loss) if stop_loss and not math.isnan(stop_loss) else round(entry_price * 1.025, 8)   # 2.5% stop
+                
+            # 🔍 CRITICAL VALIDATION: Ensure entry, TP, and SL are distinct values
+            if entry_price == take_profit or entry_price == stop_loss or take_profit == stop_loss:
+                logger.error(f"❌ SIGNAL REJECTED for {symbol}: Identical price levels - Entry: {entry_price}, TP: {take_profit}, SL: {stop_loss}")
+                return None
             confidence = float(best_signal['confidence']) if best_signal['confidence'] and not math.isnan(best_signal['confidence']) else 0.5
             volume_24h = float(market_data.get('volume_24h', sum(volumes))) if market_data.get('volume_24h') else sum(volumes)
             
@@ -1615,10 +1626,21 @@ class OpportunityManager:
                 logger.debug(f"❌ Strategy {strategy_name} disabled by learning system for {symbol}")
                 return None
             
-            # Ensure all values are valid
+            # Ensure all values are valid and distinct
             entry_price = float(entry_price) if entry_price and not math.isnan(entry_price) else current_price
-            take_profit = float(take_profit) if take_profit and not math.isnan(take_profit) else entry_price * 1.02
-            stop_loss = float(stop_loss) if stop_loss and not math.isnan(stop_loss) else entry_price * 0.98
+            
+            # Calculate distinct TP and SL values based on direction to prevent identical values
+            if best_signal['direction'] == 'LONG':
+                take_profit = float(take_profit) if take_profit and not math.isnan(take_profit) else round(entry_price * 1.025, 8)  # 2.5% profit
+                stop_loss = float(stop_loss) if stop_loss and not math.isnan(stop_loss) else round(entry_price * 0.975, 8)   # 2.5% stop
+            else:  # SHORT
+                take_profit = float(take_profit) if take_profit and not math.isnan(take_profit) else round(entry_price * 0.975, 8)  # 2.5% profit
+                stop_loss = float(stop_loss) if stop_loss and not math.isnan(stop_loss) else round(entry_price * 1.025, 8)   # 2.5% stop
+                
+            # 🔍 CRITICAL VALIDATION: Ensure entry, TP, and SL are distinct values
+            if entry_price == take_profit or entry_price == stop_loss or take_profit == stop_loss:
+                logger.error(f"❌ BALANCED signal REJECTED for {symbol}: Identical price levels - Entry: {entry_price}, TP: {take_profit}, SL: {stop_loss}")
+                return None
             confidence = float(best_signal['confidence']) if best_signal['confidence'] and not math.isnan(best_signal['confidence']) else 0.6
             volume_24h = float(market_data.get('volume_24h', sum(volumes))) if market_data.get('volume_24h') else sum(volumes)
             
@@ -3262,8 +3284,8 @@ class OpportunityManager:
                 current_price > resistance_level * 1.001):  # 0.1% breakout
                 direction = "LONG"
                 entry_price = current_price
-                take_profit = current_price * 1.005  # 0.5% profit target
-                stop_loss = current_price * 0.997   # 0.3% stop loss
+                take_profit = round(current_price * 1.005, 8)  # 0.5% profit target
+                stop_loss = round(current_price * 0.997, 8)   # 0.3% stop loss
                 confidence = min(0.8, min_confidence + 0.2)  # Boost confidence for breakouts
                 scalping_type = "micro_breakout"
                 
@@ -3272,8 +3294,8 @@ class OpportunityManager:
                   current_price < support_level * 0.999):  # 0.1% breakdown
                 direction = "SHORT"
                 entry_price = current_price
-                take_profit = current_price * 0.995  # 0.5% profit target
-                stop_loss = current_price * 1.003   # 0.3% stop loss
+                take_profit = round(current_price * 0.995, 8)  # 0.5% profit target
+                stop_loss = round(current_price * 1.003, 8)   # 0.3% stop loss
                 confidence = min(0.8, min_confidence + 0.2)  # Boost confidence for breakouts
                 scalping_type = "micro_breakdown"
                 
@@ -3284,16 +3306,31 @@ class OpportunityManager:
                     direction = "LONG" if price_momentum > 0 else "SHORT"
                     entry_price = current_price
                     if direction == "LONG":
-                        take_profit = current_price * 1.004  # 0.4% profit
-                        stop_loss = current_price * 0.998   # 0.2% stop
+                        take_profit = round(current_price * 1.004, 8)  # 0.4% profit
+                        stop_loss = round(current_price * 0.998, 8)   # 0.2% stop
                     else:
-                        take_profit = current_price * 0.996  # 0.4% profit
-                        stop_loss = current_price * 1.002   # 0.2% stop
+                        take_profit = round(current_price * 0.996, 8)  # 0.4% profit
+                        stop_loss = round(current_price * 1.002, 8)   # 0.2% stop
                     confidence = min(0.7, min_confidence + 0.1)
                     scalping_type = "momentum_scalp"
             
             if not direction:
                 return None
+            
+            # 🔍 CRITICAL VALIDATION: Ensure entry, TP, and SL are distinct values
+            if entry_price == take_profit or entry_price == stop_loss or take_profit == stop_loss:
+                logger.error(f"❌ SCALP signal REJECTED for {symbol}: Identical price levels - Entry: {entry_price}, TP: {take_profit}, SL: {stop_loss}")
+                return None
+                
+            # Validate proper signal direction relationships
+            if direction == "LONG":
+                if not (stop_loss < entry_price < take_profit):
+                    logger.error(f"❌ SCALP LONG signal REJECTED for {symbol}: Invalid price order - SL: {stop_loss}, Entry: {entry_price}, TP: {take_profit}")
+                    return None
+            else:  # SHORT
+                if not (take_profit < entry_price < stop_loss):
+                    logger.error(f"❌ SCALP SHORT signal REJECTED for {symbol}: Invalid price order - TP: {take_profit}, Entry: {entry_price}, SL: {stop_loss}")
+                    return None
                 
             # Apply learned confidence filter
             if confidence < min_confidence:

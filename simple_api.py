@@ -30,6 +30,7 @@ from src.strategy.strategy_manager import StrategyManager
 from src.risk.risk_manager import RiskManager
 from src.opportunity.opportunity_manager import OpportunityManager
 from src.signals.enhanced_signal_tracker import enhanced_signal_tracker
+from src.signals.realtime_scalping_manager import RealtimeScalpingManager
 from src.learning.automated_learning_manager import AutomatedLearningManager
 from src.api.connection_manager import ConnectionManager
 
@@ -172,6 +173,8 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://crypto_user:crypto_passwo
 # Global components
 opportunity_manager = None
 automated_learning_manager = None
+realtime_scalping_manager = None
+connection_manager = None
 
 # Global variables for background processing
 _background_scan_task = None
@@ -237,6 +240,10 @@ if BACKTESTING_AVAILABLE and backtesting_router:
     print("✅ Backtesting routes enabled")
 else:
     print("⚠️ Backtesting routes disabled")
+
+# Include WebSocket routes
+app.include_router(websocket_router)
+print("✅ WebSocket routes enabled")
 
 # Include signal tracking routes if available - DISABLED to fix duplicate performance endpoint
 # if SIGNAL_TRACKING_AVAILABLE and signal_tracking_router:
@@ -360,7 +367,7 @@ async def background_refresh():
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup."""
-    global opportunity_manager, automated_learning_manager, _background_refresh_task
+    global opportunity_manager, automated_learning_manager, realtime_scalping_manager, connection_manager, _background_refresh_task
     
     print("Initializing components...")
     
@@ -391,6 +398,32 @@ async def startup_event():
     opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker)
     await opportunity_manager.initialize()
     
+    # Initialize connection manager for WebSocket broadcasting
+    connection_manager = ConnectionManager()
+    
+    # 🚀 INITIALIZE REAL-TIME SCALPING MANAGER 
+    print("🚀 Initializing real-time scalping manager...")
+    try:
+        realtime_scalping_manager = RealtimeScalpingManager(
+            opportunity_manager=opportunity_manager,
+            exchange_client=exchange_client,
+            connection_manager=connection_manager
+        )
+        await realtime_scalping_manager.start()
+        print("✅ Real-time scalping system started - signals will update every 30 seconds!")
+    except Exception as e:
+        print(f"❌ Failed to initialize real-time scalping manager: {e}")
+        realtime_scalping_manager = None
+    
+    # Configure WebSocket components
+    from src.api.websocket import set_websocket_components
+    set_websocket_components(
+        opp_mgr=opportunity_manager,
+        exch_client=exchange_client,
+        signal_tracker=enhanced_signal_tracker,
+        scalping_manager=realtime_scalping_manager
+    )
+    
     # 🧠 INITIALIZE AUTOMATED LEARNING MANAGER - THE MISSING PIECE!
     print("🧠 Initializing automated learning manager...")
     try:
@@ -413,12 +446,18 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Proper cleanup on shutdown to prevent port binding issues."""
-    global _background_refresh_task, _background_scan_task, opportunity_manager, automated_learning_manager
+    global _background_refresh_task, _background_scan_task, opportunity_manager, automated_learning_manager, realtime_scalping_manager
     
     logger.info("🛑 Starting graceful shutdown...")
     
     try:
-        # Stop automated learning manager FIRST
+        # Stop real-time scalping manager FIRST  
+        if realtime_scalping_manager:
+            logger.info("🚀 Stopping real-time scalping manager...")
+            await realtime_scalping_manager.stop()
+            logger.info("✅ Real-time scalping manager stopped")
+        
+        # Stop automated learning manager
         if automated_learning_manager:
             logger.info("🧠 Stopping automated learning manager...")
             await automated_learning_manager.stop_learning_loop()
@@ -1187,7 +1226,47 @@ async def get_positions_legacy():
 
 @app.get("/api/v1/trading/scalping-signals")
 async def get_scalping_signals():
-    """Get scalping trading signals focused on capital returns."""
+    """Get real-time scalping trading signals with automatic lifecycle management."""
+    # Use real-time scalping manager if available
+    if realtime_scalping_manager:
+        try:
+            scalping_signals = realtime_scalping_manager.get_active_signals()
+            summary = realtime_scalping_manager.get_signal_summary()
+            
+            if not scalping_signals:
+                return {
+                    "status": "no_signals",
+                    "message": "No active scalping signals",
+                    "data": [],
+                    "summary": summary,
+                    "scan_info": {
+                        "strategy_type": "real_time_scalping",
+                        "target_returns": "3-10% capital",
+                        "timeframe": "15m/1h",
+                        "last_scan": datetime.now().isoformat(),
+                        "signal_age_limit": "15 minutes",
+                        "update_frequency": "30 seconds"
+                    }
+                }
+            
+            return {
+                "status": "complete",
+                "data": scalping_signals,
+                "summary": summary,
+                "message": f"Found {len(scalping_signals)} active real-time scalping signals",
+                "scan_info": {
+                    "strategy_type": "real_time_scalping",
+                    "target_returns": "3-10% capital", 
+                    "timeframe": "15m/1h",
+                    "last_scan": datetime.now().isoformat(),
+                    "signal_age_limit": "15 minutes",
+                    "update_frequency": "30 seconds"
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting real-time scalping signals: {e}")
+    
+    # Fallback to opportunity manager if real-time manager not available
     if not opportunity_manager:
         return {
             "status": "initializing",
@@ -1196,7 +1275,7 @@ async def get_scalping_signals():
         }
     
     try:
-        # Get scalping opportunities
+        # Get scalping opportunities (fallback)
         scalping_signals = opportunity_manager.get_scalping_opportunities()
         
         if not scalping_signals:
@@ -1340,6 +1419,25 @@ async def enter_all_trades():
 @app.post("/api/v1/trading/refresh-scalping")
 async def refresh_scalping_signals():
     """Manually refresh scalping signals scan."""
+    # Use real-time scalping manager if available
+    if realtime_scalping_manager:
+        try:
+            print("🔄 Real-time scalping refresh triggered...")
+            await realtime_scalping_manager.force_signal_refresh()
+            
+            scalping_signals = realtime_scalping_manager.get_active_signals()
+            summary = realtime_scalping_manager.get_signal_summary()
+            
+            return {
+                "status": "success",
+                "message": f"Real-time scalping refresh completed - {len(scalping_signals)} active signals",
+                "data": scalping_signals,
+                "summary": summary
+            }
+        except Exception as e:
+            logger.error(f"Error refreshing real-time scalping signals: {e}")
+    
+    # Fallback to opportunity manager 
     if not opportunity_manager:
         return {
             "status": "error",

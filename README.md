@@ -1,12 +1,26 @@
 # 🚀 Revolutionary Adaptive Crypto Trading System
 
-**The only trading bot that learns REALITY, not just rules - featuring breakthrough dual-reality tracking with mobile-responsive interface and intelligent signal prioritization.**
+**The only trading bot that learns REALITY, not just rules - featuring breakthrough real-time WebSocket scalping, dual-reality tracking, mobile-responsive interface, and intelligent signal prioritization.**
 
-A sophisticated cryptocurrency trading system featuring **real-time signal tracking**, **dual-reality performance monitoring**, **fakeout detection**, **adaptive market analysis**, **HIGH priority signal detection**, **mobile-responsive interface**, and **comprehensive learning insights** - designed to think and learn from true market behavior.
+A sophisticated cryptocurrency trading system featuring **real-time WebSocket scalping**, **signal lifecycle management**, **dual-reality performance monitoring**, **fakeout detection**, **adaptive market analysis**, **HIGH priority signal detection**, **mobile-responsive interface**, and **comprehensive learning insights** - designed to think and learn from true market behavior with live signal updates.
 
 ---
 
 ## 🎯 **BREAKTHROUGH FEATURES**
+
+### ⚡ **Real-Time WebSocket Scalping System** ⭐ **REVOLUTIONARY BREAKTHROUGH**
+**"Live signal streams with automatic lifecycle management and instant updates"**
+
+- **Live Signal Broadcasting**: WebSocket-powered real-time signal delivery
+- **Signal Lifecycle Management**: 30-second generation, 15-minute auto-expiry
+- **Real-Time Age Display**: Live signal aging with color-coded freshness indicators
+- **Automatic Invalidation**: Signals auto-remove when TP/SL hit or expired
+- **Live Connection Status**: Animated "LIVE" indicator showing connection health
+- **Event-Driven Updates**: Real-time signal_new, signal_update, signal_stale, signal_invalidate
+- **Optimal Trading Window**: Maintains 0-15 minute signal freshness for scalping
+- **No Refresh Needed**: Signals appear/disappear automatically without page refresh
+
+**🔥 PROBLEM SOLVED:** Traditional systems require manual refresh and show stale signals. Our real-time WebSocket system ensures traders always see fresh signals within the optimal 0-15 minute scalping window with live updates.
 
 ### 🧠 **Dual-Reality Tracking System** ⭐ **REVOLUTIONARY BREAKTHROUGH**
 **"Learn from ACTUAL market behavior, not artificial stop loss constraints"**
@@ -30,6 +44,7 @@ A sophisticated cryptocurrency trading system featuring **real-time signal track
 - **Progressive Disclosure**: Collapsible sections for better mobile information architecture
 - **Battery Efficient**: Optimized rendering for mobile device performance
 - **Cross-Platform**: Works seamlessly on iOS, Android, desktop, and tablet
+- **Real-Time Mobile Updates**: WebSocket signals update instantly on mobile devices
 
 ### 🎯 **HIGH Priority Signal System** ⭐ **PROFIT MAXIMIZER**
 **Intelligent signal prioritization based on capital return potential**
@@ -106,15 +121,18 @@ A sophisticated cryptocurrency trading system featuring **real-time signal track
 └── 🎮 Dashboard - Mobile-first system overview and health
 ```
 
-### **Backend (FastAPI + AsyncIO)**
+### **Backend (FastAPI + AsyncIO + WebSocket)**
 ```
-🚀 High-Performance API Server
+🚀 High-Performance Real-Time API Server
+├── ⚡ Real-Time Scalping Manager - WebSocket signal lifecycle management
+├── 🌐 WebSocket Server - Live signal broadcasting (/ws/scalping)
 ├── 🎯 Opportunity Manager - Signal generation with priority calculation
 ├── 🧠 Enhanced Signal Tracker - Dual-reality performance monitoring
 ├── 🔥 Fakeout Detector - Post-SL rebound analysis
 ├── 🧠 Learning Insights API - Intelligence visualization
 ├── ⭐ Golden Signal Detector - Best performance identification
 ├── 🔄 Background Scanner - Continuous market monitoring (437+ symbols)
+├── ⏰ Signal Lifecycle Tasks - 30s generation, 15s validation, 60s cleanup
 └── 💾 PostgreSQL Database - Comprehensive dual-reality data storage
 ```
 
@@ -169,6 +187,14 @@ BINANCE_API_SECRET=your_api_secret_here
 # Enhanced Tracking
 ENABLE_SIGNAL_TRACKING=true
 
+# ⚡ REAL-TIME WEBSOCKET SCALPING
+ENABLE_WEBSOCKET=true
+WEBSOCKET_SIGNAL_GENERATION_INTERVAL=30    # Generate signals every 30 seconds
+WEBSOCKET_SIGNAL_VALIDATION_INTERVAL=15    # Validate signals every 15 seconds  
+WEBSOCKET_SIGNAL_CLEANUP_INTERVAL=60       # Cleanup expired signals every 60 seconds
+SIGNAL_AGE_LIMIT=900                       # 15 minutes signal age limit
+SIGNAL_STALE_WARNING=600                   # 10 minutes stale warning
+
 # 🧠 DUAL REALITY TRACKING - LEARNS TRUE PERFORMANCE, NOT JUST STOP LOSS HITS
 LEARNING_IGNORE_STOP_LOSS=true
 DUAL_REALITY_TRACKING=true
@@ -217,14 +243,19 @@ open http://YOUR_IP:3000
 
 ## 🎮 **USING THE SYSTEM**
 
-### **🎯 Mobile-Optimized Scalping Page**
+### **⚡ Real-Time Mobile Scalping Page**
 ```
+✅ Live WebSocket signal updates (no refresh needed)
+✅ Real-time signal age display with color coding (green→yellow→red)
+✅ Animated "LIVE" connection indicator showing WebSocket status
+✅ Automatic signal lifecycle management (30s generation, 15min expiry)
 ✅ Compact signal cards with all critical information
 ✅ HIGH priority badges for 7%+ capital return signals  
 ✅ Touch-friendly "Enter Trade" buttons (GREEN=LONG, RED=SHORT)
 ✅ Real-time signal prioritization and sorting
 ✅ Scalping type indicators (momentum, breakout, mean reversion)
 ✅ One-tap signal details and position sizing scenarios
+✅ Eastern timezone display for consistent time reference
 ```
 
 ### **📱 Mobile Trading Features**
@@ -280,13 +311,15 @@ open http://YOUR_IP:3000
 
 ### **🎯 Trading Endpoints**
 ```http
-# Mobile-optimized live scalping signals with priority system
-GET  /api/v1/trading/scalping-signals
-POST /api/v1/trading/execute_manual_trade
-GET  /api/v1/trading/positions
-GET  /api/v1/trading/status
-POST /api/v1/trading/enter-all-trades
-POST /api/v1/trading/refresh-scalping
+# Real-time WebSocket scalping with live signal updates
+WS   /ws/scalping                           # Real-time signal broadcasting
+WS   /ws/signals                            # General WebSocket endpoint
+GET  /api/v1/trading/scalping-signals       # Mobile-optimized scalping signals
+POST /api/v1/trading/execute_manual_trade   # Manual trade execution
+GET  /api/v1/trading/positions              # Real-time position monitoring
+GET  /api/v1/trading/status                 # System health status
+POST /api/v1/trading/enter-all-trades       # Bulk trade entry
+POST /api/v1/trading/refresh-scalping       # Force signal refresh
 ```
 
 ### **🧠 Dual-Reality Learning Endpoints**
@@ -472,35 +505,97 @@ ENABLE_SIGNAL_TRACKING = true           # Real-time performance monitoring
 TRACKING_INTERVALS = [15,30,60,120,240] # Snapshot intervals (minutes)
 GOLDEN_SIGNAL_THRESHOLD = 0.03         # 3% profit threshold
 GOLDEN_SIGNAL_TIME_LIMIT = 60          # 60 minutes time limit
+
+# Real-Time WebSocket Configuration
+WEBSOCKET_ENABLED = true                # Enable WebSocket broadcasting
+SIGNAL_GENERATION_INTERVAL = 30        # Generate signals every 30 seconds
+SIGNAL_VALIDATION_INTERVAL = 15        # Validate existing signals every 15 seconds  
+SIGNAL_CLEANUP_INTERVAL = 60           # Cleanup expired signals every 60 seconds
+SIGNAL_AGE_LIMIT = 900                 # 15 minutes maximum signal age
+SIGNAL_STALE_WARNING = 600             # 10 minutes stale warning threshold
+WEBSOCKET_BROADCAST_INTERVAL = 2       # Broadcast updates every 2 seconds
+AUTO_INVALIDATE_ON_TP_SL = true        # Auto-remove signals when TP/SL hit
 ```
 
 ---
 
 ## 🚀 **PRODUCTION DEPLOYMENT**
 
-### **☁️ Cloud Setup (Recommended)**
+### **☁️ VPS Production Setup (Recommended)**
 ```bash
 # VPS with 4GB+ RAM, 2+ CPU cores
-# Ubuntu 20.04+ with Docker support
+# Ubuntu 20.04+ with Node.js and Python support
 
 # Database optimization for dual-reality data
 postgresql.conf: shared_buffers = 512MB, max_connections = 200
 
-# Process management  
-pm2 start simple_api.py --name trading-api
-pm2 start "cd frontend && npm start" --name trading-frontend
+# PM2 Process Management Configuration
+# ecosystem.config.js:
+module.exports = {
+  apps: [
+    {
+      name: 'crypto-trading-api',
+      script: './venv/bin/python',
+      args: 'simple_api.py',
+      cwd: '/home/ubuntu/crypto-trading-bot',
+      instances: 1,
+      autorestart: true,
+      env: { PYTHONPATH: '/home/ubuntu/crypto-trading-bot' }
+    },
+    {
+      name: 'crypto-trading-frontend',
+      script: '/usr/bin/npm',
+      args: 'run start',
+      cwd: '/home/ubuntu/crypto-trading-bot/frontend',
+      instances: 1,
+      autorestart: true,
+      env: { PORT: 3000, BROWSER: 'none', CI: 'true' }
+    }
+  ]
+};
 
-# Reverse proxy (Nginx) with mobile optimization
-location /api/ { 
-    proxy_pass http://localhost:8000/; 
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+# Deploy and manage with PM2
+pm2 start ecosystem.config.js
+pm2 save
+pm2 startup  # Auto-restart on system reboot
+
+# Monitor real-time logs
+pm2 logs crypto-trading-api
+pm2 logs crypto-trading-frontend
+
+# Reverse proxy (Nginx) with WebSocket support
+upstream backend {
+    server localhost:8000;
 }
-location / { 
-    proxy_pass http://localhost:3000/; 
-    # Mobile optimization headers
-    add_header Cache-Control "public, max-age=31536000" always;
-    gzip on;
-    gzip_types text/css application/javascript application/json;
+upstream frontend {
+    server localhost:3000;
+}
+
+server {
+    location /api/ { 
+        proxy_pass http://backend/; 
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    
+    # WebSocket support for real-time features
+    location /ws/ {
+        proxy_pass http://backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 86400;
+    }
+    
+    location / { 
+        proxy_pass http://frontend/; 
+        # Mobile optimization headers
+        add_header Cache-Control "public, max-age=31536000" always;
+        gzip on;
+        gzip_types text/css application/javascript application/json;
+    }
 }
 ```
 
@@ -552,13 +647,17 @@ This system represents a fundamental breakthrough in algorithmic trading: from l
 
 **🚀 Ready to revolutionize your crypto trading with TRUE learning and mobile freedom? Start with small amounts, let the dual-reality system learn from actual market behavior, and watch it become a genuinely intelligent trading partner!**
 
-**Current System Status: ✅ ALL SERVICES RUNNING + MOBILE-OPTIMIZED + DUAL-REALITY ACTIVE**
-- 🚀 API Server: Running on port 8000
-- 📱 Mobile-Responsive Frontend: Running on port 3000  
+**Current System Status: ✅ ALL SERVICES RUNNING + REAL-TIME WEBSOCKET + MOBILE-OPTIMIZED + DUAL-REALITY ACTIVE**
+- ⚡ Real-Time WebSocket Server: Broadcasting live signals on /ws/scalping
+- 🚀 API Server: Running on port 8000 with WebSocket support
+- 📱 Mobile-Responsive Frontend: Running on port 3000 with live updates
 - 💾 Database: PostgreSQL operational with dual-reality schema
+- 🔄 Signal Lifecycle Manager: 30s generation, 15s validation, 60s cleanup
 - 🧠 Enhanced Tracking: 70+ signals tracked with real-time updates
 - 🔥 Dual-Reality Learning: Active fakeout detection and virtual tracking
 - 🎯 Signal Generation: Priority system with HIGH priority detection
 - 📊 Learning Dashboard: http://localhost:3000/learning
-- 🌍 External Access: http://71.164.76.192:3000 (mobile-friendly)
-- 📱 Mobile Optimization: Touch-friendly, responsive, battery-efficient
+- ⚡ Real-Time Scalping: http://localhost:3000/scalping (live signals)
+- 🌍 External Access: http://71.164.76.192:3000 (mobile-friendly + WebSocket)
+- 📱 Mobile Optimization: Touch-friendly, responsive, battery-efficient, real-time updates
+- 🕐 Eastern Time Display: Consistent timezone reference across all interfaces

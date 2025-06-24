@@ -35,23 +35,33 @@ import {
   Assessment as AssessmentIcon,
   FlashOn as FlashIcon,
   PrecisionManufacturing as PrecisionIcon,
-  TrendingFlat as ScalpIcon
+  TrendingFlat as ScalpIcon,
+  Wifi as WifiIcon,
+  WifiOff as WifiOffIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
+import { useScalpingWebSocket } from '../contexts/ScalpingWebSocketContext';
 
 const Scalping = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
   
-  const [signals, setSignals] = useState([]);
+  // Use real-time WebSocket connection
+  const { 
+    signals, 
+    summary, 
+    isConnected, 
+    connectionError, 
+    forceRefresh: wsForceRefresh 
+  } = useScalpingWebSocket();
+  
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedSignal, setSelectedSignal] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [summary, setSummary] = useState(null);
   const [executingSignals, setExecutingSignals] = useState(new Set());
   const [executedTrades, setExecutedTrades] = useState(new Set());
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -59,35 +69,23 @@ const Scalping = () => {
   const [enteringAllTrades, setEnteringAllTrades] = useState(false);
 
   useEffect(() => {
-    fetchScalpingSignals();
-    fetchTradingStatus();
-    const interval = setInterval(fetchScalpingSignals, 60000); // Refresh every minute for scalping
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchScalpingSignals = async () => {
-    try {
-      setLoading(signals.length === 0); // Only show loading on initial load
-      const response = await axios.get(`${config.API_BASE_URL}/api/v1/trading/scalping-signals`);
-      
-      if (response.data.status === 'complete' || response.data.status === 'success') {
-        setSignals(response.data.data || []);
-        setSummary(response.data.summary || null);
-        setError(null);
-      } else if (response.data.status === 'no_signals') {
-        setSignals([]);
-        setSummary(null);
-        setError(null);
-      } else {
-        setError(response.data.message || 'Failed to fetch scalping signals');
-      }
-    } catch (err) {
-      setError('Failed to connect to scalping signals API');
-      console.error('Error fetching scalping signals:', err);
-    } finally {
+    // Set loading to false once we have WebSocket connection
+    if (isConnected || connectionError) {
       setLoading(false);
     }
-  };
+    
+    // Set error state from WebSocket connection
+    if (connectionError) {
+      setError(connectionError);
+    } else {
+      setError(null);
+    }
+    
+    // Fetch trading status
+    fetchTradingStatus();
+  }, [isConnected, connectionError]);
+
+  // Signals now come from WebSocket - no need for fetchScalpingSignals function
 
   const fetchTradingStatus = async () => {
     try {
@@ -103,10 +101,19 @@ const Scalping = () => {
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
-      await axios.post(`${config.API_BASE_URL}/api/v1/trading/refresh-scalping`);
-      await fetchScalpingSignals();
+      await wsForceRefresh();
+      setSnackbar({
+        open: true,
+        message: 'Scalping signals refreshed successfully!',
+        severity: 'success'
+      });
     } catch (err) {
       setError('Failed to refresh scalping signals');
+      setSnackbar({
+        open: true,
+        message: 'Failed to refresh signals',
+        severity: 'error'
+      });
     } finally {
       setRefreshing(false);
     }
@@ -347,6 +354,20 @@ const Scalping = () => {
     const leverage = signal.optimal_leverage || 1;
     const scalpType = signal.scalping_type || 'unknown';
     const riskReward = signal.risk_reward || 0;
+    const signalAge = signal.age_seconds || 0;
+    const signalStatus = signal.status || 'active';
+    
+    // Calculate age display
+    const ageMinutes = Math.floor(signalAge / 60);
+    const ageSeconds = signalAge % 60;
+    const ageDisplay = ageMinutes > 0 ? `${ageMinutes}m` : `${Math.floor(ageSeconds)}s`;
+    
+    // Determine age color
+    const getAgeColor = () => {
+      if (signalAge < 300) return 'success.main'; // < 5 minutes - fresh
+      if (signalAge < 600) return 'warning.main'; // < 10 minutes - getting stale
+      return 'error.main'; // > 10 minutes - stale
+    };
 
     return (
       <Card 
@@ -419,7 +440,19 @@ const Scalping = () => {
                 variant="outlined"
                 sx={{ fontSize: '0.6rem', height: '20px' }}
               />
-              {signal.status === 'stale' && (
+              <Chip
+                label={ageDisplay}
+                size="small"
+                sx={{ 
+                  fontSize: '0.65rem', 
+                  height: '20px',
+                  color: getAgeColor(),
+                  borderColor: getAgeColor(),
+                  fontWeight: 'bold'
+                }}
+                variant="outlined"
+              />
+              {signalStatus === 'stale' && (
                 <Chip
                   label="STALE"
                   color="warning"
@@ -509,7 +542,13 @@ const Scalping = () => {
           {/* Compact Timestamp */}
           {signal.timestamp && (
             <Typography variant="caption" color="textSecondary" display="block" textAlign="center" mt={0.5} fontSize="0.6rem">
-              {new Date(signal.timestamp).toLocaleTimeString()}
+{new Intl.DateTimeFormat('en-US', {
+                timeZone: 'America/New_York',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+              }).format(new Date(signal.timestamp * 1000))} EST
             </Typography>
           )}
         </CardContent>
@@ -667,15 +706,32 @@ const Scalping = () => {
         gap={{ xs: 2, sm: 0 }}
       >
         <Box>
-          <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold" gutterBottom>
-            ⚡ High-Speed Scalping
-          </Typography>
+          <Box display="flex" alignItems="center" gap={1} mb={1}>
+            <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
+              ⚡ High-Speed Scalping
+            </Typography>
+            <Chip
+              icon={isConnected ? <WifiIcon /> : <WifiOffIcon />}
+              label={isConnected ? 'LIVE' : connectionError ? 'ERROR' : 'CONNECTING'}
+              color={isConnected ? 'success' : connectionError ? 'error' : 'warning'}
+              size="small"
+              sx={{ 
+                fontWeight: 'bold',
+                animation: isConnected ? 'pulse 2s infinite' : 'none',
+                '@keyframes pulse': {
+                  '0%': { opacity: 1 },
+                  '50%': { opacity: 0.7 },
+                  '100%': { opacity: 1 },
+                }
+              }}
+            />
+          </Box>
           <Typography 
             variant="body1" 
             color="text.secondary"
             sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
           >
-            Rapid-fire 15m/1h precision signals for quick profits
+            Real-time signals with automatic lifecycle management
           </Typography>
         </Box>
         
@@ -726,7 +782,7 @@ const Scalping = () => {
           }}
         >
           <Typography variant="h6" gutterBottom fontWeight="bold">
-            📊 Scalping Overview
+            📊 Real-Time Scalping Overview
           </Typography>
           <Grid container spacing={{ xs: 2, sm: 3 }}>
             <Grid item xs={6} sm={3}>
@@ -752,24 +808,31 @@ const Scalping = () => {
             <Grid item xs={6} sm={3}>
               <Box textAlign="center">
                 <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold" color="warning.main">
-                  ${(summary.total_expected_capital || 0).toFixed(0)}
+                  {(summary.high_priority_count || 0)}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Total Expected Capital
+                  High Priority (≥7%)
                 </Typography>
               </Box>
             </Grid>
             <Grid item xs={6} sm={3}>
               <Box textAlign="center">
                 <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold" color="info.main">
-                  {(summary.high_priority_count || 0)}
+                  {(summary.avg_age_minutes || 0).toFixed(1)}m
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  High Priority
+                  Avg Signal Age
                 </Typography>
               </Box>
             </Grid>
           </Grid>
+          
+          {/* Real-time Status Info */}
+          <Box mt={2} p={1} bgcolor="rgba(0,255,0,0.05)" borderRadius={1} border="1px solid rgba(0,255,0,0.2)">
+            <Typography variant="caption" color="success.main" fontWeight="bold">
+              🚀 REAL-TIME: Signals update every 30s • Auto-invalidation at 15min • WebSocket connected
+            </Typography>
+          </Box>
         </Paper>
       )}
 

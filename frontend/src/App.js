@@ -3,7 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { useMediaQuery } from '@mui/material';
-// import { WebSocketProvider } from './contexts/WebSocketContext';  // Disabled WebSocket
+// import { WebSocketProvider } from './contexts/WebSocketContext';
+import { ScalpingWebSocketProvider } from './contexts/ScalpingWebSocketContext';  // Disabled WebSocket
 import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import Signals from './pages/Signals';
@@ -416,21 +417,23 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router>
-        <Navbar />
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/signals" element={<Signals />} />
-          <Route path="/opportunities" element={<Opportunities />} />
-          <Route path="/scalping" element={<Scalping />} />
-          <Route path="/positions" element={<Positions />} />
-          <Route path="/performance" element={<Performance />} />
-          <Route path="/backtesting" element={<Backtesting />} />
-          <Route path="/learning" element={<Learning />} />
-          <Route path="/strategies" element={<Strategies />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
-      </Router>
+      <ScalpingWebSocketProvider>
+        <Router>
+          <Navbar />
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/signals" element={<Signals />} />
+            <Route path="/opportunities" element={<Opportunities />} />
+            <Route path="/scalping" element={<Scalping />} />
+            <Route path="/positions" element={<Positions />} />
+            <Route path="/performance" element={<Performance />} />
+            <Route path="/backtesting" element={<Backtesting />} />
+            <Route path="/learning" element={<Learning />} />
+            <Route path="/strategies" element={<Strategies />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </Router>
+      </ScalpingWebSocketProvider>
     </ThemeProvider>
   );
 }

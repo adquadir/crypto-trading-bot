@@ -798,12 +798,17 @@ class SignalGenerator:
             )  # Use 1% of price as minimum ATR
             if direction == "LONG":
                 entry = current_price
-                tp = entry + (2 * atr)
-                sl = entry - atr
+                tp = round(entry + (2 * atr), 8)
+                sl = round(entry - atr, 8)
             else:  # SHORT
                 entry = current_price
-                tp = entry - (2 * atr)
-                sl = entry + atr
+                tp = round(entry - (2 * atr), 8)
+                sl = round(entry + atr, 8)
+            
+            # 🔍 CRITICAL VALIDATION: Ensure entry, TP, and SL are distinct values
+            if entry == tp or entry == sl or tp == sl:
+                logger.error(f"❌ Signal generation FAILED: Identical price levels - Entry: {entry}, TP: {tp}, SL: {sl}")
+                return None, None, None
             
             return entry, tp, sl
             
