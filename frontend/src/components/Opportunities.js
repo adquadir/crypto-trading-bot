@@ -24,7 +24,10 @@ import {
   TextField,
   Alert,
   Divider,
-  Stack
+  Stack,
+  FormControl,
+  FormControlLabel,
+  Switch
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { useMediaQuery } from '@mui/system';
@@ -397,6 +400,8 @@ const SignalCard = ({ signal, onDetailsClick }) => {
 const Opportunities = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
+  
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -499,7 +504,9 @@ const Opportunities = () => {
     if (aCertainty !== bCertainty) {
       return bCertainty - aCertainty;
     }
-    return calculatePrecisionScore(b) - calculatePrecisionScore(a);
+    const aPrecision = calculatePrecisionScore(a);
+    const bPrecision = calculatePrecisionScore(b);
+    return bPrecision - aPrecision;
   });
 
   const handleDetailsClick = (signal) => {
@@ -507,384 +514,375 @@ const Opportunities = () => {
     setDetailsOpen(true);
   };
 
-  if (loading && signals.length === 0) {
+  const handleCloseDetails = () => {
+    setDetailsOpen(false);
+    setSelectedSignal(null);
+  };
+
+  if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
+        <CircularProgress size={isMobile ? 40 : 60} />
+        {!isMobile && (
+          <Typography variant="h6" sx={{ ml: 2 }}>
+            Loading opportunities...
+          </Typography>
+        )}
       </Box>
     );
   }
 
+  if (error) {
+    return (
+      <Alert severity="error" sx={{ mt: 2 }}>
+        {error}
+      </Alert>
+    );
+  }
+
   return (
-    <Box sx={{ p: isMobile ? 1 : 2 }}>
-      {/* Header - Mobile Optimized */}
-      <Box mb={3}>
-        <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-          <Box flex={1}>
-            <Typography variant={isMobile ? "h6" : "h5"} gutterBottom fontWeight="bold">
-              🎯 3% Precision Trading
+    <Box>
+      {/* Mobile-Optimized Header with Stats */}
+      <Paper 
+        sx={{ 
+          p: { xs: 2, sm: 3 }, 
+          mb: { xs: 2, sm: 3 },
+          background: 'linear-gradient(135deg, rgba(144, 202, 249, 0.1) 0%, rgba(244, 143, 177, 0.1) 100%)'
+        }}
+      >
+        <Grid container spacing={{ xs: 2, sm: 3 }} alignItems="center">
+          <Grid item xs={12} sm={8}>
+            <Typography variant={isMobile ? "h6" : "h5"} fontWeight="bold" gutterBottom>
+              🎯 Precision Trading Opportunities
             </Typography>
-            <Typography variant="body2" color="textSecondary" sx={{ display: isMobile ? 'none' : 'block' }}>
-              "Give me just 3% of movement — with precision, volume, and high probability — and I'll scale that into serious profit."
+            <Typography variant="body2" color="text.secondary">
+              {filteredSignals.length} active opportunities • Updated every 15 seconds
             </Typography>
-          </Box>
-          <IconButton onClick={fetchSignals} disabled={loading} color="primary">
-            <RefreshIcon />
-          </IconButton>
-        </Box>
-        
-        {/* Mobile Stats Row */}
-        <Stack direction="row" spacing={1} justifyContent="space-between" flexWrap="wrap" gap={1}>
-          <Chip 
-            icon={<SpeedIcon />} 
-            label={`${filteredSignals.length} Signals`} 
-            color="primary" 
-            size="small"
-          />
-          <Chip 
-            icon={<span>🟢</span>} 
-            label={`${filteredSignals.filter(s => ['GUARANTEED', 'VERY HIGH', 'HIGH'].includes(s.certainty_label)).length} High-Certainty`} 
-            color="success" 
-            variant="filled"
-            size="small"
-          />
-          {isMobile && (
-            <Chip 
-              icon={<AssessmentIcon />} 
-              label={isMobile ? "Cards" : "Card View"}
-              color="info"
-              size="small"
-            />
-          )}
-        </Stack>
-      </Box>
-
-      {/* Strategy Stats Grid - Responsive */}
-      <Grid container spacing={2} mb={3}>
-        <Grid item xs={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center', p: isMobile ? 1.5 : 2 }}>
-              <PrecisionIcon color="primary" sx={{ fontSize: isMobile ? 30 : 40, mb: 1 }} />
-              <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">Precision Focus</Typography>
-              <Typography variant="caption" color="textSecondary">
-                2-4% moves only
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center', p: isMobile ? 1.5 : 2 }}>
-              <LeverageIcon color="success" sx={{ fontSize: isMobile ? 30 : 40, mb: 1 }} />
-              <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">Leverage Ready</Typography>
-              <Typography variant="caption" color="textSecondary">
-                5x-15x amplification
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center', p: isMobile ? 1.5 : 2 }}>
-              <SpeedIcon color="warning" sx={{ fontSize: isMobile ? 30 : 40, mb: 1 }} />
-              <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">Fast Execution</Typography>
-              <Typography variant="caption" color="textSecondary">
-                In/out &lt; 2 hours
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center', p: isMobile ? 1.5 : 2 }}>
-              <ProfitIcon color="error" sx={{ fontSize: isMobile ? 30 : 40, mb: 1 }} />
-              <Typography variant={isMobile ? "body2" : "h6"} fontWeight="bold">Compound Ready</Typography>
-              <Typography variant="caption" color="textSecondary">
-                Repeatable profits
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Filters - Mobile Optimized */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent sx={{ p: isMobile ? 1.5 : 2 }}>
-          <Typography variant="subtitle1" gutterBottom>
-            🔍 Precision Filters
-          </Typography>
-          <Grid container spacing={isMobile ? 1 : 2} alignItems="center">
-            <Grid item xs={12} md={2}>
-              <TextField
-                fullWidth
-                label="Search Symbol"
-                value={filters.searchText}
-                onChange={(e) => setFilters(prev => ({ ...prev, searchText: e.target.value }))}
-                size="small"
-              />
-            </Grid>
-            <Grid item xs={6} md={2}>
-              <TextField
-                fullWidth
-                label="Min Move %"
-                type="number"
-                value={filters.minMove}
-                onChange={(e) => setFilters(prev => ({ ...prev, minMove: Number(e.target.value) }))}
-                size="small"
-                inputProps={{ step: 0.1, min: 0.5, max: 10 }}
-              />
-            </Grid>
-            <Grid item xs={6} md={2}>
-              <TextField
-                fullWidth
-                label="Max Move %"
-                type="number"
-                value={filters.maxMove}
-                onChange={(e) => setFilters(prev => ({ ...prev, maxMove: Number(e.target.value) }))}
-                size="small"
-                inputProps={{ step: 0.1, min: 1, max: 20 }}
-              />
-            </Grid>
-            <Grid item xs={6} md={2}>
-              <TextField
-                fullWidth
-                label="Min Precision"
-                type="number"
-                value={filters.minPrecisionScore}
-                onChange={(e) => setFilters(prev => ({ ...prev, minPrecisionScore: Number(e.target.value) }))}
-                size="small"
-                inputProps={{ min: 0, max: 100 }}
-              />
-            </Grid>
-            <Grid item xs={6} md={2}>
-              <TextField
-                fullWidth
-                label="Min Confidence"
-                type="number"
-                value={filters.minConfidence}
-                onChange={(e) => setFilters(prev => ({ ...prev, minConfidence: Number(e.target.value) }))}
-                size="small"
-                inputProps={{ step: 0.1, min: 0, max: 1 }}
-              />
-            </Grid>
-            <Grid item xs={12} md={2}>
-              <Button
-                fullWidth
-                variant={filters.showOnlyHighCertainty ? "contained" : "outlined"}
-                color={filters.showOnlyHighCertainty ? "success" : "primary"}
-                onClick={() => setFilters(prev => ({ ...prev, showOnlyHighCertainty: !prev.showOnlyHighCertainty }))}
-                startIcon={filters.showOnlyHighCertainty ? <span>🟢</span> : <span>🎯</span>}
-                size="small"
-                sx={{ height: '40px' }}
-              >
-                {isMobile ? (filters.showOnlyHighCertainty ? 'High ✓' : 'High Filter') : (filters.showOnlyHighCertainty ? 'High Certainty ON' : 'Show High Certainty')}
-              </Button>
-            </Grid>
           </Grid>
-        </CardContent>
-      </Card>
+          <Grid item xs={12} sm={4}>
+            <Box display="flex" gap={1} flexWrap="wrap" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
+              <Chip 
+                icon={<AssessmentIcon />}
+                label={`${filteredSignals.length} Signals`} 
+                color="primary" 
+                size={isMobile ? "medium" : "small"}
+              />
+              <IconButton
+                onClick={fetchSignals}
+                disabled={loading}
+                size={isMobile ? "medium" : "small"}
+                sx={{ 
+                  bgcolor: 'background.paper',
+                  '&:hover': { bgcolor: 'action.hover' }
+                }}
+              >
+                <RefreshIcon />
+              </IconButton>
+            </Box>
+          </Grid>
+        </Grid>
+      </Paper>
 
-      {/* Responsive Content: Cards on Mobile, Table on Desktop */}
-      {isMobile ? (
-        /* Mobile Card View */
-        <Box>
-          {filteredSignals.map((signal, index) => (
-            <SignalCard 
-              key={signal.signal_id || index} 
-              signal={signal} 
-              onDetailsClick={handleDetailsClick}
+      {/* Mobile-Optimized Filters */}
+      <Paper sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 3 } }}>
+        <Typography variant="h6" gutterBottom sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
+          🔍 Filter Opportunities
+        </Typography>
+        
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
+          {/* Search */}
+          <Grid item xs={12} sm={6} md={4}>
+            <TextField
+              fullWidth
+              size={isMobile ? "medium" : "small"}
+              label="Search Symbol"
+              value={filters.searchText}
+              onChange={(e) => setFilters(prev => ({ ...prev, searchText: e.target.value }))}
+              placeholder="e.g., BTC, ETH"
+              sx={{
+                '& .MuiInputBase-root': {
+                  fontSize: { xs: '16px', sm: '14px' } // Prevents zoom on iOS
+                }
+              }}
             />
-          ))}
-        </Box>
+          </Grid>
+
+          {/* Precision Score */}
+          <Grid item xs={12} sm={6} md={4}>
+            <TextField
+              fullWidth
+              size={isMobile ? "medium" : "small"}
+              type="number"
+              label="Min Precision Score"
+              value={filters.minPrecisionScore}
+              onChange={(e) => setFilters(prev => ({ ...prev, minPrecisionScore: Number(e.target.value) }))}
+              inputProps={{ min: 0, max: 100, step: 5 }}
+              sx={{
+                '& .MuiInputBase-root': {
+                  fontSize: { xs: '16px', sm: '14px' }
+                }
+              }}
+            />
+          </Grid>
+
+          {/* Move Range */}
+          <Grid item xs={12} sm={6} md={4}>
+            <Box>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Move Range: {filters.minMove}% - {filters.maxMove}%
+              </Typography>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <TextField
+                  size="small"
+                  type="number"
+                  label="Min %"
+                  value={filters.minMove}
+                  onChange={(e) => setFilters(prev => ({ ...prev, minMove: Number(e.target.value) }))}
+                  inputProps={{ min: 0, max: 20, step: 0.1 }}
+                  sx={{ 
+                    width: '80px',
+                    '& .MuiInputBase-root': {
+                      fontSize: { xs: '16px', sm: '14px' }
+                    }
+                  }}
+                />
+                <TextField
+                  size="small"
+                  type="number"
+                  label="Max %"
+                  value={filters.maxMove}
+                  onChange={(e) => setFilters(prev => ({ ...prev, maxMove: Number(e.target.value) }))}
+                  inputProps={{ min: 0, max: 20, step: 0.1 }}
+                  sx={{ 
+                    width: '80px',
+                    '& .MuiInputBase-root': {
+                      fontSize: { xs: '16px', sm: '14px' }
+                    }
+                  }}
+                />
+              </Stack>
+            </Box>
+          </Grid>
+
+          {/* High Certainty Toggle */}
+          <Grid item xs={12} sm={6} md={4}>
+            <FormControl component="fieldset">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={filters.showOnlyHighCertainty}
+                    onChange={(e) => setFilters(prev => ({ ...prev, showOnlyHighCertainty: e.target.checked }))}
+                    color="primary"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" fontWeight="medium">
+                      High Certainty Only
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      GUARANTEED • VERY HIGH • HIGH
+                    </Typography>
+                  </Box>
+                }
+              />
+            </FormControl>
+          </Grid>
+
+          {/* Quick Actions */}
+          <Grid item xs={12} sm={6} md={4}>
+            <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => setFilters({
+                  minPrecisionScore: 80,
+                  maxMove: 3.5,
+                  minMove: 2.5,
+                  minConfidence: 0.7,
+                  searchText: '',
+                  showOnlyHighCertainty: true
+                })}
+                sx={{ 
+                  fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                  minHeight: { xs: '36px', sm: '32px' }
+                }}
+              >
+                🎯 Perfect 3%
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => setFilters({
+                  minPrecisionScore: 0,
+                  maxMove: 10.0,
+                  minMove: 0.5,
+                  minConfidence: 0.0,
+                  searchText: '',
+                  showOnlyHighCertainty: false
+                })}
+                sx={{ 
+                  fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                  minHeight: { xs: '36px', sm: '32px' }
+                }}
+              >
+                🔄 Reset
+              </Button>
+            </Stack>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Results */}
+      {filteredSignals.length === 0 ? (
+        <Paper sx={{ p: { xs: 3, sm: 4 }, textAlign: 'center' }}>
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            No opportunities match your filters
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Try adjusting your filter criteria or check back later
+          </Typography>
+        </Paper>
       ) : (
-        /* Desktop Table View */
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Symbol</TableCell>
-                <TableCell>Direction</TableCell>
-                <TableCell>Take Profit Certainty</TableCell>
-                <TableCell>Entry Price</TableCell>
-                <TableCell>Take Profit</TableCell>
-                <TableCell>Stop Loss</TableCell>
-                <TableCell>Move %</TableCell>
-                <TableCell>Confidence</TableCell>
-                <TableCell>Precision Score</TableCell>
-                <TableCell>Risk:Reward</TableCell>
-                <TableCell>Profit @ 10x</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredSignals.map((signal, index) => {
-                const entry = signal.entry || signal.entry_price || 0;
-                const tp = signal.take_profit || signal.takeProfit || 0;
-                const sl = signal.stop_loss || signal.stopLoss || entry * 0.98; // Default 2% SL
-                const confidence = signal.confidence || signal.confidence_score || 0;
-                const movePct = Math.abs((tp - entry) / entry) * 100;
-                const riskReward = Math.abs(tp - entry) / Math.abs(entry - sl);
-                const profitAt10x = 500 * (movePct / 100) * 10;
-                
-                return (
-                  <TableRow key={signal.signal_id || index} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="bold">
-                        {signal.symbol}
-                      </Typography>
-                      {signal.timestamp && (
-                        <Typography variant="caption" color="textSecondary">
-                          {new Date(signal.timestamp).toLocaleTimeString()}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        icon={getDirectionIcon(signal.direction)}
-                        label={signal.direction}
-                        color={getDirectionColor(signal.direction)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <CertaintyBadge signal={signal} />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        ${entry.toFixed(6)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="success.main">
-                        ${tp.toFixed(6)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="error.main">
-                        ${sl.toFixed(6)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={`${movePct.toFixed(2)}%`}
-                        color={movePct >= 2.5 && movePct <= 3.5 ? 'success' : 'warning'}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {(confidence * 100).toFixed(1)}%
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <PrecisionBadge signal={signal} />
-                    </TableCell>
-                    <TableCell>
-                      <Typography 
-                        variant="body2" 
-                        color={riskReward >= 2 ? 'success.main' : 'text.primary'}
-                      >
-                        {riskReward.toFixed(2)}:1
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="success.main" fontWeight="bold">
-                        ${profitAt10x.toFixed(0)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Tooltip title="View Details">
-                        <IconButton 
-                          size="small" 
-                          onClick={() => handleDetailsClick(signal)}
-                        >
-                          <InfoIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
-
-      {filteredSignals.length === 0 && !loading && (
-        <Box textAlign="center" py={4}>
-          <Typography variant="h6" color="textSecondary">
-            No 3% precision signals found
-          </Typography>
-          <Typography variant="body2" color="textSecondary" mt={1}>
-            Adjust your filters or wait for new high-precision opportunities
-          </Typography>
+        <Box>
+          {/* Mobile: Card Layout, Desktop: Keep existing layout */}
+          {isMobile ? (
+            <Stack spacing={2}>
+              {filteredSignals.map((signal, index) => (
+                <SignalCard 
+                  key={`${signal.symbol}-${index}`} 
+                  signal={signal} 
+                  onDetailsClick={handleDetailsClick}
+                />
+              ))}
+            </Stack>
+          ) : (
+            <Grid container spacing={2}>
+              {filteredSignals.map((signal, index) => (
+                <Grid item xs={12} sm={6} lg={4} key={`${signal.symbol}-${index}`}>
+                  <SignalCard 
+                    signal={signal} 
+                    onDetailsClick={handleDetailsClick}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          )}
         </Box>
       )}
 
-      {/* Signal Details Dialog - Mobile Optimized */}
+      {/* Mobile-Optimized Signal Details Dialog */}
       <Dialog
         open={detailsOpen}
-        onClose={() => setDetailsOpen(false)}
+        onClose={handleCloseDetails}
         maxWidth="md"
         fullWidth
         fullScreen={isMobile}
+        sx={{
+          '& .MuiDialog-paper': {
+            margin: { xs: 0, sm: '32px' },
+            maxHeight: { xs: '100%', sm: 'calc(100% - 64px)' },
+            borderRadius: { xs: 0, sm: '12px' }
+          }
+        }}
       >
-        <DialogTitle>
-          🎯 3% Precision Signal Details: {selectedSignal?.symbol}
+        <DialogTitle sx={{ 
+          p: { xs: 2, sm: 3 },
+          borderBottom: '1px solid',
+          borderColor: 'divider'
+        }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6" fontWeight="bold">
+              {selectedSignal?.symbol} Signal Details
+            </Typography>
+            <IconButton 
+              onClick={handleCloseDetails}
+              size={isMobile ? "medium" : "small"}
+            >
+              <InfoIcon />
+            </IconButton>
+          </Box>
         </DialogTitle>
-        <DialogContent>
+        
+        <DialogContent sx={{ p: { xs: 2, sm: 3 } }}>
           {selectedSignal && (
             <Box>
+              {/* Certainty Badge */}
+              <Box mb={3} textAlign="center">
+                <CertaintyBadge signal={selectedSignal} />
+              </Box>
+
+              {/* Key Metrics */}
               <Grid container spacing={2} mb={3}>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="textSecondary">Direction</Typography>
-                  <Chip
-                    icon={getDirectionIcon(selectedSignal.direction)}
-                    label={selectedSignal.direction}
-                    color={getDirectionColor(selectedSignal.direction)}
-                  />
+                  <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'background.default' }}>
+                    <Typography variant="caption" color="text.secondary">Entry Price</Typography>
+                    <Typography variant="h6" fontWeight="bold">
+                      ${(selectedSignal.entry || selectedSignal.entry_price || 0).toFixed(6)}
+                    </Typography>
+                  </Paper>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="textSecondary">Precision Score</Typography>
-                  <PrecisionBadge signal={selectedSignal} />
+                  <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'success.light' }}>
+                    <Typography variant="caption" color="text.secondary">Take Profit</Typography>
+                    <Typography variant="h6" fontWeight="bold" color="success.dark">
+                      ${(selectedSignal.take_profit || selectedSignal.takeProfit || 0).toFixed(6)}
+                    </Typography>
+                  </Paper>
                 </Grid>
-                <Grid item xs={4}>
-                  <Typography variant="body2" color="textSecondary">Entry Price</Typography>
-                  <Typography variant="h6">${(selectedSignal.entry || selectedSignal.entry_price || 0).toFixed(6)}</Typography>
+                <Grid item xs={6}>
+                  <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'error.light' }}>
+                    <Typography variant="caption" color="text.secondary">Stop Loss</Typography>
+                    <Typography variant="h6" fontWeight="bold" color="error.dark">
+                      ${(selectedSignal.stop_loss || selectedSignal.stopLoss || 0).toFixed(6)}
+                    </Typography>
+                  </Paper>
                 </Grid>
-                <Grid item xs={4}>
-                  <Typography variant="body2" color="textSecondary">Take Profit</Typography>
-                  <Typography variant="h6" color="success.main">${(selectedSignal.take_profit || selectedSignal.takeProfit || 0).toFixed(6)}</Typography>
-                </Grid>
-                <Grid item xs={4}>
-                  <Typography variant="body2" color="textSecondary">Stop Loss</Typography>
-                  <Typography variant="h6" color="error.main">${(selectedSignal.stop_loss || selectedSignal.stopLoss || 0).toFixed(6)}</Typography>
+                <Grid item xs={6}>
+                  <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'warning.light' }}>
+                    <Typography variant="caption" color="text.secondary">Expected Move</Typography>
+                    <Typography variant="h6" fontWeight="bold" color="warning.dark">
+                      {(Math.abs(((selectedSignal.take_profit || selectedSignal.takeProfit || 0) - (selectedSignal.entry || selectedSignal.entry_price || 0)) / (selectedSignal.entry || selectedSignal.entry_price || 1)) * 100).toFixed(2)}%
+                    </Typography>
+                  </Paper>
                 </Grid>
               </Grid>
-              
+
+              {/* Profit Calculator */}
               <ProfitCalculator signal={selectedSignal} />
-              
-              {selectedSignal.strategy && (
-                <Box mt={2}>
-                  <Typography variant="body2" color="textSecondary">Strategy</Typography>
-                  <Typography variant="body1">{selectedSignal.strategy}</Typography>
-                </Box>
-              )}
+
+              {/* Precision Score */}
+              <Box mt={3} textAlign="center">
+                <PrecisionBadge signal={selectedSignal} />
+              </Box>
             </Box>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDetailsOpen(false)} fullWidth={isMobile}>
+        
+        <DialogActions sx={{ 
+          p: { xs: 2, sm: 3 },
+          borderTop: '1px solid',
+          borderColor: 'divider',
+          flexDirection: { xs: 'column', sm: 'row' },
+          gap: { xs: 1, sm: 0 }
+        }}>
+          <Button 
+            onClick={handleCloseDetails}
+            variant="outlined"
+            fullWidth={isMobile}
+          >
             Close
+          </Button>
+          <Button 
+            variant="contained" 
+            color="primary"
+            fullWidth={isMobile}
+            sx={{ ml: { xs: 0, sm: 1 } }}
+          >
+            Track Signal
           </Button>
         </DialogActions>
       </Dialog>
-
-      {error && (
-        <Alert severity="error" sx={{ mt: 2 }}>
-          {error}
-        </Alert>
-      )}
     </Box>
   );
 };

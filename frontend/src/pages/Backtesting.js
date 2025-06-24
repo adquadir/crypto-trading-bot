@@ -24,11 +24,15 @@ import {
   TableHead,
   TableRow,
   Paper,
-  CircularProgress
+  CircularProgress,
+  useMediaQuery,
+  useTheme
 } from '@mui/material';
 import config from '../config';
 
 const Backtesting = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [strategies, setStrategies] = useState([]);
   const [symbols, setSymbols] = useState([]);
   const [selectedStrategy, setSelectedStrategy] = useState('');
@@ -426,25 +430,55 @@ const Backtesting = () => {
   );
 
   return (
-    <Container maxWidth="lg" sx={{ py: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1" fontWeight="bold">
+    <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 3 } }}>
+      <Box sx={{ 
+        display: 'flex', 
+        flexDirection: { xs: 'column', sm: 'row' },
+        justifyContent: 'space-between', 
+        alignItems: { xs: 'flex-start', sm: 'center' }, 
+        mb: { xs: 2, sm: 3 },
+        gap: { xs: 1, sm: 0 }
+      }}>
+        <Typography 
+          variant={isMobile ? "h5" : "h4"} 
+          component="h1" 
+          fontWeight="bold"
+          sx={{ fontSize: { xs: '1.5rem', sm: '2rem', md: '2.125rem' } }}
+        >
           Strategy Backtesting
         </Typography>
-        <Chip label="🎯 Production Ready" variant="outlined" color="success" />
+        <Chip 
+          label="🎯 Production Ready" 
+          variant="outlined" 
+          color="success" 
+          size={isMobile ? "medium" : "small"}
+        />
       </Box>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert severity="error" sx={{ mb: { xs: 2, sm: 3 } }}>
           {error}
         </Alert>
       )}
 
-      <Box sx={{ width: '100%', mb: 3 }}>
+      <Box sx={{ width: '100%', mb: { xs: 2, sm: 3 } }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={activeTab} onChange={(e, value) => setActiveTab(value)}>
-            <Tab label="Single Strategy Test" />
-            <Tab label="Strategy Comparison" />
+          <Tabs 
+            value={activeTab} 
+            onChange={(e, value) => setActiveTab(value)}
+            variant={isMobile ? "scrollable" : "standard"}
+            scrollButtons={isMobile ? "auto" : false}
+            allowScrollButtonsMobile
+            sx={{
+              '& .MuiTab-root': {
+                fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                minWidth: { xs: '120px', sm: '160px' },
+                padding: { xs: '8px 12px', sm: '12px 16px' }
+              }
+            }}
+          >
+            <Tab label={isMobile ? "Single Test" : "Single Strategy Test"} />
+            <Tab label={isMobile ? "Compare" : "Strategy Comparison"} />
           </Tabs>
         </Box>
 

@@ -21,7 +21,11 @@ import {
   Divider,
   LinearProgress,
   Tabs,
-  Tab
+  Tab,
+  Container,
+  Stack,
+  useMediaQuery,
+  useTheme
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
@@ -31,6 +35,10 @@ import axios from 'axios';
 import config from '../config';
 
 const Dashboard = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
+
   const [stats, setStats] = useState({
     total_trades: 0,
     win_rate: 0,
@@ -156,35 +164,73 @@ const Dashboard = () => {
 
   if (loading && !stats) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
+      <Container maxWidth="xl">
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+          <CircularProgress />
+          {!isMobile && (
+            <Typography variant="h6" sx={{ ml: 2 }}>
+              Loading Dashboard...
+            </Typography>
+          )}
+        </Box>
+      </Container>
     );
   }
 
   return (
-    <Box p={3}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">
+    <Container maxWidth="xl" sx={{ py: { xs: 1, sm: 2, md: 3 } }}>
+      {/* Mobile-Optimized Header */}
+      <Box 
+        display="flex" 
+        flexDirection={{ xs: 'column', sm: 'row' }}
+        justifyContent="space-between" 
+        alignItems={{ xs: 'stretch', sm: 'center' }} 
+        mb={{ xs: 2, sm: 3 }}
+        gap={{ xs: 2, sm: 0 }}
+      >
+        <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
           Trading Dashboard
         </Typography>
-        <Box display="flex" alignItems="center" gap={2}>
+        
+        {/* Mobile-Optimized Action Chips */}
+        <Stack 
+          direction={{ xs: 'column', sm: 'row' }} 
+          spacing={1}
+          alignItems={{ xs: 'stretch', sm: 'center' }}
+        >
           <Chip
             label={`Total PnL: ${(getTotalPnL() || 0).toFixed(2)}%`}
             color={getTotalPnL() >= 0 ? 'success' : 'error'}
             icon={getTotalPnL() >= 0 ? <TrendingUpIcon /> : <TrendingDownIcon />}
+            size={isMobile ? "medium" : "small"}
+            sx={{ 
+              fontWeight: 'bold',
+              minHeight: { xs: '32px', sm: 'auto' }
+            }}
           />
           <Chip
-            label={`Risk Level: ${getRiskLevel().toUpperCase()}`}
+            label={`Risk: ${getRiskLevel().toUpperCase()}`}
             color={getRiskLevel() === 'high' ? 'error' : getRiskLevel() === 'medium' ? 'warning' : 'success'}
             icon={getRiskLevel() === 'high' ? <WarningIcon /> : null}
+            size={isMobile ? "medium" : "small"}
+            sx={{ 
+              fontWeight: 'bold',
+              minHeight: { xs: '32px', sm: 'auto' }
+            }}
           />
           <Tooltip title="Refresh dashboard">
-            <IconButton onClick={fetchDashboardData} disabled={loading}>
+            <IconButton 
+              onClick={fetchDashboardData} 
+              disabled={loading}
+              sx={{ 
+                alignSelf: { xs: 'center', sm: 'auto' },
+                minWidth: { xs: '48px', sm: 'auto' }
+              }}
+            >
               <RefreshIcon />
             </IconButton>
           </Tooltip>
-        </Box>
+        </Stack>
       </Box>
 
       {error && (
@@ -202,149 +248,212 @@ const Dashboard = () => {
                 Retry
               </Button>
             }
+            sx={{ width: '100%' }}
           >
             {error}
           </Alert>
         </Snackbar>
       )}
 
-      <Tabs
-        value={activeTab}
-        onChange={(_, newValue) => setActiveTab(newValue)}
-        sx={{ mb: 3 }}
-      >
-        <Tab label="Overview" />
-        <Tab label="Profile Performance" />
-        <Tab label="Parameter History" />
-      </Tabs>
+      {/* Mobile-Optimized Tabs */}
+      <Paper sx={{ mb: { xs: 2, sm: 3 } }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, newValue) => setActiveTab(newValue)}
+          variant={isMobile ? "scrollable" : "standard"}
+          scrollButtons={isMobile ? "auto" : false}
+          allowScrollButtonsMobile
+          sx={{
+            '& .MuiTab-root': {
+              fontSize: { xs: '0.75rem', sm: '0.875rem' },
+              minWidth: { xs: '80px', sm: '120px' },
+              padding: { xs: '8px 12px', sm: '12px 16px' }
+            }
+          }}
+        >
+          <Tab label="Overview" />
+          <Tab label={isMobile ? "Profiles" : "Profile Performance"} />
+          <Tab label={isMobile ? "History" : "Parameter History"} />
+        </Tabs>
+      </Paper>
 
       {activeTab === 0 && (
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 3 }}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
+          {/* Performance Metrics */}
+          <Grid item xs={12} lg={6}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
                 Performance Metrics
               </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Typography color="textSecondary" variant="body2">
-                    Total Trades
-                  </Typography>
-                  <Typography variant="h6">
-                    {stats.total_trades}
-                  </Typography>
+              <Grid container spacing={{ xs: 2, sm: 3 }}>
+                <Grid item xs={6} sm={6}>
+                  <Box textAlign="center">
+                    <Typography color="textSecondary" variant="body2" gutterBottom>
+                      Total Trades
+                    </Typography>
+                    <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
+                      {stats.total_trades}
+                    </Typography>
+                  </Box>
                 </Grid>
-                <Grid item xs={6}>
-                  <Typography color="textSecondary" variant="body2">
-                    Win Rate
-                  </Typography>
-                  <Typography variant="h6" color={stats.win_rate >= 0.5 ? 'success.main' : 'error.main'}>
-                    {(stats.win_rate * 100).toFixed(1)}%
-                  </Typography>
+                <Grid item xs={6} sm={6}>
+                  <Box textAlign="center">
+                    <Typography color="textSecondary" variant="body2" gutterBottom>
+                      Win Rate
+                    </Typography>
+                    <Typography 
+                      variant={isMobile ? "h5" : "h4"} 
+                      fontWeight="bold"
+                      color={stats.win_rate >= 0.5 ? 'success.main' : 'error.main'}
+                    >
+                      {(stats.win_rate * 100).toFixed(1)}%
+                    </Typography>
+                  </Box>
                 </Grid>
-                <Grid item xs={6}>
-                  <Typography color="textSecondary" variant="body2">
-                    Profit Factor
-                  </Typography>
-                  <Typography variant="h6" color={stats.profit_factor >= 1 ? 'success.main' : 'error.main'}>
-                    {stats.profit_factor.toFixed(2)}
-                  </Typography>
+                <Grid item xs={6} sm={6}>
+                  <Box textAlign="center">
+                    <Typography color="textSecondary" variant="body2" gutterBottom>
+                      Profit Factor
+                    </Typography>
+                    <Typography 
+                      variant={isMobile ? "h5" : "h4"} 
+                      fontWeight="bold"
+                      color={stats.profit_factor >= 1 ? 'success.main' : 'error.main'}
+                    >
+                      {stats.profit_factor.toFixed(2)}
+                    </Typography>
+                  </Box>
                 </Grid>
-                <Grid item xs={6}>
-                  <Typography color="textSecondary" variant="body2">
-                    Max Drawdown
-                  </Typography>
-                  <Typography variant="h6" color={stats.max_drawdown > 0.15 ? 'error.main' : 'warning.main'}>
-                    {(stats.max_drawdown * 100).toFixed(1)}%
-                  </Typography>
+                <Grid item xs={6} sm={6}>
+                  <Box textAlign="center">
+                    <Typography color="textSecondary" variant="body2" gutterBottom>
+                      Max Drawdown
+                    </Typography>
+                    <Typography 
+                      variant={isMobile ? "h5" : "h4"} 
+                      fontWeight="bold"
+                      color={stats.max_drawdown > 0.15 ? 'error.main' : 'warning.main'}
+                    >
+                      {(stats.max_drawdown * 100).toFixed(1)}%
+                    </Typography>
+                  </Box>
                 </Grid>
               </Grid>
             </Paper>
           </Grid>
 
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 3 }}>
+          {/* Risk Metrics */}
+          <Grid item xs={12} lg={6}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
                 Risk Metrics
               </Typography>
-              <Grid container spacing={2}>
+              <Grid container spacing={{ xs: 2, sm: 3 }}>
                 <Grid item xs={12}>
-                  <Typography color="textSecondary" variant="body2">
+                  <Typography color="textSecondary" variant="body2" gutterBottom>
                     Daily Risk Usage
                   </Typography>
                   <LinearProgress
                     variant="determinate"
                     value={(stats.daily_risk_usage || 0) * 100}
                     color={(stats.daily_risk_usage || 0) > 0.8 ? 'error' : (stats.daily_risk_usage || 0) > 0.5 ? 'warning' : 'success'}
-                    sx={{ height: 10, borderRadius: 5, mb: 1 }}
+                    sx={{ 
+                      height: { xs: 8, sm: 10 }, 
+                      borderRadius: 5, 
+                      mb: 1 
+                    }}
                   />
                   <Typography variant="body2" color="textSecondary">
                     {((stats.daily_risk_usage || 0) * 100).toFixed(1)}% of daily risk limit used
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography color="textSecondary" variant="body2">
-                    Current Leverage
-                  </Typography>
-                  <Typography variant="h6" color={(stats.current_leverage || 0) > 3 ? 'error.main' : 'success.main'}>
-                    {(stats.current_leverage || 0).toFixed(1)}x
-                  </Typography>
+                  <Box textAlign="center">
+                    <Typography color="textSecondary" variant="body2" gutterBottom>
+                      Current Leverage
+                    </Typography>
+                    <Typography 
+                      variant={isMobile ? "h5" : "h4"} 
+                      fontWeight="bold"
+                      color={(stats.current_leverage || 0) > 3 ? 'error.main' : 'success.main'}
+                    >
+                      {(stats.current_leverage || 0).toFixed(1)}x
+                    </Typography>
+                  </Box>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography color="textSecondary" variant="body2">
-                    Portfolio Beta
-                  </Typography>
-                  <Typography variant="h6" color={Math.abs(stats.portfolio_beta || 0) > 1 ? 'warning.main' : 'success.main'}>
-                    {(stats.portfolio_beta || 0).toFixed(2)}
-                  </Typography>
+                  <Box textAlign="center">
+                    <Typography color="textSecondary" variant="body2" gutterBottom>
+                      Portfolio Beta
+                    </Typography>
+                    <Typography 
+                      variant={isMobile ? "h5" : "h4"} 
+                      fontWeight="bold"
+                      color={Math.abs(stats.portfolio_beta || 0) > 1 ? 'warning.main' : 'success.main'}
+                    >
+                      {(stats.portfolio_beta || 0).toFixed(2)}
+                    </Typography>
+                  </Box>
                 </Grid>
               </Grid>
             </Paper>
           </Grid>
 
+          {/* Active Positions - Mobile Optimized */}
           <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
                 Active Positions
               </Typography>
-              <Grid container spacing={2}>
+              <Grid container spacing={{ xs: 1, sm: 2, md: 3 }}>
                 {positions.map((position) => (
-                  <Grid item xs={12} sm={6} md={4} key={position.symbol}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom>
+                  <Grid item xs={12} sm={6} lg={4} key={position.symbol}>
+                    <Card 
+                      variant="outlined" 
+                      sx={{ 
+                        border: '1px solid',
+                        borderColor: position.pnl >= 0 ? 'success.main' : 'error.main',
+                        '&:hover': { boxShadow: 2 }
+                      }}
+                    >
+                      <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+                        <Typography variant="h6" gutterBottom fontWeight="bold">
                           {position.symbol}
                         </Typography>
                         <Grid container spacing={1}>
                           <Grid item xs={6}>
-                            <Typography color="textSecondary" variant="body2">
+                            <Typography color="textSecondary" variant="caption">
                               Size
                             </Typography>
-                            <Typography variant="body1">
+                            <Typography variant="body2" fontWeight="medium">
                               {position.size}
                             </Typography>
                           </Grid>
                           <Grid item xs={6}>
-                            <Typography color="textSecondary" variant="body2">
+                            <Typography color="textSecondary" variant="caption">
                               PnL
                             </Typography>
-                            <Typography variant="body1" color={position.pnl >= 0 ? 'success.main' : 'error.main'}>
+                            <Typography 
+                              variant="body2" 
+                              fontWeight="bold"
+                              color={position.pnl >= 0 ? 'success.main' : 'error.main'}
+                            >
                               {position.pnl.toFixed(2)}%
                             </Typography>
                           </Grid>
                           <Grid item xs={6}>
-                            <Typography color="textSecondary" variant="body2">
-                              Entry Price
+                            <Typography color="textSecondary" variant="caption">
+                              Entry
                             </Typography>
-                            <Typography variant="body1">
+                            <Typography variant="body2" fontWeight="medium">
                               ${position.entry_price.toFixed(2)}
                             </Typography>
                           </Grid>
                           <Grid item xs={6}>
-                            <Typography color="textSecondary" variant="body2">
-                              Current Price
+                            <Typography color="textSecondary" variant="caption">
+                              Current
                             </Typography>
-                            <Typography variant="body1">
+                            <Typography variant="body2" fontWeight="medium">
                               ${position.current_price.toFixed(2)}
                             </Typography>
                           </Grid>
@@ -353,6 +462,21 @@ const Dashboard = () => {
                     </Card>
                   </Grid>
                 ))}
+                {positions.length === 0 && (
+                  <Grid item xs={12}>
+                    <Box 
+                      display="flex" 
+                      justifyContent="center" 
+                      alignItems="center" 
+                      minHeight="100px"
+                      color="text.secondary"
+                    >
+                      <Typography variant="body1">
+                        No active positions
+                      </Typography>
+                    </Box>
+                  </Grid>
+                )}
               </Grid>
             </Paper>
           </Grid>
@@ -360,10 +484,10 @@ const Dashboard = () => {
       )}
 
       {activeTab === 1 && (
-        <Grid container spacing={3}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
           {Object.entries(stats.profile_performance || {}).map(([profile, performance]) => (
-            <Grid item xs={12} md={4} key={profile}>
-              <Paper sx={{ p: 3 }}>
+            <Grid item xs={12} sm={6} lg={4} key={profile}>
+              <Paper sx={{ p: { xs: 2, sm: 3 } }}>
                 <Typography variant="h6" gutterBottom>
                   {profile.charAt(0).toUpperCase() + profile.slice(1)} Profile
                 </Typography>
@@ -372,7 +496,11 @@ const Dashboard = () => {
                     <Typography color="textSecondary" variant="body2">
                       Win Rate
                     </Typography>
-                    <Typography variant="h6" color={performance.win_rate >= 0.5 ? 'success.main' : 'error.main'}>
+                    <Typography 
+                      variant={isMobile ? "h5" : "h4"} 
+                      fontWeight="bold"
+                      color={performance.win_rate >= 0.5 ? 'success.main' : 'error.main'}
+                    >
                       {(performance.win_rate * 100).toFixed(1)}%
                     </Typography>
                   </Grid>
@@ -380,7 +508,11 @@ const Dashboard = () => {
                     <Typography color="textSecondary" variant="body2">
                       Profit Factor
                     </Typography>
-                    <Typography variant="h6" color={performance.profit_factor >= 1 ? 'success.main' : 'error.main'}>
+                    <Typography 
+                      variant={isMobile ? "h5" : "h4"} 
+                      fontWeight="bold"
+                      color={performance.profit_factor >= 1 ? 'success.main' : 'error.main'}
+                    >
                       {performance.profit_factor.toFixed(2)}
                     </Typography>
                   </Grid>
@@ -388,15 +520,15 @@ const Dashboard = () => {
                     <Typography color="textSecondary" variant="body2">
                       Total Trades
                     </Typography>
-                    <Typography variant="h6">
+                    <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
                       {performance.total_trades}
                     </Typography>
                   </Grid>
                   <Grid item xs={6}>
                     <Typography color="textSecondary" variant="body2">
-                      Avg Trade Duration
+                      Avg Duration
                     </Typography>
-                    <Typography variant="h6">
+                    <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
                       {performance.avg_duration}
                     </Typography>
                   </Grid>
@@ -416,67 +548,71 @@ const Dashboard = () => {
       )}
 
       {activeTab === 2 && (
-        <Grid container spacing={3}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
           <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
                 Parameter Adaptation History
               </Typography>
-              <Grid container spacing={2}>
+              <Stack spacing={2}>
                 {stats.parameter_history?.map((entry, index) => (
-                  <Grid item xs={12} key={index}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="subtitle1" gutterBottom>
-                          {new Date(entry.timestamp).toLocaleString()}
-                        </Typography>
-                        <Grid container spacing={2}>
-                          <Grid item xs={12} md={6}>
-                            <Typography color="textSecondary" variant="body2">
-                              Profile
-                            </Typography>
-                            <Typography variant="body1">
-                              {entry.profile}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={12} md={6}>
-                            <Typography color="textSecondary" variant="body2">
-                              Trigger
-                            </Typography>
-                            <Typography variant="body1">
-                              {entry.trigger}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={12}>
-                            <Typography color="textSecondary" variant="body2">
-                              Changes
-                            </Typography>
+                  <Card key={index} variant="outlined">
+                    <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+                      <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                        {new Date(entry.timestamp).toLocaleString()}
+                      </Typography>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={6}>
+                          <Typography color="textSecondary" variant="body2">
+                            Profile
+                          </Typography>
+                          <Typography variant="body1" fontWeight="medium">
+                            {entry.profile}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <Typography color="textSecondary" variant="body2">
+                            Trigger
+                          </Typography>
+                          <Typography variant="body1" fontWeight="medium">
+                            {entry.trigger}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={12}>
+                          <Typography color="textSecondary" variant="body2" gutterBottom>
+                            Changes
+                          </Typography>
+                          <Stack spacing={0.5}>
                             {Object.entries(entry.changes).map(([param, value]) => (
                               <Typography key={param} variant="body2">
-                                {param}: {value}
+                                <strong>{param}:</strong> {value}
                               </Typography>
                             ))}
-                          </Grid>
+                          </Stack>
                         </Grid>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                ))}
-              </Grid>
+                      </Grid>
+                    </CardContent>
+                  </Card>
+                )) || (
+                  <Typography color="text.secondary" textAlign="center" py={4}>
+                    No parameter history available
+                  </Typography>
+                )}
+              </Stack>
             </Paper>
           </Grid>
 
           <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
                 Volatility Impact
               </Typography>
               <Grid container spacing={2}>
                 {Object.entries(stats.volatility_impact || {}).map(([profile, impact]) => (
-                  <Grid item xs={12} md={4} key={profile}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="subtitle1" gutterBottom>
+                  <Grid item xs={12} sm={6} lg={4} key={profile}>
+                    <Card variant="outlined">
+                      <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+                        <Typography variant="subtitle1" gutterBottom fontWeight="medium">
                           {profile.charAt(0).toUpperCase() + profile.slice(1)} Profile
                         </Typography>
                         <Grid container spacing={1}>
@@ -484,7 +620,7 @@ const Dashboard = () => {
                             <Typography color="textSecondary" variant="body2">
                               Current Volatility
                             </Typography>
-                            <Typography variant="body1">
+                            <Typography variant="body1" fontWeight="medium">
                               {impact.current_volatility.toFixed(2)}
                             </Typography>
                           </Grid>
@@ -492,19 +628,21 @@ const Dashboard = () => {
                             <Typography color="textSecondary" variant="body2">
                               Impact Factor
                             </Typography>
-                            <Typography variant="body1">
+                            <Typography variant="body1" fontWeight="medium">
                               {impact.impact_factor.toFixed(2)}
                             </Typography>
                           </Grid>
                           <Grid item xs={12}>
-                            <Typography color="textSecondary" variant="body2">
+                            <Typography color="textSecondary" variant="body2" gutterBottom>
                               Parameter Adjustments
                             </Typography>
-                            {Object.entries(impact.parameter_adjustments).map(([param, value]) => (
-                              <Typography key={param} variant="body2">
-                                {param}: {value}
-                              </Typography>
-                            ))}
+                            <Stack spacing={0.5}>
+                              {Object.entries(impact.parameter_adjustments || {}).map(([param, value]) => (
+                                <Typography key={param} variant="body2">
+                                  <strong>{param}:</strong> {value}
+                                </Typography>
+                              ))}
+                            </Stack>
                           </Grid>
                         </Grid>
                       </CardContent>
@@ -516,7 +654,16 @@ const Dashboard = () => {
           </Grid>
         </Grid>
       )}
-    </Box>
+
+      {/* Last Updated Indicator */}
+      {lastUpdated && !isMobile && (
+        <Box textAlign="center" mt={2}>
+          <Typography variant="caption" color="text.secondary">
+            Last updated: {lastUpdated.toLocaleTimeString()}
+          </Typography>
+        </Box>
+      )}
+    </Container>
   );
 };
 

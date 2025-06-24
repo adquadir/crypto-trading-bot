@@ -19,7 +19,10 @@ import {
   TableHead,
   TableRow,
   Tab,
-  Tabs
+  Tabs,
+  Container,
+  useMediaQuery,
+  useTheme
 } from '@mui/material';
 import {
   Assessment as AssessmentIcon,
@@ -32,6 +35,10 @@ import axios from 'axios';
 import config from '../config';
 
 const Performance = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
+
   const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -169,23 +176,41 @@ const Performance = () => {
 
   if (loading && !performanceData) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
+      <Container maxWidth="xl">
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+          <CircularProgress size={isMobile ? 40 : 60} />
+          {!isMobile && (
+            <Typography variant="h6" sx={{ ml: 2 }}>
+              Loading performance data...
+            </Typography>
+          )}
+        </Box>
+      </Container>
     );
   }
 
   return (
-    <Box p={3}>
-      {/* Header */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+    <Container maxWidth="xl" sx={{ py: { xs: 1, sm: 2, md: 3 } }}>
+      {/* Mobile-Optimized Header */}
+      <Box 
+        display="flex" 
+        flexDirection={{ xs: 'column', sm: 'row' }}
+        justifyContent="space-between" 
+        alignItems={{ xs: 'stretch', sm: 'center' }} 
+        mb={{ xs: 2, sm: 3 }}
+        gap={{ xs: 2, sm: 0 }}
+      >
         <Box>
-          <Typography variant="h4" color="primary">
+          <Typography variant={isMobile ? "h5" : "h4"} color="primary" fontWeight="bold">
             Performance Analytics
           </Typography>
-          <Typography variant="body1" color="textSecondary">
+          <Typography 
+            variant="body1" 
+            color="text.secondary"
+            sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
+          >
             Real-time signal tracking and adaptive learning insights
-            {realTimeActive && (
+            {realTimeActive && !isMobile && (
               <Chip 
                 label="🔴 LIVE (3s)" 
                 color="success" 
@@ -195,60 +220,93 @@ const Performance = () => {
             )}
           </Typography>
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
-          onClick={fetchAllData}
-          disabled={loading}
+        
+        <Stack 
+          direction={{ xs: 'column', sm: 'row' }} 
+          spacing={1}
+          alignItems={{ xs: 'stretch', sm: 'center' }}
         >
-          Refresh All Data
-        </Button>
+          {realTimeActive && isMobile && (
+            <Chip 
+              label="🔴 LIVE (3s)" 
+              color="success" 
+              size="medium" 
+              sx={{ alignSelf: 'center' }}
+            />
+          )}
+          <Button
+            variant="outlined"
+            startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
+            onClick={fetchAllData}
+            disabled={loading}
+            size={isMobile ? "medium" : "small"}
+            sx={{ 
+              minHeight: { xs: '44px', sm: 'auto' },
+              fontSize: { xs: '0.875rem', sm: '0.75rem' }
+            }}
+          >
+            Refresh All Data
+          </Button>
+        </Stack>
       </Box>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert severity="error" sx={{ mb: { xs: 2, sm: 3 } }}>
           {error}
         </Alert>
       )}
 
-      {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
-        <Tabs value={activeTab} onChange={handleTabChange}>
-          <Tab label="Performance Overview" />
-          <Tab label="Golden Signals" />
-          <Tab label="Live Tracking" />
-          <Tab label="Adaptive Assessment" />
+      {/* Mobile-Optimized Tabs */}
+      <Paper sx={{ mb: { xs: 2, sm: 3 } }}>
+        <Tabs 
+          value={activeTab} 
+          onChange={handleTabChange}
+          variant={isMobile ? "scrollable" : "standard"}
+          scrollButtons={isMobile ? "auto" : false}
+          allowScrollButtonsMobile
+          sx={{
+            '& .MuiTab-root': {
+              fontSize: { xs: '0.75rem', sm: '0.875rem' },
+              minWidth: { xs: '90px', sm: '140px' },
+              padding: { xs: '8px 12px', sm: '12px 16px' }
+            }
+          }}
+        >
+          <Tab label={isMobile ? "Overview" : "Performance Overview"} />
+          <Tab label={isMobile ? "Golden" : "Golden Signals"} />
+          <Tab label={isMobile ? "Live" : "Live Tracking"} />
+          <Tab label={isMobile ? "Adaptive" : "Adaptive Assessment"} />
         </Tabs>
       </Paper>
 
       {/* Performance Overview Tab */}
       {activeTab === 0 && performanceData && (
-        <Grid container spacing={3}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
           <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
                 Overall Performance (Last 7 Days)
               </Typography>
-              <Grid container spacing={3}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Card>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="primary">
+              <Grid container spacing={{ xs: 2, sm: 3 }}>
+                <Grid item xs={6} sm={3}>
+                  <Card variant="outlined">
+                    <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
+                      <Typography variant={isMobile ? "h5" : "h4"} color="primary" fontWeight="bold">
                         {performanceData.overall?.total_signals || 0}
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Total Signals Tracked
                       </Typography>
                     </CardContent>
                   </Card>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Card>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="success.main">
+                <Grid item xs={6} sm={3}>
+                  <Card variant="outlined">
+                    <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
+                      <Typography variant={isMobile ? "h5" : "h4"} color="success.main" fontWeight="bold">
                         {((performanceData.overall?.signals_3pct || 0) / Math.max(performanceData.overall?.total_signals || 1, 1) * 100).toFixed(1)}%
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         3% Hit Rate
                       </Typography>
                       <Chip 
@@ -260,25 +318,25 @@ const Performance = () => {
                     </CardContent>
                   </Card>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Card>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="warning.main">
+                <Grid item xs={6} sm={3}>
+                  <Card variant="outlined">
+                    <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
+                      <Typography variant={isMobile ? "h5" : "h4"} color="warning.main" fontWeight="bold">
                         {performanceData.overall?.golden_signals || 0}
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Golden Signals
                       </Typography>
                     </CardContent>
                   </Card>
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Card>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="info.main">
+                <Grid item xs={6} sm={3}>
+                  <Card variant="outlined">
+                    <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
+                      <Typography variant={isMobile ? "h5" : "h4"} color="info.main" fontWeight="bold">
                         {(performanceData.overall?.avg_time_to_3pct || 0).toFixed(1)}m
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Avg Time to 3%
                       </Typography>
                     </CardContent>
@@ -288,21 +346,34 @@ const Performance = () => {
             </Paper>
           </Grid>
 
-          {/* Strategy Performance */}
+          {/* Strategy Performance - Mobile Optimized */}
           <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
                 Strategy Performance Rankings
               </Typography>
-              <TableContainer>
-                <Table>
+              <TableContainer sx={{ 
+                maxHeight: { xs: '400px', sm: 'none' },
+                '&::-webkit-scrollbar': {
+                  width: '6px',
+                  height: '6px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  backgroundColor: 'rgba(255,255,255,0.3)',
+                  borderRadius: '3px',
+                },
+              }}>
+                <Table size={isMobile ? "small" : "medium"}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Strategy</TableCell>
-                      <TableCell align="right">Total</TableCell>
-                      <TableCell align="right">3% Hit Rate</TableCell>
-                      <TableCell align="right">Golden Signals</TableCell>
-                      <TableCell align="right">Performance</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold' }}>Strategy</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Total</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>3% Hit Rate</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Golden</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Grade</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -311,8 +382,12 @@ const Performance = () => {
                       const grade = getPerformanceGrade(hitRate);
                       
                       return (
-                        <TableRow key={strategy.strategy}>
-                          <TableCell>{strategy.strategy}</TableCell>
+                        <TableRow key={strategy.strategy} hover>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight="medium">
+                              {strategy.strategy}
+                            </Typography>
+                          </TableCell>
                           <TableCell align="right">{strategy.total}</TableCell>
                           <TableCell align="right">{hitRate.toFixed(1)}%</TableCell>
                           <TableCell align="right">{strategy.golden}</TableCell>
@@ -336,9 +411,9 @@ const Performance = () => {
 
       {/* Golden Signals Tab */}
       {activeTab === 1 && (
-        <Grid container spacing={3}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
           <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
                 Golden Signals (Quick 3% Gainers)
               </Typography>
@@ -347,13 +422,19 @@ const Performance = () => {
                   No golden signals yet. Golden signals are those that hit 3% profit within 60 minutes.
                 </Alert>
               ) : (
-                <Grid container spacing={2}>
+                <Grid container spacing={{ xs: 1.5, sm: 2 }}>
                   {goldenSignals.map((signal, index) => (
-                    <Grid item xs={12} sm={6} md={4} key={index}>
-                      <Card sx={{ border: '2px solid', borderColor: 'warning.main' }}>
-                        <CardContent>
+                    <Grid item xs={12} sm={6} lg={4} key={index}>
+                      <Card 
+                        sx={{ 
+                          border: '2px solid', 
+                          borderColor: 'warning.main',
+                          '&:hover': { boxShadow: 4 }
+                        }}
+                      >
+                        <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
                           <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                            <Typography variant="h6">{signal.symbol}</Typography>
+                            <Typography variant="h6" fontWeight="bold">{signal.symbol}</Typography>
                             <Chip 
                               icon={<StarIcon />}
                               label="GOLDEN" 
@@ -363,11 +444,11 @@ const Performance = () => {
                           </Box>
                           <Stack spacing={1}>
                             <Box display="flex" justifyContent="space-between">
-                              <Typography variant="body2" color="textSecondary">Strategy:</Typography>
-                              <Typography variant="body2">{signal.strategy}</Typography>
+                              <Typography variant="body2" color="text.secondary">Strategy:</Typography>
+                              <Typography variant="body2" fontWeight="medium">{signal.strategy}</Typography>
                             </Box>
                             <Box display="flex" justifyContent="space-between">
-                              <Typography variant="body2" color="textSecondary">Direction:</Typography>
+                              <Typography variant="body2" color="text.secondary">Direction:</Typography>
                               <Chip 
                                 label={signal.direction}
                                 color={signal.direction === 'LONG' ? 'success' : 'error'}
@@ -375,13 +456,13 @@ const Performance = () => {
                               />
                             </Box>
                             <Box display="flex" justifyContent="space-between">
-                              <Typography variant="body2" color="textSecondary">Time to 3%:</Typography>
+                              <Typography variant="body2" color="text.secondary">Time to 3%:</Typography>
                               <Typography variant="body2" fontWeight="bold" color="success.main">
                                 {signal.time_to_3pct_minutes}m
                               </Typography>
                             </Box>
                             <Box display="flex" justifyContent="space-between">
-                              <Typography variant="body2" color="textSecondary">Max PnL:</Typography>
+                              <Typography variant="body2" color="text.secondary">Max PnL:</Typography>
                               <Typography variant="body2" fontWeight="bold" color="success.main">
                                 {(signal.max_pnl_pct * 100).toFixed(2)}%
                               </Typography>
@@ -400,10 +481,17 @@ const Performance = () => {
 
       {/* Live Tracking Tab */}
       {activeTab === 2 && (
-        <Grid container spacing={3}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
           <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
+              <Box 
+                display="flex" 
+                flexDirection={{ xs: 'column', sm: 'row' }}
+                justifyContent="space-between" 
+                alignItems={{ xs: 'stretch', sm: 'center' }} 
+                mb={2}
+                gap={{ xs: 1, sm: 0 }}
+              >
                 <Typography variant="h6">
                   Live Signal Tracking
                 </Typography>
@@ -423,59 +511,87 @@ const Performance = () => {
                   )}
                 </Box>
               </Box>
-              <Grid container spacing={2} mb={3}>
+              
+              <Grid container spacing={{ xs: 1.5, sm: 2 }} mb={3}>
                 <Grid item xs={12} sm={4}>
-                  <Card sx={{ 
-                    border: realTimeActive ? '2px solid' : '1px solid', 
-                    borderColor: realTimeActive ? 'success.main' : 'divider',
-                    transition: 'all 0.3s ease'
-                  }}>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="primary" sx={{
-                        transition: 'color 0.3s ease',
-                        color: realTimeActive ? 'success.main' : 'primary.main'
-                      }}>
+                  <Card 
+                    variant="outlined"
+                    sx={{ 
+                      border: realTimeActive ? '2px solid' : '1px solid', 
+                      borderColor: realTimeActive ? 'success.main' : 'divider',
+                      transition: 'all 0.3s ease'
+                    }}
+                  >
+                    <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
+                      <Typography 
+                        variant={isMobile ? "h5" : "h4"} 
+                        fontWeight="bold"
+                        sx={{
+                          transition: 'color 0.3s ease',
+                          color: realTimeActive ? 'success.main' : 'primary.main'
+                        }}
+                      >
                         {liveTracking?.active_signals_count || 0}
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Active Signals
-                        {realTimeActive && <Typography variant="caption" display="block" color="success.main">● Live</Typography>}
+                        {realTimeActive && (
+                          <Typography variant="caption" display="block" color="success.main">
+                            ● Live
+                          </Typography>
+                        )}
                       </Typography>
                     </CardContent>
                   </Card>
                 </Grid>
                 <Grid item xs={12} sm={4}>
-                  <Card sx={{ 
-                    border: realTimeActive ? '2px solid' : '1px solid', 
-                    borderColor: realTimeActive ? 'info.main' : 'divider',
-                    transition: 'all 0.3s ease'
-                  }}>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="info.main" sx={{
-                        transition: 'color 0.3s ease'
-                      }}>
+                  <Card 
+                    variant="outlined"
+                    sx={{ 
+                      border: realTimeActive ? '2px solid' : '1px solid', 
+                      borderColor: realTimeActive ? 'info.main' : 'divider',
+                      transition: 'all 0.3s ease'
+                    }}
+                  >
+                    <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
+                      <Typography 
+                        variant={isMobile ? "h5" : "h4"} 
+                        color="info.main"
+                        fontWeight="bold"
+                        sx={{ transition: 'color 0.3s ease' }}
+                      >
                         {liveTracking?.price_cache_symbols || 0}
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Monitored Symbols
-                        {realTimeActive && <Typography variant="caption" display="block" color="info.main">● Live</Typography>}
+                        {realTimeActive && (
+                          <Typography variant="caption" display="block" color="info.main">
+                            ● Live
+                          </Typography>
+                        )}
                       </Typography>
                     </CardContent>
                   </Card>
                 </Grid>
                 <Grid item xs={12} sm={4}>
-                  <Card sx={{ 
-                    border: realTimeActive ? '2px solid' : '1px solid', 
-                    borderColor: realTimeActive ? 'success.main' : 'divider',
-                    transition: 'all 0.3s ease'
-                  }}>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color={realTimeActive ? "success.main" : "grey.500"} sx={{
-                        transition: 'color 0.3s ease'
-                      }}>
+                  <Card 
+                    variant="outlined"
+                    sx={{ 
+                      border: realTimeActive ? '2px solid' : '1px solid', 
+                      borderColor: realTimeActive ? 'success.main' : 'divider',
+                      transition: 'all 0.3s ease'
+                    }}
+                  >
+                    <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
+                      <Typography 
+                        variant={isMobile ? "h5" : "h4"} 
+                        fontWeight="bold"
+                        color={realTimeActive ? "success.main" : "grey.500"}
+                        sx={{ transition: 'color 0.3s ease' }}
+                      >
                         {realTimeActive ? "LIVE" : "OFFLINE"}
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         Real-time Monitoring
                       </Typography>
                     </CardContent>
@@ -483,82 +599,84 @@ const Performance = () => {
                 </Grid>
               </Grid>
 
-              {/* Active Signals */}
+              {/* Active Signals Table - Mobile Optimized */}
               {liveTracking?.active_signals?.length > 0 && (
-                <TableContainer>
-                  <Table>
+                <TableContainer sx={{ 
+                  maxHeight: { xs: '400px', sm: 'none' },
+                  '&::-webkit-scrollbar': {
+                    width: '6px',
+                    height: '6px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    backgroundColor: 'rgba(255,255,255,0.3)',
+                    borderRadius: '3px',
+                  },
+                }}>
+                  <Table size={isMobile ? "small" : "medium"}>
                     <TableHead>
                       <TableRow>
-                        <TableCell>Symbol</TableCell>
-                        <TableCell>Strategy</TableCell>
-                        <TableCell>Direction</TableCell>
-                        <TableCell align="right">Age</TableCell>
-                        <TableCell align="right">Current PnL</TableCell>
-                        <TableCell align="right">Max PnL</TableCell>
-                        <TableCell>Targets Hit</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Symbol</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Strategy</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Direction</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>Age</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>Current PnL</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>Max PnL</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Targets Hit</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {(liveTracking?.active_signals || []).map((signal, index) => (
-                        <TableRow key={index}>
-                          <TableCell>{signal.symbol}</TableCell>
-                          <TableCell>{signal.strategy}</TableCell>
+                      {liveTracking.active_signals.map((signal, index) => (
+                        <TableRow key={index} hover>
                           <TableCell>
-                            <Chip 
+                            <Typography variant="body2" fontWeight="medium">
+                              {signal.symbol}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {signal.strategy}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Chip
                               label={signal.direction}
                               color={signal.direction === 'LONG' ? 'success' : 'error'}
                               size="small"
                             />
                           </TableCell>
-                          <TableCell align="right">{signal.age_minutes}m</TableCell>
                           <TableCell align="right">
-                            <Typography 
-                              color={signal.current_pnl_pct >= 0 ? 'success.main' : 'error.main'}
-                              fontWeight="bold"
-                              sx={{
-                                transition: 'all 0.3s ease',
-                                animation: realTimeActive ? 'pulse 2s infinite' : 'none',
-                                '@keyframes pulse': {
-                                  '0%': { opacity: 1 },
-                                  '50%': { opacity: 0.7 },
-                                  '100%': { opacity: 1 }
-                                }
-                              }}
-                            >
-                              {signal.current_pnl_pct >= 0 ? '+' : ''}{signal.current_pnl_pct}%
-                              {realTimeActive && (
-                                <Typography 
-                                  component="span" 
-                                  variant="caption" 
-                                  sx={{ ml: 0.5, color: 'success.main' }}
-                                >
-                                  ●
-                                </Typography>
-                              )}
+                            <Typography variant="body2">
+                              {signal.age_minutes}m
                             </Typography>
                           </TableCell>
                           <TableCell align="right">
                             <Typography 
-                              color="success.main" 
+                              variant="body2" 
                               fontWeight="bold"
-                              sx={{
-                                transition: 'all 0.3s ease'
-                              }}
+                              color={signal.current_pnl_pct >= 0 ? 'success.main' : 'error.main'}
                             >
-                              +{signal.max_profit_pct}%
+                              {(signal.current_pnl_pct * 100).toFixed(2)}%
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Typography variant="body2" color="info.main">
+                              {(signal.max_pnl_pct * 100).toFixed(2)}%
                             </Typography>
                           </TableCell>
                           <TableCell>
                             <Stack direction="row" spacing={0.5}>
-                              {signal.targets_hit?.['3pct'] && (
-                                <Chip label="3%" color="success" size="small" />
-                              )}
-                              {signal.targets_hit?.['5pct'] && (
-                                <Chip label="5%" color="success" size="small" />
-                              )}
-                              {signal.targets_hit?.stop_loss && (
-                                <Chip label="SL" color="error" size="small" />
-                              )}
+                              {signal.targets_hit.map((target, i) => (
+                                <Chip
+                                  key={i}
+                                  label={target}
+                                  color="success"
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              ))}
                             </Stack>
                           </TableCell>
                         </TableRow>
@@ -574,93 +692,28 @@ const Performance = () => {
 
       {/* Adaptive Assessment Tab */}
       {activeTab === 3 && (
-        <Grid container spacing={3}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
           <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
+            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
               <Typography variant="h6" gutterBottom>
-                Adaptive Market Assessment
+                Adaptive Assessment
               </Typography>
-              
-              {adaptiveAssessment?.market_regime && (
-                <Grid container spacing={3} mb={3}>
-                  <Grid item xs={12} md={6}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6" color="primary" gutterBottom>
-                          Current Market Regime
-                        </Typography>
-                        <Chip 
-                          label={adaptiveAssessment?.market_regime?.market_type || 'Unknown'}
-                          color="primary"
-                          sx={{ mb: 2, fontWeight: 'bold' }}
-                        />
-                        <Typography variant="body2" color="textSecondary">
-                          {adaptiveAssessment?.market_regime?.characteristics || 'No data'}
-                        </Typography>
-                        <Divider sx={{ my: 2 }} />
-                        <Stack spacing={1}>
-                          <Box display="flex" justifyContent="space-between">
-                            <Typography variant="body2">Volatility:</Typography>
-                            <Typography variant="body2" fontWeight="bold">
-                              {adaptiveAssessment?.market_regime?.avg_volatility || 0}%
-                            </Typography>
-                          </Box>
-                          <Box display="flex" justifyContent="space-between">
-                            <Typography variant="body2">Volume Ratio:</Typography>
-                            <Typography variant="body2" fontWeight="bold">
-                              {adaptiveAssessment?.market_regime?.avg_volume_ratio || 0}x
-                            </Typography>
-                          </Box>
-                          <Box display="flex" justifyContent="space-between">
-                            <Typography variant="body2">Learning Potential:</Typography>
-                            <Chip 
-                              label={adaptiveAssessment?.market_regime?.learning_potential || 'Unknown'}
-                              color="success"
-                              size="small"
-                            />
-                          </Box>
-                        </Stack>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  
-                  <Grid item xs={12} md={6}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6" color="primary" gutterBottom>
-                          Adaptive Strategy
-                        </Typography>
-                        <Box display="flex" alignItems="center" gap={1} mb={2}>
-                          <Typography variant="h4">{adaptiveAssessment?.adaptive_strategy?.emoji || '🔄'}</Typography>
-                          <Typography variant="h6">{adaptiveAssessment?.adaptive_strategy?.action || 'Analyzing'}</Typography>
-                        </Box>
-                        <Typography variant="body2" color="textSecondary" mb={2}>
-                          {adaptiveAssessment?.adaptive_strategy?.reasoning || 'Loading adaptive assessment...'}
-                        </Typography>
-                        <Divider sx={{ my: 2 }} />
-                        <Box display="flex" justifyContent="space-between">
-                          <Typography variant="body2">Risk per Trade:</Typography>
-                          <Typography variant="body2" fontWeight="bold">
-                            {adaptiveAssessment?.adaptive_strategy?.risk_per_trade || 'N/A'}
-                          </Typography>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              )}
-
-              {/* Show message when no adaptive data */}
-              {!adaptiveAssessment?.market_regime && (
+              {adaptiveAssessment ? (
+                <Box>
+                  <Typography variant="body1" color="text.secondary">
+                    Adaptive assessment data will be displayed here when available.
+                  </Typography>
+                </Box>
+              ) : (
                 <Alert severity="info">
-                  Loading adaptive assessment data...
+                  Adaptive assessment data is not currently available.
                 </Alert>
               )}
             </Paper>
           </Grid>
         </Grid>
       )}
-    </Box>
+    </Container>
   );
 };
 
