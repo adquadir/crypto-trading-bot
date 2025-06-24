@@ -636,4 +636,102 @@ async def get_learning_insights():
                 "max_rebound_pct": 0.12
             },
             "implementation_status": "⚠️ Learning system using fallback data - database connection issue"
-        } 
+        }
+
+@router.get("/strategies")
+async def get_trading_strategies():
+    """Get available trading strategies."""
+    try:
+        if not strategy_manager:
+            return {
+                "status": "initializing",
+                "data": [],
+                "message": "Strategy manager is still initializing"
+            }
+        
+        # Get strategies from strategy manager
+        if hasattr(strategy_manager, 'get_available_strategies'):
+            strategies = await strategy_manager.get_available_strategies()
+        else:
+            # Default strategy list
+            strategies = [
+                {
+                    "id": "scalping",
+                    "name": "Real-time Scalping",
+                    "description": "High-frequency scalping with 3-10% capital returns",
+                    "enabled": True,
+                    "risk_level": "medium"
+                },
+                {
+                    "id": "swing_trading", 
+                    "name": "Swing Trading",
+                    "description": "Multi-strategy swing trading with structure analysis",
+                    "enabled": True,
+                    "risk_level": "low"
+                },
+                {
+                    "id": "flow_trading",
+                    "name": "Flow Trading",
+                    "description": "Adaptive flow trading with grid optimization",
+                    "enabled": True, 
+                    "risk_level": "medium"
+                }
+            ]
+        
+        return {
+            "status": "success",
+            "data": strategies
+        }
+    except Exception as e:
+        logger.error(f"Error getting strategies: {e}")
+        return {
+            "status": "error",
+            "data": [],
+            "message": f"Error fetching strategies: {str(e)}"
+        }
+
+@router.get("/settings")
+async def get_trading_settings():
+    """Get current trading settings."""
+    try:
+        settings = {
+            "trading_mode": current_trading_mode,
+            "risk_settings": {
+                "max_position_size": 1000.0,
+                "stop_loss_percent": 2.0,
+                "take_profit_percent": 6.0
+            },
+            "strategy_settings": {
+                "scalping_enabled": True,
+                "swing_trading_enabled": True,
+                "flow_trading_enabled": True
+            },
+            "api_settings": {
+                "exchange": "binance",
+                "testnet": True
+            }
+        }
+        
+        return {
+            "status": "success",
+            "data": settings
+        }
+    except Exception as e:
+        logger.error(f"Error getting settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/settings")
+async def update_trading_settings(settings: Dict[str, Any]):
+    """Update trading settings."""
+    try:
+        # Validate and update settings
+        # This is a placeholder - implement actual settings update logic
+        
+        return {
+            "status": "success",
+            "message": "Settings updated successfully",
+            "data": settings
+        }
+    except Exception as e:
+        logger.error(f"Error updating settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) 

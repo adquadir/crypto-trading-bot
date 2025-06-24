@@ -16,6 +16,8 @@ from src.api.routes import router as base_router, set_components
 from src.api.trading_routes.trading import router as trading_router
 from src.api.trading_routes.flow_trading_routes import router as flow_trading_router, initialize_flow_trading_components
 from src.api.trading_routes.profit_scraping_routes import router as profit_scraping_router, set_profit_scraper
+from src.api.trading_routes.signal_tracking_routes import router as signal_tracking_router
+from src.api.backtesting_routes import router as backtesting_router
 from src.api.websocket import router as ws_router, set_websocket_components
 from src.api.trading_routes.trading import set_trading_components
 from src.utils.config import load_config
@@ -168,6 +170,8 @@ def create_app():
     app.include_router(trading_router, prefix="/api/v1")    # Trading routes  
     app.include_router(flow_trading_router, prefix="/api/v1")  # Flow trading routes
     app.include_router(profit_scraping_router, prefix="/api/v1")  # Profit scraping routes
+    app.include_router(signal_tracking_router, prefix="/api/v1")  # Signal tracking routes
+    app.include_router(backtesting_router, prefix="/api/v1")  # Backtesting routes
     app.include_router(ws_router)  # WebSocket routes
 
     @app.on_event("startup")
