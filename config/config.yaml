@@ -8,7 +8,7 @@ exchange:
 
 # 📊 LIVE PAPER TRADING - ML Learning Mode
 paper_trading:
-  enabled: true                     # 🔥 ENABLE for live market learning without real money
+  enabled: true                     # 🔥 ENABLED for live market learning without real money
   mode: "live_learning"             # live_learning | backtesting | disabled
   initial_balance: 10000.0          # Virtual starting capital (USDT)
   use_real_market_data: true        # Use live market feeds (not simulation)

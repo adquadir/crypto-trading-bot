@@ -31,6 +31,11 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import WarningIcon from '@mui/icons-material/Warning';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import StopIcon from '@mui/icons-material/Stop';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import SchoolIcon from '@mui/icons-material/School';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import config from '../config';
 
@@ -38,6 +43,7 @@ const Dashboard = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
+  const navigate = useNavigate();
 
   const [stats, setStats] = useState({
     total_trades: 0,
@@ -61,6 +67,10 @@ const Dashboard = () => {
   const [sortOrder, setSortOrder] = useState('desc');
   const [activeTab, setActiveTab] = useState(0);
   const maxRetries = 3;
+
+  // Paper trading state
+  const [paperTradingStatus, setPaperTradingStatus] = useState(null);
+  const [paperTradingLoading, setPaperTradingLoading] = useState(false);
 
   const handleError = (error) => {
     console.error('Error (raw):', error);
@@ -137,9 +147,51 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 30000);
+    fetchPaperTradingStatus();
+    const interval = setInterval(() => {
+      fetchDashboardData();
+      fetchPaperTradingStatus();
+    }, 30000);
     return () => clearInterval(interval);
   }, [retryCount]);
+
+  const fetchPaperTradingStatus = async () => {
+    try {
+      const response = await axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/status`);
+      setPaperTradingStatus(response.data.data);
+    } catch (error) {
+      console.error('Error fetching paper trading status:', error);
+      // Don't set error state for paper trading, it's optional
+    }
+  };
+
+  const handleStartPaperTrading = async () => {
+    try {
+      setPaperTradingLoading(true);
+      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/start`);
+      await fetchPaperTradingStatus();
+      // Navigate to paper trading page
+      navigate('/paper-trading');
+    } catch (error) {
+      console.error('Error starting paper trading:', error);
+      setError('Failed to start paper trading');
+    } finally {
+      setPaperTradingLoading(false);
+    }
+  };
+
+  const handleStopPaperTrading = async () => {
+    try {
+      setPaperTradingLoading(true);
+      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/stop`);
+      await fetchPaperTradingStatus();
+    } catch (error) {
+      console.error('Error stopping paper trading:', error);
+      setError('Failed to stop paper trading');
+    } finally {
+      setPaperTradingLoading(false);
+    }
+  };
 
   const handleSort = (field) => {
     if (sortBy === field) {

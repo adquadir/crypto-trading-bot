@@ -40,6 +40,7 @@ const Navbar = () => {
     { path: '/signals', label: 'Signals', icon: <SignalCellularAltIcon /> },
     { path: '/opportunities', label: 'Opportunities', icon: <TrendingUpIcon /> },
     { path: '/scalping', label: 'Scalping', icon: <SpeedIcon /> },
+    { path: '/paper-trading', label: 'Paper Trading', icon: <PsychologyIcon /> },
     { path: '/flow-trading', label: 'Flow Trading', icon: <GridOnIcon /> },
     { path: '/profit-scraping', label: 'Profit Scraping', icon: <MonetizationOnIcon /> },
     { path: '/positions', label: 'Positions', icon: <AccountBalanceWalletIcon /> },
