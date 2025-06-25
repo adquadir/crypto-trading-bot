@@ -36,10 +36,11 @@ opportunity_manager = None
 config = None
 realtime_scalping_manager = None
 integrated_profit_manager = None
+paper_trading_engine = None
 
 async def initialize_components():
     """Initialize all trading components in the background."""
-    global exchange_client, strategy_manager, risk_manager, opportunity_manager, config, realtime_scalping_manager, integrated_profit_manager
+    global exchange_client, strategy_manager, risk_manager, opportunity_manager, config, realtime_scalping_manager, integrated_profit_manager, paper_trading_engine
     
     try:
         logger.info("Initializing components...")
@@ -106,6 +107,32 @@ async def initialize_components():
         except Exception as e:
             logger.error(f"Realtime scalping manager initialization failed: {e}")
             realtime_scalping_manager = None
+        
+        # Initialize paper trading engine
+        logger.info("Initializing paper trading engine...")
+        try:
+            from src.trading.paper_trading_engine import PaperTradingEngine
+            if opportunity_manager and exchange_client:
+                # Load paper trading config
+                paper_config = config.get('paper_trading', {}) if config else {}
+                paper_trading_engine = PaperTradingEngine(
+                    {'paper_trading': paper_config}, 
+                    exchange_client, 
+                    opportunity_manager
+                )
+                
+                # Auto-start if enabled in config
+                if paper_config.get('enabled', False):
+                    await paper_trading_engine.start()
+                    logger.info("✅ Paper trading engine started automatically")
+                else:
+                    logger.info("✅ Paper trading engine initialized (not started)")
+            else:
+                logger.warning("Skipping paper trading - missing dependencies")
+                paper_trading_engine = None
+        except Exception as e:
+            logger.error(f"Paper trading engine initialization failed: {e}")
+            paper_trading_engine = None
         
         # Initialize flow trading components
         logger.info("Initializing flow trading components...")
@@ -194,7 +221,8 @@ def create_app():
             opportunity_manager,
             exchange_client, 
             strategy_manager,
-            risk_manager
+            risk_manager,
+            paper_trading_engine
         )
         
         set_websocket_components(
@@ -231,7 +259,8 @@ def create_app():
                 "risk_manager": risk_manager is not None,
                 "opportunity_manager": opportunity_manager is not None,
                 "realtime_scalping": realtime_scalping_manager is not None,
-                "integrated_profit_manager": integrated_profit_manager is not None
+                "integrated_profit_manager": integrated_profit_manager is not None,
+                "paper_trading_engine": paper_trading_engine is not None
             }
         }
 

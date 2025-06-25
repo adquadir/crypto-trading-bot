@@ -19,17 +19,19 @@ opportunity_manager = None
 exchange_client = None
 strategy_manager = None
 risk_manager = None
+paper_trading_engine = None
 
 # Trading mode state
 current_trading_mode = "stable"  # Default mode
 
-def set_trading_components(opp_mgr, exch_client, strat_mgr, risk_mgr):
+def set_trading_components(opp_mgr, exch_client, strat_mgr, risk_mgr, paper_engine=None):
     """Set the component instances from main."""
-    global opportunity_manager, exchange_client, strategy_manager, risk_manager
+    global opportunity_manager, exchange_client, strategy_manager, risk_manager, paper_trading_engine
     opportunity_manager = opp_mgr
     exchange_client = exch_client
     strategy_manager = strat_mgr
     risk_manager = risk_mgr
+    paper_trading_engine = paper_engine
 
 class TradeRequest(BaseModel):
     symbol: str
@@ -743,48 +745,54 @@ async def update_trading_settings(settings: Dict[str, Any]):
 async def get_paper_trading_status():
     """Get paper trading engine status and performance."""
     try:
-        # This would connect to the actual paper trading engine
-        # For now, return mock data to show the concept
-        
-        status = {
-            "enabled": True,
-            "mode": "live_learning",
-            "virtual_balance": 12350.75,
-            "initial_balance": 10000.0,
-            "total_return_pct": 23.51,
-            "daily_pnl": 145.30,
-            "max_drawdown_pct": 3.2,
-            "active_positions": 7,
-            "completed_trades": 143,
-            "win_rate_pct": 68.5,
-            "total_fees_paid": 89.45,
-            "uptime_hours": 72.5,
-            "learning_insights": [
-                "Best performing strategy: scalping (Win rate: 72.1%)",
-                "Total return: 23.5% ($12,350.75 from $10,000.00)",
-                "Max drawdown: 3.2%",
-                "Total trades executed: 143, Active positions: 7"
-            ],
-            "strategy_performance": {
-                "scalping": {
-                    "total_trades": 89,
-                    "win_rate": 0.721,
-                    "avg_pnl": 12.45,
-                    "total_pnl": 1108.05
-                },
-                "swing_trading": {
-                    "total_trades": 34,
-                    "win_rate": 0.647,
-                    "avg_pnl": 18.67,
-                    "total_pnl": 634.78
-                },
-                "flow_trading": {
-                    "total_trades": 20,
-                    "win_rate": 0.60,
-                    "avg_pnl": 15.23,
-                    "total_pnl": 304.60
+        if not paper_trading_engine:
+            # Return default/disabled state if engine not available
+            return {
+                "status": "success",
+                "data": {
+                    "enabled": False,
+                    "mode": "disabled",
+                    "virtual_balance": 0.0,
+                    "initial_balance": 10000.0,
+                    "total_return_pct": 0.0,
+                    "daily_pnl": 0.0,
+                    "max_drawdown_pct": 0.0,
+                    "active_positions": 0,
+                    "completed_trades": 0,
+                    "win_rate_pct": 0.0,
+                    "total_fees_paid": 0.0,
+                    "uptime_hours": 0.0,
+                    "learning_insights": [
+                        "Paper trading engine not initialized",
+                        "Enable paper trading in config to start learning"
+                    ],
+                    "strategy_performance": {}
                 }
             }
+        
+        # Get real data from paper trading engine
+        portfolio_summary = paper_trading_engine.get_portfolio_summary()
+        
+        # Calculate uptime
+        uptime_hours = 0.0
+        if hasattr(paper_trading_engine, 'start_time'):
+            uptime_hours = (datetime.now() - paper_trading_engine.start_time).total_seconds() / 3600
+        
+        status = {
+            "enabled": paper_trading_engine.running,
+            "mode": "live_learning" if paper_trading_engine.running else "stopped",
+            "virtual_balance": portfolio_summary.get('virtual_balance', 0.0),
+            "initial_balance": paper_trading_engine.initial_balance,
+            "total_return_pct": portfolio_summary.get('total_return_pct', 0.0),
+            "daily_pnl": portfolio_summary.get('daily_pnl', 0.0),
+            "max_drawdown_pct": portfolio_summary.get('max_drawdown_pct', 0.0),
+            "active_positions": portfolio_summary.get('active_positions', 0),
+            "completed_trades": portfolio_summary.get('completed_trades', 0),
+            "win_rate_pct": portfolio_summary.get('win_rate_pct', 0.0),
+            "total_fees_paid": portfolio_summary.get('total_fees_paid', 0.0),
+            "uptime_hours": uptime_hours,
+            "learning_insights": portfolio_summary.get('learning_insights', []),
+            "strategy_performance": paper_trading_engine.learning_data.get('strategy_performance', {})
         }
         
         return {
@@ -800,39 +808,14 @@ async def get_paper_trading_status():
 async def get_paper_trading_positions():
     """Get active virtual positions."""
     try:
-        # Mock active positions data
-        positions = [
-            {
-                "position_id": "paper_001",
-                "symbol": "BTCUSDT",
-                "side": "LONG",
-                "entry_price": 43250.50,
-                "current_price": 43890.75,
-                "size": 0.023,
-                "leverage": 3.0,
-                "unrealized_pnl": 44.32,
-                "unrealized_pnl_pct": 1.48,
-                "age_minutes": 87,
-                "strategy": "scalping",
-                "stop_loss": 42800.00,
-                "take_profit": 44500.00
-            },
-            {
-                "position_id": "paper_002",
-                "symbol": "ETHUSDT",
-                "side": "SHORT",
-                "entry_price": 2580.75,
-                "current_price": 2545.20,
-                "size": 0.387,
-                "leverage": 2.0,
-                "unrealized_pnl": 27.54,
-                "unrealized_pnl_pct": 2.76,
-                "age_minutes": 45,
-                "strategy": "swing_trading",
-                "stop_loss": 2620.00,
-                "take_profit": 2520.00
+        if not paper_trading_engine:
+            return {
+                "status": "success",
+                "data": []
             }
-        ]
+        
+        # Get real positions from paper trading engine
+        positions = paper_trading_engine.get_active_positions()
         
         return {
             "status": "success",
@@ -891,15 +874,30 @@ async def get_paper_trading_performance():
 async def start_paper_trading():
     """Start the paper trading engine for live learning."""
     try:
-        # This would start the actual paper trading engine
-        logger.info("🚀 Starting paper trading engine for live ML learning")
+        if not paper_trading_engine:
+            raise HTTPException(status_code=503, detail="Paper trading engine not available")
+        
+        if paper_trading_engine.running:
+            return {
+                "status": "success",
+                "message": "Paper trading engine already running",
+                "data": {
+                    "mode": "live_learning",
+                    "initial_balance": paper_trading_engine.initial_balance,
+                    "already_running": True
+                }
+            }
+        
+        # Start the paper trading engine
+        await paper_trading_engine.start()
+        logger.info("🚀 Paper trading engine started via API")
         
         return {
             "status": "success",
             "message": "Paper trading engine started - Live learning mode activated",
             "data": {
                 "mode": "live_learning",
-                "initial_balance": 10000.0,
+                "initial_balance": paper_trading_engine.initial_balance,
                 "started_at": datetime.now().isoformat()
             }
         }
@@ -912,17 +910,34 @@ async def start_paper_trading():
 async def stop_paper_trading():
     """Stop the paper trading engine and save learning data."""
     try:
-        # This would stop the actual paper trading engine
-        logger.info("🛑 Stopping paper trading engine and saving learning data")
+        if not paper_trading_engine:
+            raise HTTPException(status_code=503, detail="Paper trading engine not available")
+        
+        if not paper_trading_engine.running:
+            return {
+                "status": "success",
+                "message": "Paper trading engine already stopped",
+                "data": {
+                    "stopped_at": datetime.now().isoformat(),
+                    "already_stopped": True
+                }
+            }
+        
+        # Get final summary before stopping
+        final_summary = paper_trading_engine.get_portfolio_summary()
+        
+        # Stop the paper trading engine
+        await paper_trading_engine.stop()
+        logger.info("🛑 Paper trading engine stopped via API")
         
         return {
             "status": "success",
             "message": "Paper trading engine stopped - Learning data saved",
             "data": {
                 "stopped_at": datetime.now().isoformat(),
-                "final_balance": 12350.75,
-                "total_return": 23.51,
-                "trades_completed": 143,
+                "final_balance": final_summary.get('virtual_balance', 0.0),
+                "total_return": final_summary.get('total_return_pct', 0.0),
+                "trades_completed": final_summary.get('completed_trades', 0),
                 "learning_data_saved": True
             }
         }
