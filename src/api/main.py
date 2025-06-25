@@ -196,14 +196,14 @@ def create_app():
         allow_headers=["*"],
     )
 
-    # Include routers
-    app.include_router(base_router, prefix="/api/v1")       # Base routes
-    app.include_router(trading_router, prefix="/api/v1/trading")    # Trading routes  
-    app.include_router(flow_trading_router, prefix="/api/v1")  # Flow trading routes
-    app.include_router(profit_scraping_router, prefix="/api/v1")  # Profit scraping routes
-    app.include_router(signal_tracking_router, prefix="/api/v1")  # Signal tracking routes
-    app.include_router(backtesting_router, prefix="/api/v1")  # Backtesting routes
-    app.include_router(ws_router)  # WebSocket routes
+    # Include routers with proper prefixes
+    app.include_router(base_router, prefix="/api/v1")       # Base routes (/api/v1/...)
+    app.include_router(trading_router, prefix="/api/v1/trading")    # Trading routes (/api/v1/trading/...)  
+    app.include_router(flow_trading_router, prefix="/api/v1")  # Flow trading routes (/api/v1/...)
+    app.include_router(profit_scraping_router, prefix="/api/v1")  # Profit scraping routes (/api/v1/...)
+    app.include_router(signal_tracking_router, prefix="/api/v1")  # Signal tracking routes (/api/v1/...)
+    app.include_router(backtesting_router, prefix="/api/v1")  # Backtesting routes (/api/v1/...)
+    app.include_router(ws_router)  # WebSocket routes (no prefix needed)
 
     @app.on_event("startup")
     async def startup_event():
