@@ -76,7 +76,7 @@ async def initialize_components():
         logger.info("Initializing risk manager...")
         try:
             from src.risk.risk_manager import RiskManager
-            risk_manager = RiskManager()
+            risk_manager = RiskManager(config)
             logger.info("Risk manager initialized successfully")
         except Exception as e:
             logger.error(f"Risk manager initialization failed: {e}")
@@ -86,8 +86,12 @@ async def initialize_components():
         logger.info("Initializing opportunity manager...")
         try:
             from src.opportunity.opportunity_manager import OpportunityManager
-            opportunity_manager = OpportunityManager()
-            logger.info("Opportunity manager initialized successfully")
+            if exchange_client and strategy_manager and risk_manager:
+                opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager)
+                logger.info("Opportunity manager initialized successfully")
+            else:
+                logger.warning("Skipping opportunity manager - missing dependencies")
+                opportunity_manager = None
         except Exception as e:
             logger.error(f"Opportunity manager initialization failed: {e}")
             opportunity_manager = None
