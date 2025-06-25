@@ -116,26 +116,30 @@ async def initialize_components():
         logger.info("Initializing paper trading engine...")
         try:
             from src.trading.paper_trading_engine import PaperTradingEngine
-            if opportunity_manager and exchange_client:
-                # Load paper trading config
-                paper_config = config.get('paper_trading', {}) if config else {}
-                paper_trading_engine = PaperTradingEngine(
-                    {'paper_trading': paper_config}, 
-                    exchange_client, 
-                    opportunity_manager
-                )
-                
-                # Auto-start if enabled in config
-                if paper_config.get('enabled', False):
-                    await paper_trading_engine.start()
-                    logger.info("✅ Paper trading engine started automatically")
-                else:
-                    logger.info("✅ Paper trading engine initialized (not started)")
+            
+            # Always initialize paper trading engine even if dependencies are missing
+            # Load paper trading config with defaults
+            paper_config = config.get('paper_trading', {}) if config else {}
+            paper_config.setdefault('initial_balance', 10000.0)
+            paper_config.setdefault('enabled', True)
+            
+            paper_trading_engine = PaperTradingEngine(
+                {'paper_trading': paper_config}, 
+                exchange_client,  # Can be None
+                opportunity_manager  # Can be None
+            )
+            
+            # Auto-start if enabled in config
+            if paper_config.get('enabled', False):
+                await paper_trading_engine.start()
+                logger.info("✅ Paper trading engine started successfully")
             else:
-                logger.warning("Skipping paper trading - missing dependencies")
-                paper_trading_engine = None
+                logger.info("✅ Paper trading engine initialized (manual start required)")
+                
         except Exception as e:
             logger.error(f"Paper trading engine initialization failed: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             paper_trading_engine = None
         
         # Initialize flow trading components

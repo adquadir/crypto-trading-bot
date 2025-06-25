@@ -68,48 +68,51 @@ class PaperTradingEngine:
     """
     
     def __init__(self, config: Dict[str, Any], exchange_client, opportunity_manager):
+        """Initialize paper trading engine with virtual balance and ML learning capabilities."""
         self.config = config.get('paper_trading', {})
-        self.exchange_client = exchange_client
-        self.opportunity_manager = opportunity_manager
+        self.exchange_client = exchange_client  # Can be None
+        self.opportunity_manager = opportunity_manager  # Can be None
         
-        # Trading state
-        self.running = False
-        self.initial_balance = self.config.get('initial_balance', 10000.0)
-        self.virtual_balance = self.initial_balance
+        # Core configuration with defaults
+        self.initial_balance = float(self.config.get('initial_balance', 10000.0))
+        self.virtual_balance = self.initial_balance  # Start with full balance
+        self.mode = self.config.get('mode', 'live_learning')
+        self.use_real_market_data = self.config.get('use_real_market_data', True)
+        self.simulate_real_conditions = self.config.get('simulate_real_conditions', True)
+        self.learning_enabled = self.config.get('learning_enabled', True)
+        
+        # Trading simulation parameters
+        self.slippage = self.config.get('slippage', {})
+        self.fees = self.config.get('fees', {})
+        self.latency = self.config.get('latency', {})
+        
+        # Position management
+        self.virtual_positions: Dict[str, VirtualPosition] = {}
+        self.completed_trades: List[VirtualTrade] = []
+        self.daily_pnl = 0.0
         self.peak_balance = self.initial_balance
         self.max_drawdown = 0.0
         
-        # Position tracking
-        self.virtual_positions = {}
-        self.completed_trades = []
-        self.active_positions = []
+        # ML learning data
+        self.learning_data = {
+            'win_rate': 0.0,
+            'strategy_performance': {},
+            'learning_insights': [],
+            'market_regime_accuracy': 0.0,
+            'signal_confidence_improvement': 0.0,
+            'trades_executed': 0,
+            'total_pnl': 0.0
+        }
         
         # Performance tracking
         self.performance_history = []
-        self.last_daily_update = None
-        self.daily_pnl = 0.0  # Initialize daily PnL tracking
+        self.start_time = None
+        self.running = False
         
-        # ML learning data
-        self.learning_data = {
-            'strategy_performance': {},
-            'market_regime_adaptations': [],
-            'signal_quality_improvements': [],
-            'risk_adjustments': []
-        }
-        
-        # Risk management
-        self.position_limits = self.config.get('position_limits', {})
-        self.risk_per_trade = self.config.get('risk_per_trade', 0.02)  # 2% per trade
-        
-        # Fees and slippage simulation
-        self.trading_fee = self.config.get('trading_fee', 0.0004)  # 0.04%
-        self.slippage = self.config.get('slippage', 0.0003)  # 0.03%
-        self.latency_ms = self.config.get('latency_ms', 50)  # 50ms latency
-        
-        # Initialize daily performance tracking
+        # Initialize daily performance with sample data
         self._initialize_daily_performance()
         
-        logger.info(f"📊 Paper Trading Engine initialized - Initial balance: ${self.initial_balance}")
+        logger.info(f"📊 Paper Trading Engine initialized - Virtual Balance: ${self.virtual_balance:,.2f}")
 
     async def start(self):
         """Start the paper trading engine."""
@@ -118,6 +121,7 @@ class PaperTradingEngine:
             return
             
         self.running = True
+        self.start_time = datetime.now()  # Set start time
         logger.info("🚀 Starting Live Paper Trading Engine - ML Learning Mode")
         
         # Start background tasks
@@ -155,7 +159,7 @@ class PaperTradingEngine:
                 return None
             
             # Simulate realistic order execution delay
-            await asyncio.sleep(self.latency_ms / 1000)
+            await asyncio.sleep(self.latency.get('ms', 50) / 1000)
             
             # Get current market price for slippage calculation
             current_price = await self._get_current_market_price(symbol)
@@ -171,7 +175,7 @@ class PaperTradingEngine:
             size = position_size_usd / executed_price
             
             # Calculate fees
-            fee_rate = self.trading_fee
+            fee_rate = self.fees.get('rate', 0.0004)  # 0.04%
             fees = position_size_usd * fee_rate
             
             # Check if we have enough balance
@@ -247,7 +251,7 @@ class PaperTradingEngine:
             pnl_usdt *= position.leverage
             
             # Calculate fees for closing
-            close_fee_rate = self.trading_fee
+            close_fee_rate = self.fees.get('close_rate', 0.0004)
             close_fees = (executed_price * position.size) * close_fee_rate
             
             # Net PnL after fees
@@ -303,9 +307,9 @@ class PaperTradingEngine:
     def _apply_slippage(self, market_price: float, direction: str, order_type: str = "market") -> float:
         """Apply realistic slippage to order execution."""
         if order_type == "market":
-            slippage_rate = self.slippage
+            slippage_rate = self.slippage.get('rate', 0.0003)  # 0.03%
         else:
-            slippage_rate = self.slippage
+            slippage_rate = self.slippage.get('rate', 0.0003)  # 0.03%
         
         if direction.upper() in ['LONG', 'BUY']:
             # Buying - slippage increases price
@@ -755,52 +759,15 @@ class PaperTradingEngine:
             return []
 
     def _initialize_daily_performance(self):
-        """Initialize daily performance with last 7 days of data"""
-        from datetime import datetime, timedelta
+        """Initialize daily performance with empty data - no sample data"""
+        from datetime import datetime
         
         current_date = datetime.now()
-        self.performance_history = []  # Clear any existing data
         
-        # Create initial daily performance entries for last 7 days
-        for i in range(7, 0, -1):
-            date = current_date - timedelta(days=i)
-            
-            # Create realistic sample performance data for visualization
-            # Simulate trading activity increasing towards recent days
-            if i <= 3:  # Last 3 days - more activity
-                daily_pnl = random.uniform(-30, 80)  # Some losses, more gains
-                trades_count = random.randint(2, 8)
-                positions_count = random.randint(1, 4)
-                balance_change = daily_pnl * 0.8  # Not all PnL affects balance immediately
-            elif i <= 5:  # Middle days - moderate activity  
-                daily_pnl = random.uniform(-20, 50)
-                trades_count = random.randint(0, 4)
-                positions_count = random.randint(0, 2)
-                balance_change = daily_pnl * 0.6
-            else:  # Older days - less activity
-                daily_pnl = random.uniform(-10, 25)
-                trades_count = random.randint(0, 2)
-                positions_count = random.randint(0, 1)
-                balance_change = daily_pnl * 0.4
-            
-            # Calculate realistic win rate
-            win_rate = random.uniform(45, 75) if trades_count > 0 else 0.0
-            
-            daily_entry = {
-                "timestamp": date.isoformat(),
-                "balance": max(self.initial_balance + balance_change, self.initial_balance * 0.9),  # Don't go too low
-                "total_value": max(self.initial_balance + balance_change, self.initial_balance * 0.9),
-                "unrealized_pnl": random.uniform(-10, 15) if positions_count > 0 else 0,
-                "daily_pnl": daily_pnl,
-                "max_drawdown": abs(min(0, balance_change)) / self.initial_balance if balance_change < 0 else 0,
-                "active_positions": positions_count,
-                "total_trades": trades_count,
-                "win_rate": win_rate
-            }
-            
-            self.performance_history.append(daily_entry)
+        # Force clear all existing data to remove persistent duplicates
+        self.performance_history = []
         
-        # Add today's entry with real current data
+        # Add only today's entry with real current data
         today_entry = {
             "timestamp": current_date.isoformat(),
             "balance": self.virtual_balance,
@@ -816,7 +783,7 @@ class PaperTradingEngine:
         self.performance_history.append(today_entry)
         self.last_daily_update = current_date.date()
         
-        logger.info(f"📊 Initialized daily performance with {len(self.performance_history)} days of sample data")
+        logger.info(f"📊 Initialized fresh daily performance - single entry for today")
     
     def _calculate_win_rate(self):
         """Calculate current win rate from completed trades"""

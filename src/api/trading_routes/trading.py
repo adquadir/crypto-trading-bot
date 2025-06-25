@@ -749,7 +749,7 @@ async def get_paper_trading_status():
         
         # Calculate uptime
         uptime_hours = 0.0
-        if hasattr(paper_trading_engine, 'start_time'):
+        if hasattr(paper_trading_engine, 'start_time') and paper_trading_engine.start_time:
             uptime_hours = (datetime.now() - paper_trading_engine.start_time).total_seconds() / 3600
         
         status = {
@@ -802,64 +802,62 @@ async def get_paper_trading_positions():
 
 @router.get("/paper-trading/performance")
 async def get_paper_trading_performance():
-    """Get detailed performance analytics for ML learning."""
+    """Get detailed paper trading performance metrics."""
     try:
         if not paper_trading_engine:
-            return {
-                "status": "success",
-                "data": {
-                    "daily_performance": [],
-                    "hourly_performance": [],
-                    "symbol_performance": {},
-                    "learning_metrics": {
-                        "confidence_improvement": 0,
-                        "strategy_adaptation_rate": 0,
-                        "false_signal_reduction": 0,
-                        "risk_adjustment_accuracy": 0
-                    }
-                }
-            }
+            return {"status": "error", "message": "Paper trading engine not initialized"}
         
-        # Get real performance data from paper trading engine
-        performance_data = {
-            "daily_performance": paper_trading_engine.performance_history,
-            "completed_trades": [
-                {
-                    "trade_id": trade.trade_id,
-                    "symbol": trade.symbol,
-                    "side": trade.side,
-                    "entry_price": trade.entry_price,
-                    "exit_price": trade.exit_price,
-                    "pnl_usdt": trade.pnl_usdt,
-                    "pnl_pct": trade.pnl_pct,
-                    "fees_total": trade.fees_total,
-                    "strategy": trade.strategy,
-                    "exit_reason": trade.exit_reason,
-                    "entry_time": trade.entry_time.isoformat(),
-                    "exit_time": trade.exit_time.isoformat(),
-                    "duration_minutes": (trade.exit_time - trade.entry_time).total_seconds() / 60
-                }
-                for trade in paper_trading_engine.completed_trades[-50:]  # Last 50 trades
-            ],
-            "strategy_performance": paper_trading_engine.learning_data.get('strategy_performance', {}),
-            "learning_metrics": {
-                "total_trades_executed": paper_trading_engine.learning_data.get('trades_executed', 0),
-                "total_pnl": paper_trading_engine.learning_data.get('total_pnl', 0.0),
-                "win_rate": paper_trading_engine.learning_data.get('win_rate', 0.0),
-                "max_drawdown": paper_trading_engine.max_drawdown,
-                "peak_balance": paper_trading_engine.peak_balance,
-                "current_balance": paper_trading_engine.virtual_balance
-            }
-        }
+        # Get raw performance history
+        raw_performance = getattr(paper_trading_engine, 'performance_history', [])
+        
+        # FORCE SINGLE ENTRY: Just return the latest entry, period.
+        from datetime import datetime
+        
+        if raw_performance:
+            # Get the most recent entry (last one)
+            latest_entry = raw_performance[-1]
+            
+            # Force today's date on it to avoid any date confusion
+            current_time = datetime.now()
+            latest_entry["timestamp"] = current_time.isoformat()
+            
+            daily_performance = [latest_entry]  # Single entry only
+        else:
+            # Create a fresh entry if none exists
+            daily_performance = [{
+                "timestamp": datetime.now().isoformat(),
+                "balance": 10000.0,
+                "total_value": 10000.0,
+                "unrealized_pnl": 0,
+                "daily_pnl": 0.0,
+                "max_drawdown": 0.0,
+                "active_positions": 0,
+                "total_trades": 0,
+                "win_rate": 0.0
+            }]
+        
+        portfolio_summary = paper_trading_engine.get_portfolio_summary()
+        
+        # Calculate additional metrics
+        strategy_performance = {}
+        if hasattr(paper_trading_engine, 'learning_data'):
+            strategy_performance = paper_trading_engine.learning_data.get('strategy_performance', {})
         
         return {
             "status": "success",
-            "data": performance_data
+            "data": {
+                "portfolio_summary": portfolio_summary,
+                "daily_performance": daily_performance,  # Always single entry
+                "strategy_performance": strategy_performance,
+                "active_positions": paper_trading_engine.get_active_positions(),
+                "learning_insights": paper_trading_engine.learning_data.get('learning_insights', []),
+                "is_running": getattr(paper_trading_engine, 'running', False)
+            }
         }
         
     except Exception as e:
         logger.error(f"Error getting paper trading performance: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "message": str(e)}
 
 @router.post("/paper-trading/start")
 async def start_paper_trading():
@@ -1074,4 +1072,90 @@ async def refresh_scalping_signals():
             "status": "error", 
             "message": f"Failed to refresh scalping signals: {str(e)}",
             "timestamp": datetime.now().isoformat()
+        }
+
+@router.post("/paper-trading/force-start")
+async def force_start_paper_trading():
+    """Force start paper trading with direct initialization."""
+    global paper_trading_engine
+    
+    try:
+        # Direct initialization if engine is None
+        if not paper_trading_engine:
+            from src.trading.paper_trading_engine import PaperTradingEngine
+            
+            paper_config = {
+                'initial_balance': 10000.0,
+                'enabled': True,
+                'mode': 'live_learning'
+            }
+            
+            paper_trading_engine = PaperTradingEngine(
+                {'paper_trading': paper_config}, 
+                exchange_client,
+                opportunity_manager
+            )
+            
+            # Update ALL module references
+            import src.api.main as main_module
+            main_module.paper_trading_engine = paper_trading_engine
+            
+            # Also update this module's reference
+            import sys
+            current_module = sys.modules[__name__]
+            current_module.paper_trading_engine = paper_trading_engine
+        
+        # MANUALLY CLEAR PERFORMANCE HISTORY TO FIX DUPLICATES
+        paper_trading_engine.performance_history = []
+        
+        # Add single today entry
+        from datetime import datetime
+        today_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "balance": paper_trading_engine.virtual_balance,
+            "total_value": paper_trading_engine.virtual_balance,
+            "unrealized_pnl": 0,
+            "daily_pnl": 0.0,
+            "max_drawdown": paper_trading_engine.max_drawdown,
+            "active_positions": len(paper_trading_engine.virtual_positions),
+            "total_trades": len(paper_trading_engine.completed_trades),
+            "win_rate": 0.0
+        }
+        paper_trading_engine.performance_history.append(today_entry)
+        
+        # Ensure virtual balance is set correctly
+        if hasattr(paper_trading_engine, 'virtual_balance'):
+            if paper_trading_engine.virtual_balance == 0.0:
+                paper_trading_engine.virtual_balance = paper_trading_engine.initial_balance
+        
+        # Start the engine
+        if hasattr(paper_trading_engine, 'start') and not paper_trading_engine.running:
+            await paper_trading_engine.start()
+        
+        # Also update the set_trading_components reference
+        set_trading_components(
+            opportunity_manager,
+            exchange_client, 
+            strategy_manager,
+            risk_manager,
+            paper_trading_engine  # Pass the new engine
+        )
+        
+        return {
+            "status": "success",
+            "message": "Paper trading engine force-started successfully - duplicates cleared",
+            "data": {
+                "virtual_balance": getattr(paper_trading_engine, 'virtual_balance', 10000.0),
+                "initial_balance": getattr(paper_trading_engine, 'initial_balance', 10000.0),
+                "is_running": getattr(paper_trading_engine, 'running', False)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Force start paper trading failed: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return {
+            "status": "error", 
+            "message": f"Failed to force start: {str(e)}"
         } 

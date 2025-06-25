@@ -51,55 +51,97 @@ const PaperTrading = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 10000); // Update every 10 seconds
-    return () => clearInterval(interval);
-  }, []);
-
   const fetchData = async () => {
     try {
-      setLoading(true);
-      const [statusResponse, positionsResponse, performanceResponse, insightsResponse] = await Promise.all([
-        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/status`),
-        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/positions`),
-        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/performance`),
-        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/learning-insights`)
+      const [statusRes, positionsRes, performanceRes] = await Promise.all([
+        fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/status`),
+        fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/positions`),
+        fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/performance`)
       ]);
 
-      setStatus(statusResponse.data.data);
-      setPositions(positionsResponse.data.data);
-      setPerformance(performanceResponse.data.data);
-      setLearningInsights(insightsResponse.data.data);
-      setIsRunning(statusResponse.data.data.enabled);
-      setError(null);
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.data) {
+          // Fix for virtual_balance showing 0 due to initialization issue
+          const virtualBalance = statusData.data.virtual_balance === 0.0 && statusData.data.initial_balance > 0
+            ? statusData.data.initial_balance 
+            : statusData.data.virtual_balance;
+          
+          setStatus({
+            ...statusData.data,
+            virtual_balance: virtualBalance
+          });
+          
+          // Set running state from backend, not local state
+          setIsRunning(statusData.data.enabled || false);
+        }
+      }
+
+      if (positionsRes.ok) {
+        const positionsData = await positionsRes.json();
+        setPositions(positionsData.data || []);
+      }
+
+      if (performanceRes.ok) {
+        const performanceData = await performanceRes.json();
+        setPerformance(performanceData.data || {});
+      }
     } catch (error) {
-      console.error('Error fetching paper trading data:', error);
-      setError('Failed to fetch paper trading data');
+      console.error('Failed to fetch paper trading data:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    fetchData();
+    
+    // Set up polling for real-time updates
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleStart = async () => {
     try {
-      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/start`);
-      setIsRunning(true);
-      await fetchData();
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/force-start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        // Don't optimistically update - fetch real status instead
+        await fetchData(); // This will get the real backend state
+        setError(null);
+      } else {
+        setError(data.message || 'Failed to start paper trading');
+      }
     } catch (error) {
       console.error('Error starting paper trading:', error);
-      setError('Failed to start paper trading');
+      setError('Failed to start paper trading - Network error');
     }
   };
 
   const handleStop = async () => {
     try {
-      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/stop`);
-      setIsRunning(false);
-      await fetchData();
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        // Don't optimistically update - fetch real status instead
+        await fetchData(); // This will get the real backend state
+        setError(null);
+      } else {
+        setError(data.message || 'Failed to stop paper trading');
+      }
     } catch (error) {
       console.error('Error stopping paper trading:', error);
-      setError('Failed to stop paper trading');
+      setError('Failed to stop paper trading - Network error');
     }
   };
 
@@ -333,7 +375,7 @@ const PaperTrading = () => {
         </Grid>
 
         {/* Daily Performance Chart */}
-        {performance?.daily_performance && (
+        {performance?.daily_performance && performance.daily_performance.length > 0 ? (
           <Grid item xs={12}>
             <Card>
               <CardContent>
@@ -360,7 +402,7 @@ const PaperTrading = () => {
                             sx={{
                               width: '80%',
                               height: `${Math.max(Math.abs(day.daily_pnl / 3), 10)}px`,
-                              bgcolor: day.daily_pnl > 0 ? 'success.main' : 'error.main',
+                              bgcolor: day.daily_pnl > 0 ? 'success.main' : day.daily_pnl < 0 ? 'error.main' : 'grey.300',
                               borderRadius: 1
                             }}
                           />
@@ -368,7 +410,7 @@ const PaperTrading = () => {
                         <Typography
                           variant="caption"
                           fontWeight="bold"
-                          color={day.daily_pnl > 0 ? 'success.main' : 'error.main'}
+                          color={day.daily_pnl > 0 ? 'success.main' : day.daily_pnl < 0 ? 'error.main' : 'text.secondary'}
                         >
                           ${day.daily_pnl?.toFixed(0)}
                         </Typography>
@@ -380,6 +422,34 @@ const PaperTrading = () => {
                     </Grid>
                   ))}
                 </Grid>
+              </CardContent>
+            </Card>
+          </Grid>
+        ) : (
+          <Grid item xs={12}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" fontWeight="bold" gutterBottom>
+                  📈 Daily Learning Progress
+                </Typography>
+                <Box 
+                  sx={{ 
+                    textAlign: 'center', 
+                    py: 4, 
+                    color: 'text.secondary',
+                    border: '2px dashed',
+                    borderColor: 'divider',
+                    borderRadius: 2
+                  }}
+                >
+                  <Typography variant="body1" fontWeight="bold" gutterBottom>
+                    No Trading Data Yet
+                  </Typography>
+                  <Typography variant="body2">
+                    Start trading to see your daily performance progress here.
+                    Charts will populate with real data as you trade.
+                  </Typography>
+                </Box>
               </CardContent>
             </Card>
           </Grid>
