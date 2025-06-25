@@ -61,10 +61,10 @@ const PaperTrading = () => {
     try {
       setLoading(true);
       const [statusResponse, positionsResponse, performanceResponse, insightsResponse] = await Promise.all([
-        axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/status`),
-        axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/positions`),
-        axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/performance`),
-        axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/learning-insights`)
+        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/status`),
+        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/positions`),
+        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/performance`),
+        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/learning-insights`)
       ]);
 
       setStatus(statusResponse.data.data);
@@ -83,7 +83,7 @@ const PaperTrading = () => {
 
   const handleStart = async () => {
     try {
-      await axios.post(`${config.API_BASE_URL}/api/v1/paper-trading/start`);
+      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/start`);
       setIsRunning(true);
       await fetchData();
     } catch (error) {
@@ -94,7 +94,7 @@ const PaperTrading = () => {
 
   const handleStop = async () => {
     try {
-      await axios.post(`${config.API_BASE_URL}/api/v1/paper-trading/stop`);
+      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/stop`);
       setIsRunning(false);
       await fetchData();
     } catch (error) {

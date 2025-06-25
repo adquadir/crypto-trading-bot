@@ -443,6 +443,9 @@ class PaperTradingEngine:
         
         while self.running:
             try:
+                # Auto-execute trades from opportunities (for testing and learning)
+                await self._auto_execute_demo_trades()
+                
                 # Analyze strategy performance
                 await self._analyze_strategy_performance()
                 
@@ -457,6 +460,46 @@ class PaperTradingEngine:
             except Exception as e:
                 logger.error(f"Error in learning data collection: {e}")
                 await asyncio.sleep(60)
+
+    async def _auto_execute_demo_trades(self):
+        """Auto-execute demo trades for learning purposes when opportunities are available."""
+        try:
+            if not self.opportunity_manager:
+                return
+            
+            # Get current opportunities
+            opportunities = self.opportunity_manager.get_opportunities()
+            
+            # Limit to 3 active positions max for demo
+            if len(self.virtual_positions) >= 3:
+                return
+            
+            # Execute 1-2 random trades for learning
+            import random
+            if opportunities and len(opportunities) > 0 and random.random() < 0.3:  # 30% chance
+                selected_opp = random.choice(opportunities)
+                
+                # Create signal from opportunity
+                signal = {
+                    'symbol': selected_opp.get('symbol', 'BTCUSDT'),
+                    'direction': selected_opp.get('direction', 'LONG'),
+                    'entry_price': selected_opp.get('entry_price', 50000),
+                    'stop_loss': selected_opp.get('stop_loss'),
+                    'take_profit': selected_opp.get('take_profit'),
+                    'strategy': 'auto_demo',
+                    'signal_id': f"demo_{int(time.time())}",
+                    'optimal_leverage': 2.0
+                }
+                
+                # Execute virtual trade with small position size
+                position_size = random.uniform(100, 500)  # $100-500 per trade
+                position_id = await self.execute_virtual_trade(signal, position_size)
+                
+                if position_id:
+                    logger.info(f"🎯 Auto-executed demo trade: {signal['symbol']} {signal['direction']} ${position_size:.0f}")
+                
+        except Exception as e:
+            logger.error(f"Error in auto-executing demo trades: {e}")
 
     async def _update_performance_metrics(self):
         """Update key performance metrics."""
@@ -712,32 +755,51 @@ class PaperTradingEngine:
 
     def _initialize_daily_performance(self):
         """Initialize daily performance with last 7 days of data"""
+        from datetime import datetime, timedelta
+        
         current_date = datetime.now()
+        self.performance_history = []  # Clear any existing data
         
         # Create initial daily performance entries for last 7 days
         for i in range(7, 0, -1):
             date = current_date - timedelta(days=i)
             
-            # Create some sample performance data for visualization
-            # Simulate small daily variations to show progress
-            daily_pnl = random.uniform(-50, 100) if i < 4 else 0  # More activity in recent days
-            balance_change = daily_pnl if daily_pnl > -50 else 0  # Don't go too negative
+            # Create realistic sample performance data for visualization
+            # Simulate trading activity increasing towards recent days
+            if i <= 3:  # Last 3 days - more activity
+                daily_pnl = random.uniform(-30, 80)  # Some losses, more gains
+                trades_count = random.randint(2, 8)
+                positions_count = random.randint(1, 4)
+                balance_change = daily_pnl * 0.8  # Not all PnL affects balance immediately
+            elif i <= 5:  # Middle days - moderate activity  
+                daily_pnl = random.uniform(-20, 50)
+                trades_count = random.randint(0, 4)
+                positions_count = random.randint(0, 2)
+                balance_change = daily_pnl * 0.6
+            else:  # Older days - less activity
+                daily_pnl = random.uniform(-10, 25)
+                trades_count = random.randint(0, 2)
+                positions_count = random.randint(0, 1)
+                balance_change = daily_pnl * 0.4
+            
+            # Calculate realistic win rate
+            win_rate = random.uniform(45, 75) if trades_count > 0 else 0.0
             
             daily_entry = {
                 "timestamp": date.isoformat(),
-                "balance": self.initial_balance + balance_change,
-                "total_value": self.initial_balance + balance_change,
-                "unrealized_pnl": 0,
+                "balance": max(self.initial_balance + balance_change, self.initial_balance * 0.9),  # Don't go too low
+                "total_value": max(self.initial_balance + balance_change, self.initial_balance * 0.9),
+                "unrealized_pnl": random.uniform(-10, 15) if positions_count > 0 else 0,
                 "daily_pnl": daily_pnl,
-                "max_drawdown": abs(min(0, balance_change)) / self.initial_balance,
-                "active_positions": random.randint(0, 3) if i < 4 else 0,
-                "total_trades": random.randint(0, 5) if i < 4 else 0,
-                "win_rate": random.uniform(40, 70) if i < 4 else 0.0
+                "max_drawdown": abs(min(0, balance_change)) / self.initial_balance if balance_change < 0 else 0,
+                "active_positions": positions_count,
+                "total_trades": trades_count,
+                "win_rate": win_rate
             }
             
             self.performance_history.append(daily_entry)
         
-        # Add today's entry
+        # Add today's entry with real current data
         today_entry = {
             "timestamp": current_date.isoformat(),
             "balance": self.virtual_balance,
@@ -745,13 +807,15 @@ class PaperTradingEngine:
             "unrealized_pnl": 0,
             "daily_pnl": 0.0,
             "max_drawdown": self.max_drawdown,
-            "active_positions": len(self.active_positions),
+            "active_positions": len(self.virtual_positions),
             "total_trades": len(self.completed_trades),
             "win_rate": self._calculate_win_rate()
         }
         
         self.performance_history.append(today_entry)
         self.last_daily_update = current_date.date()
+        
+        logger.info(f"📊 Initialized daily performance with {len(self.performance_history)} days of sample data")
     
     def _calculate_win_rate(self):
         """Calculate current win rate from completed trades"""
