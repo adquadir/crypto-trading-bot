@@ -30,16 +30,16 @@ const config = {
     API_BASE_URL: getApiBaseUrl(),
     WS_BASE_URL: getWsBaseUrl(),
     ENDPOINTS: {
-        STATS: '/api/v1/trading/stats',
-        POSITIONS: '/api/v1/trading/positions',
-        STRATEGIES: '/api/v1/trading/strategies',
-        SETTINGS: '/api/v1/trading/settings',
-        SIGNALS: '/api/v1/trading/opportunities',  // Use opportunities as signals
+        STATS: '/api/v1/stats',
+        POSITIONS: '/api/v1/positions',
+        STRATEGIES: '/api/v1/strategies',
+        SETTINGS: '/api/v1/settings',
+        SIGNALS: '/api/v1/opportunities',  // Use opportunities as signals
         WS_SIGNALS: '/ws/signals',
-        OPPORTUNITIES: '/api/v1/trading/opportunities',
-        OPPORTUNITY_STATS: '/api/v1/trading/opportunities/stats',
-        SYMBOL_OPPORTUNITY: (symbol) => `/api/v1/trading/opportunities/${symbol}`,
-        EXECUTE_MANUAL_TRADE: '/api/v1/trading/execute_manual_trade'
+        OPPORTUNITIES: '/api/v1/opportunities',
+        OPPORTUNITY_STATS: '/api/v1/opportunities/stats',
+        SYMBOL_OPPORTUNITY: (symbol) => `/api/v1/opportunities/${symbol}`,
+        EXECUTE_MANUAL_TRADE: '/api/v1/execute_manual_trade'
     },
     // API endpoints - WebSocket disabled
     API_URL: process.env.REACT_APP_API_URL || null,

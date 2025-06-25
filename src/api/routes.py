@@ -298,3 +298,118 @@ async def refresh_scalping_signals():
             "message": f"Failed to refresh scalping signals: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
+
+@router.get("/advanced/risk-analysis")
+async def get_advanced_risk_analysis():
+    """Get advanced risk analysis"""
+    try:
+        # Mock advanced risk analysis data
+        analysis = {
+            "portfolio_risk": {
+                "current_exposure": 0.75,
+                "var_1day": 0.023,
+                "expected_shortfall": 0.035,
+                "beta": 1.15,
+                "sharpe_ratio": 2.34
+            },
+            "market_risk": {
+                "volatility_regime": "normal",
+                "correlation_breakdown": {
+                    "crypto_correlation": 0.82,
+                    "traditional_correlation": 0.15
+                },
+                "stress_test_results": {
+                    "crypto_crash_50": -0.45,
+                    "market_crash_20": -0.12,
+                    "liquidity_crisis": -0.28
+                }
+            },
+            "recommendations": [
+                "Current portfolio within acceptable risk limits",
+                "Consider reducing exposure during high volatility periods",
+                "Maintain diversification across strategies"
+            ]
+        }
+        
+        return {
+            "status": "success",
+            "data": analysis
+        }
+    except Exception as e:
+        logger.error(f"Error getting risk analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/advanced/performance-analytics")
+async def get_performance_analytics():
+    """Get advanced performance analytics"""
+    try:
+        # Mock performance analytics data
+        analytics = {
+            "strategy_breakdown": {
+                "scalping": {"return": 0.15, "volatility": 0.08, "sharpe": 1.87},
+                "swing": {"return": 0.12, "volatility": 0.06, "sharpe": 2.00},
+                "flow": {"return": 0.18, "volatility": 0.10, "sharpe": 1.80}
+            },
+            "time_series_analysis": {
+                "trend": "positive",
+                "seasonality": "detected",
+                "stationarity": "weak"
+            },
+            "risk_adjusted_metrics": {
+                "calmar_ratio": 2.45,
+                "sortino_ratio": 3.21,
+                "max_drawdown_duration": 12
+            }
+        }
+        
+        return {
+            "status": "success",
+            "data": analytics
+        }
+    except Exception as e:
+        logger.error(f"Error getting performance analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/advanced/signals/{symbol}")
+async def get_advanced_signals(symbol: str):
+    """Get advanced signals for a specific symbol"""
+    try:
+        # Mock advanced signals data
+        signals = {
+            "symbol": symbol,
+            "current_signals": [
+                {
+                    "type": "momentum",
+                    "strength": 0.75,
+                    "direction": "bullish",
+                    "confidence": 0.82,
+                    "timeframe": "15m"
+                },
+                {
+                    "type": "mean_reversion", 
+                    "strength": 0.45,
+                    "direction": "bearish",
+                    "confidence": 0.67,
+                    "timeframe": "1h"
+                }
+            ],
+            "ml_predictions": {
+                "next_1h": {"direction": "up", "probability": 0.73},
+                "next_4h": {"direction": "down", "probability": 0.61},
+                "next_24h": {"direction": "up", "probability": 0.58}
+            },
+            "technical_indicators": {
+                "rsi": 68.5,
+                "macd_signal": "bullish",
+                "bollinger_position": "upper",
+                "volume_profile": "high"
+            }
+        }
+        
+        return {
+            "status": "success",
+            "data": signals
+        }
+    except Exception as e:
+        logger.error(f"Error getting advanced signals for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

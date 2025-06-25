@@ -121,3 +121,23 @@ class IntegratedProfitManager:
         except Exception as e:
             logger.error(f"Error getting ML performance: {e}")
             return {}
+
+    def get_status(self) -> Dict[str, Any]:
+        """Wrapper method for API compatibility - calls get_integrated_status"""
+        return self.get_integrated_status()
+    
+    def get_recent_trades(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Wrapper method for API compatibility - calls profit_scraper.get_recent_trades"""
+        try:
+            return self.profit_scraper.get_recent_trades(limit)
+        except Exception as e:
+            logger.error(f"Error getting recent trades: {e}")
+            return []
+    
+    async def start(self, symbols: List[str]) -> Dict[str, Any]:
+        """Wrapper method for API compatibility - calls start_integrated_scraping"""
+        return await self.start_integrated_scraping(symbols)
+    
+    def stop(self):
+        """Wrapper method for API compatibility - calls stop_integrated_scraping"""
+        self.stop_integrated_scraping()
