@@ -413,3 +413,29 @@ async def get_advanced_signals(symbol: str):
     except Exception as e:
         logger.error(f"Error getting advanced signals for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/refresh-opportunities")
+async def refresh_opportunities():
+    """Manually trigger opportunity scanning"""
+    try:
+        if not opportunity_manager:
+            raise HTTPException(status_code=503, detail="Opportunity manager not available")
+        
+        # Trigger a fresh scan
+        await opportunity_manager.scan_opportunities()
+        
+        # Get the updated opportunities
+        opportunities = opportunity_manager.get_opportunities()
+        
+        return {
+            "status": "success",
+            "message": f"Opportunities refreshed - found {len(opportunities)} signals",
+            "data": {
+                "opportunities_count": len(opportunities),
+                "scan_time": opportunity_manager.last_scan_time
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error refreshing opportunities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

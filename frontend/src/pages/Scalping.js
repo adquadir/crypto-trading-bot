@@ -173,7 +173,7 @@ const Scalping = () => {
   const handleEnterAllTrades = async () => {
     setEnteringAllTrades(true);
     try {
-      const response = await axios.post(`${config.API_BASE_URL}/api/v1/trading/enter-all-trades`);
+      const response = await axios.post(`${config.API_BASE_URL}/api/v1/enter-all-trades`);
       
       if (response.data.status === 'success') {
         const { entered_trades, failed_trades, total_expected_capital, avg_expected_return } = response.data.data;
