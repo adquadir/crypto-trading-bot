@@ -157,7 +157,7 @@ const Dashboard = () => {
 
   const fetchPaperTradingStatus = async () => {
     try {
-      const response = await axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/status`);
+      const response = await axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/status`);
       setPaperTradingStatus(response.data.data);
     } catch (error) {
       console.error('Error fetching paper trading status:', error);
@@ -168,7 +168,7 @@ const Dashboard = () => {
   const handleStartPaperTrading = async () => {
     try {
       setPaperTradingLoading(true);
-      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/start`);
+      await axios.post(`${config.API_BASE_URL}/api/v1/paper-trading/start`);
       await fetchPaperTradingStatus();
       // Navigate to paper trading page
       navigate('/paper-trading');
@@ -183,7 +183,7 @@ const Dashboard = () => {
   const handleStopPaperTrading = async () => {
     try {
       setPaperTradingLoading(true);
-      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/stop`);
+      await axios.post(`${config.API_BASE_URL}/api/v1/paper-trading/stop`);
       await fetchPaperTradingStatus();
     } catch (error) {
       console.error('Error stopping paper trading:', error);
