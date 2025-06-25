@@ -165,14 +165,14 @@ const Dashboard = () => {
   if (loading && !stats) {
     return (
       <Container maxWidth="xl">
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-          <CircularProgress />
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
           {!isMobile && (
             <Typography variant="h6" sx={{ ml: 2 }}>
               Loading Dashboard...
             </Typography>
           )}
-        </Box>
+      </Box>
       </Container>
     );
   }
@@ -257,9 +257,9 @@ const Dashboard = () => {
 
       {/* Mobile-Optimized Tabs */}
       <Paper sx={{ mb: { xs: 2, sm: 3 } }}>
-        <Tabs
-          value={activeTab}
-          onChange={(_, newValue) => setActiveTab(newValue)}
+      <Tabs
+        value={activeTab}
+        onChange={(_, newValue) => setActiveTab(newValue)}
           variant={isMobile ? "scrollable" : "standard"}
           scrollButtons={isMobile ? "auto" : false}
           allowScrollButtonsMobile
@@ -270,11 +270,11 @@ const Dashboard = () => {
               padding: { xs: '8px 12px', sm: '12px 16px' }
             }
           }}
-        >
-          <Tab label="Overview" />
+      >
+        <Tab label="Overview" />
           <Tab label={isMobile ? "Profiles" : "Profile Performance"} />
           <Tab label={isMobile ? "History" : "Parameter History"} />
-        </Tabs>
+      </Tabs>
       </Paper>
 
       {activeTab === 0 && (
@@ -289,53 +289,53 @@ const Dashboard = () => {
                 <Grid item xs={6} sm={6}>
                   <Box textAlign="center">
                     <Typography color="textSecondary" variant="body2" gutterBottom>
-                      Total Trades
-                    </Typography>
+                    Total Trades
+                  </Typography>
                     <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
-                      {stats.total_trades}
-                    </Typography>
+                    {stats.total_trades}
+                  </Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={6} sm={6}>
                   <Box textAlign="center">
                     <Typography color="textSecondary" variant="body2" gutterBottom>
-                      Win Rate
-                    </Typography>
+                    Win Rate
+                  </Typography>
                     <Typography 
                       variant={isMobile ? "h5" : "h4"} 
                       fontWeight="bold"
                       color={stats.win_rate >= 0.5 ? 'success.main' : 'error.main'}
                     >
-                      {(stats.win_rate * 100).toFixed(1)}%
-                    </Typography>
+                    {(stats.win_rate * 100).toFixed(1)}%
+                  </Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={6} sm={6}>
                   <Box textAlign="center">
                     <Typography color="textSecondary" variant="body2" gutterBottom>
-                      Profit Factor
-                    </Typography>
+                    Profit Factor
+                  </Typography>
                     <Typography 
                       variant={isMobile ? "h5" : "h4"} 
                       fontWeight="bold"
                       color={stats.profit_factor >= 1 ? 'success.main' : 'error.main'}
                     >
-                      {stats.profit_factor.toFixed(2)}
-                    </Typography>
+                    {stats.profit_factor.toFixed(2)}
+                  </Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={6} sm={6}>
                   <Box textAlign="center">
                     <Typography color="textSecondary" variant="body2" gutterBottom>
-                      Max Drawdown
-                    </Typography>
+                    Max Drawdown
+                  </Typography>
                     <Typography 
                       variant={isMobile ? "h5" : "h4"} 
                       fontWeight="bold"
                       color={stats.max_drawdown > 0.15 ? 'error.main' : 'warning.main'}
                     >
-                      {(stats.max_drawdown * 100).toFixed(1)}%
-                    </Typography>
+                    {(stats.max_drawdown * 100).toFixed(1)}%
+                  </Typography>
                   </Box>
                 </Grid>
               </Grid>
@@ -370,29 +370,29 @@ const Dashboard = () => {
                 <Grid item xs={6}>
                   <Box textAlign="center">
                     <Typography color="textSecondary" variant="body2" gutterBottom>
-                      Current Leverage
-                    </Typography>
+                    Current Leverage
+                  </Typography>
                     <Typography 
                       variant={isMobile ? "h5" : "h4"} 
                       fontWeight="bold"
                       color={(stats.current_leverage || 0) > 3 ? 'error.main' : 'success.main'}
                     >
-                      {(stats.current_leverage || 0).toFixed(1)}x
-                    </Typography>
+                    {(stats.current_leverage || 0).toFixed(1)}x
+                  </Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={6}>
                   <Box textAlign="center">
                     <Typography color="textSecondary" variant="body2" gutterBottom>
-                      Portfolio Beta
-                    </Typography>
+                    Portfolio Beta
+                  </Typography>
                     <Typography 
                       variant={isMobile ? "h5" : "h4"} 
                       fontWeight="bold"
                       color={Math.abs(stats.portfolio_beta || 0) > 1 ? 'warning.main' : 'success.main'}
                     >
-                      {(stats.portfolio_beta || 0).toFixed(2)}
-                    </Typography>
+                    {(stats.portfolio_beta || 0).toFixed(2)}
+                  </Typography>
                   </Box>
                 </Grid>
               </Grid>
@@ -559,29 +559,29 @@ const Dashboard = () => {
                   <Card key={index} variant="outlined">
                     <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
                       <Typography variant="subtitle1" gutterBottom fontWeight="medium">
-                        {new Date(entry.timestamp).toLocaleString()}
-                      </Typography>
-                      <Grid container spacing={2}>
+                          {new Date(entry.timestamp).toLocaleString()}
+                        </Typography>
+                        <Grid container spacing={2}>
                         <Grid item xs={12} sm={6}>
-                          <Typography color="textSecondary" variant="body2">
-                            Profile
-                          </Typography>
+                            <Typography color="textSecondary" variant="body2">
+                              Profile
+                            </Typography>
                           <Typography variant="body1" fontWeight="medium">
-                            {entry.profile}
-                          </Typography>
-                        </Grid>
+                              {entry.profile}
+                            </Typography>
+                          </Grid>
                         <Grid item xs={12} sm={6}>
-                          <Typography color="textSecondary" variant="body2">
-                            Trigger
-                          </Typography>
+                            <Typography color="textSecondary" variant="body2">
+                              Trigger
+                            </Typography>
                           <Typography variant="body1" fontWeight="medium">
-                            {entry.trigger}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={12}>
+                              {entry.trigger}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={12}>
                           <Typography color="textSecondary" variant="body2" gutterBottom>
-                            Changes
-                          </Typography>
+                              Changes
+                            </Typography>
                           <Stack spacing={0.5}>
                             {Object.entries(entry.changes).map(([param, value]) => (
                               <Typography key={param} variant="body2">
@@ -589,10 +589,10 @@ const Dashboard = () => {
                               </Typography>
                             ))}
                           </Stack>
+                          </Grid>
                         </Grid>
-                      </Grid>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
                 )) || (
                   <Typography color="text.secondary" textAlign="center" py={4}>
                     No parameter history available
@@ -638,10 +638,10 @@ const Dashboard = () => {
                             </Typography>
                             <Stack spacing={0.5}>
                               {Object.entries(impact.parameter_adjustments || {}).map(([param, value]) => (
-                                <Typography key={param} variant="body2">
+                              <Typography key={param} variant="body2">
                                   <strong>{param}:</strong> {value}
-                                </Typography>
-                              ))}
+                              </Typography>
+                            ))}
                             </Stack>
                           </Grid>
                         </Grid>
@@ -661,7 +661,7 @@ const Dashboard = () => {
           <Typography variant="caption" color="text.secondary">
             Last updated: {lastUpdated.toLocaleTimeString()}
           </Typography>
-        </Box>
+    </Box>
       )}
     </Container>
   );

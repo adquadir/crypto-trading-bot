@@ -177,14 +177,14 @@ const Performance = () => {
   if (loading && !performanceData) {
     return (
       <Container maxWidth="xl">
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
           <CircularProgress size={isMobile ? 40 : 60} />
           {!isMobile && (
             <Typography variant="h6" sx={{ ml: 2 }}>
               Loading performance data...
             </Typography>
           )}
-        </Box>
+      </Box>
       </Container>
     );
   }
@@ -234,19 +234,19 @@ const Performance = () => {
               sx={{ alignSelf: 'center' }}
             />
           )}
-          <Button
-            variant="outlined"
-            startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
-            onClick={fetchAllData}
-            disabled={loading}
+        <Button
+          variant="outlined"
+          startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
+          onClick={fetchAllData}
+          disabled={loading}
             size={isMobile ? "medium" : "small"}
             sx={{ 
               minHeight: { xs: '44px', sm: 'auto' },
               fontSize: { xs: '0.875rem', sm: '0.75rem' }
             }}
-          >
-            Refresh All Data
-          </Button>
+        >
+          Refresh All Data
+        </Button>
         </Stack>
       </Box>
 
@@ -517,9 +517,9 @@ const Performance = () => {
                   <Card 
                     variant="outlined"
                     sx={{ 
-                      border: realTimeActive ? '2px solid' : '1px solid', 
-                      borderColor: realTimeActive ? 'success.main' : 'divider',
-                      transition: 'all 0.3s ease'
+                    border: realTimeActive ? '2px solid' : '1px solid', 
+                    borderColor: realTimeActive ? 'success.main' : 'divider',
+                    transition: 'all 0.3s ease'
                     }}
                   >
                     <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
@@ -527,8 +527,8 @@ const Performance = () => {
                         variant={isMobile ? "h5" : "h4"} 
                         fontWeight="bold"
                         sx={{
-                          transition: 'color 0.3s ease',
-                          color: realTimeActive ? 'success.main' : 'primary.main'
+                        transition: 'color 0.3s ease',
+                        color: realTimeActive ? 'success.main' : 'primary.main'
                         }}
                       >
                         {liveTracking?.active_signals_count || 0}
@@ -548,9 +548,9 @@ const Performance = () => {
                   <Card 
                     variant="outlined"
                     sx={{ 
-                      border: realTimeActive ? '2px solid' : '1px solid', 
-                      borderColor: realTimeActive ? 'info.main' : 'divider',
-                      transition: 'all 0.3s ease'
+                    border: realTimeActive ? '2px solid' : '1px solid', 
+                    borderColor: realTimeActive ? 'info.main' : 'divider',
+                    transition: 'all 0.3s ease'
                     }}
                   >
                     <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
@@ -577,9 +577,9 @@ const Performance = () => {
                   <Card 
                     variant="outlined"
                     sx={{ 
-                      border: realTimeActive ? '2px solid' : '1px solid', 
-                      borderColor: realTimeActive ? 'success.main' : 'divider',
-                      transition: 'all 0.3s ease'
+                    border: realTimeActive ? '2px solid' : '1px solid', 
+                    borderColor: realTimeActive ? 'success.main' : 'divider',
+                    transition: 'all 0.3s ease'
                     }}
                   >
                     <CardContent sx={{ textAlign: 'center', p: { xs: 1.5, sm: 2 } }}>
@@ -641,7 +641,7 @@ const Performance = () => {
                             </Typography>
                           </TableCell>
                           <TableCell>
-                            <Chip
+                            <Chip 
                               label={signal.direction}
                               color={signal.direction === 'LONG' ? 'success' : 'error'}
                               size="small"
@@ -702,8 +702,8 @@ const Performance = () => {
                 <Box>
                   <Typography variant="body1" color="text.secondary">
                     Adaptive assessment data will be displayed here when available.
-                  </Typography>
-                </Box>
+                            </Typography>
+                          </Box>
               ) : (
                 <Alert severity="info">
                   Adaptive assessment data is not currently available.

@@ -533,7 +533,7 @@ const Opportunities = () => {
   }
 
   if (error) {
-    return (
+  return (
       <Alert severity="error" sx={{ mt: 2 }}>
         {error}
       </Alert>
@@ -561,12 +561,12 @@ const Opportunities = () => {
           </Grid>
           <Grid item xs={12} sm={4}>
             <Box display="flex" gap={1} flexWrap="wrap" justifyContent={{ xs: 'flex-start', sm: 'flex-end' }}>
-              <Chip 
+          <Chip 
                 icon={<AssessmentIcon />}
-                label={`${filteredSignals.length} Signals`} 
-                color="primary" 
+            label={`${filteredSignals.length} Signals`} 
+            color="primary" 
                 size={isMobile ? "medium" : "small"}
-              />
+          />
               <IconButton
                 onClick={fetchSignals}
                 disabled={loading}
@@ -578,8 +578,8 @@ const Opportunities = () => {
               >
                 <RefreshIcon />
               </IconButton>
-            </Box>
-          </Grid>
+      </Box>
+        </Grid>
         </Grid>
       </Paper>
 
@@ -587,32 +587,32 @@ const Opportunities = () => {
       <Paper sx={{ p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 3 } }}>
         <Typography variant="h6" gutterBottom sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
           🔍 Filter Opportunities
-        </Typography>
+          </Typography>
         
         <Grid container spacing={{ xs: 2, sm: 3 }}>
           {/* Search */}
           <Grid item xs={12} sm={6} md={4}>
-            <TextField
-              fullWidth
+              <TextField
+                fullWidth
               size={isMobile ? "medium" : "small"}
-              label="Search Symbol"
-              value={filters.searchText}
-              onChange={(e) => setFilters(prev => ({ ...prev, searchText: e.target.value }))}
+                label="Search Symbol"
+                value={filters.searchText}
+                onChange={(e) => setFilters(prev => ({ ...prev, searchText: e.target.value }))}
               placeholder="e.g., BTC, ETH"
               sx={{
                 '& .MuiInputBase-root': {
                   fontSize: { xs: '16px', sm: '14px' } // Prevents zoom on iOS
                 }
               }}
-            />
-          </Grid>
+              />
+            </Grid>
 
           {/* Precision Score */}
           <Grid item xs={12} sm={6} md={4}>
-            <TextField
-              fullWidth
+              <TextField
+                fullWidth
               size={isMobile ? "medium" : "small"}
-              type="number"
+                type="number"
               label="Min Precision Score"
               value={filters.minPrecisionScore}
               onChange={(e) => setFilters(prev => ({ ...prev, minPrecisionScore: Number(e.target.value) }))}
@@ -636,8 +636,8 @@ const Opportunities = () => {
                   size="small"
                   type="number"
                   label="Min %"
-                  value={filters.minMove}
-                  onChange={(e) => setFilters(prev => ({ ...prev, minMove: Number(e.target.value) }))}
+                value={filters.minMove}
+                onChange={(e) => setFilters(prev => ({ ...prev, minMove: Number(e.target.value) }))}
                   inputProps={{ min: 0, max: 20, step: 0.1 }}
                   sx={{ 
                     width: '80px',
@@ -646,12 +646,12 @@ const Opportunities = () => {
                     }
                   }}
                 />
-                <TextField
+              <TextField
                   size="small"
-                  type="number"
+                type="number"
                   label="Max %"
-                  value={filters.maxMove}
-                  onChange={(e) => setFilters(prev => ({ ...prev, maxMove: Number(e.target.value) }))}
+                value={filters.maxMove}
+                onChange={(e) => setFilters(prev => ({ ...prev, maxMove: Number(e.target.value) }))}
                   inputProps={{ min: 0, max: 20, step: 0.1 }}
                   sx={{ 
                     width: '80px',
@@ -662,7 +662,7 @@ const Opportunities = () => {
                 />
               </Stack>
             </Box>
-          </Grid>
+            </Grid>
 
           {/* High Certainty Toggle */}
           <Grid item xs={12} sm={6} md={4}>
@@ -687,7 +687,7 @@ const Opportunities = () => {
                 }
               />
             </FormControl>
-          </Grid>
+            </Grid>
 
           {/* Quick Actions */}
           <Grid item xs={12} sm={6} md={4}>
@@ -729,8 +729,8 @@ const Opportunities = () => {
                 🔄 Reset
               </Button>
             </Stack>
+            </Grid>
           </Grid>
-        </Grid>
       </Paper>
 
       {/* Results */}
@@ -748,15 +748,15 @@ const Opportunities = () => {
           {/* Mobile: Card Layout, Desktop: Keep existing layout */}
           {isMobile ? (
             <Stack spacing={2}>
-              {filteredSignals.map((signal, index) => (
-                <SignalCard 
+          {filteredSignals.map((signal, index) => (
+            <SignalCard 
                   key={`${signal.symbol}-${index}`} 
-                  signal={signal} 
-                  onDetailsClick={handleDetailsClick}
-                />
-              ))}
+              signal={signal} 
+              onDetailsClick={handleDetailsClick}
+            />
+          ))}
             </Stack>
-          ) : (
+      ) : (
             <Grid container spacing={2}>
               {filteredSignals.map((signal, index) => (
                 <Grid item xs={12} sm={6} lg={4} key={`${signal.symbol}-${index}`}>
@@ -847,14 +847,14 @@ const Opportunities = () => {
                   </Paper>
                 </Grid>
               </Grid>
-
+              
               {/* Profit Calculator */}
               <ProfitCalculator signal={selectedSignal} />
-
+              
               {/* Precision Score */}
               <Box mt={3} textAlign="center">
                 <PrecisionBadge signal={selectedSignal} />
-              </Box>
+                </Box>
             </Box>
           )}
         </DialogContent>

@@ -17,8 +17,8 @@ const Opportunities = () => {
             fontSize: { xs: '1.5rem', sm: '2rem', md: '2.125rem' }
           }}
         >
-          Trading Opportunities
-        </Typography>
+        Trading Opportunities
+      </Typography>
         <Typography 
           variant="body1" 
           color="text.secondary"

@@ -703,3 +703,4 @@ async def initialize_flow_trading_components(base_risk_manager, exchange_client,
     except Exception as e:
         logger.error(f"Error initializing flow trading components: {e}")
         return False
+ 

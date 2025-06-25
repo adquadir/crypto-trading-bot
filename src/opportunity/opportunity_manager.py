@@ -3330,7 +3330,7 @@ class OpportunityManager:
             else:  # SHORT
                 if not (take_profit < entry_price < stop_loss):
                     logger.error(f"❌ SCALP SHORT signal REJECTED for {symbol}: Invalid price order - TP: {take_profit}, Entry: {entry_price}, SL: {stop_loss}")
-                    return None
+                return None
                 
             # Apply learned confidence filter
             if confidence < min_confidence:

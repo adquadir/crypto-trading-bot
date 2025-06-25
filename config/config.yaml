@@ -6,6 +6,48 @@ exchange:
   base_url: ${BINANCE_API_URL}
   ws_url: ${BINANCE_WS_URL}
 
+# 📊 LIVE PAPER TRADING - ML Learning Mode
+paper_trading:
+  enabled: true                     # 🔥 ENABLE for live market learning without real money
+  mode: "live_learning"             # live_learning | backtesting | disabled
+  initial_balance: 10000.0          # Virtual starting capital (USDT)
+  use_real_market_data: true        # Use live market feeds (not simulation)
+  simulate_real_conditions: true    # Include slippage, fees, latency
+  learning_enabled: true            # Enable ML data collection
+  
+  # Realistic trading simulation
+  slippage:
+    market_orders: 0.0003           # 0.03% average slippage for market orders
+    limit_orders: 0.0001            # 0.01% slippage for limit orders
+  
+  fees:
+    maker_fee: 0.0002               # 0.02% maker fee (Binance Futures)
+    taker_fee: 0.0004               # 0.04% taker fee
+  
+  latency:
+    order_execution_ms: 50          # Simulate 50ms order execution
+    market_data_delay_ms: 10        # 10ms market data delay
+  
+  # ML Learning Configuration
+  learning:
+    collect_all_signals: true       # Log every signal for learning
+    track_market_regime: true       # Track market conditions
+    save_strategy_performance: true # Per-symbol strategy performance
+    learning_data_retention_days: 90 # Keep learning data for 90 days
+    
+  # Virtual Position Management
+  positions:
+    max_concurrent: 50              # Max simultaneous virtual positions
+    auto_close_on_margin_call: true # Simulate margin calls
+    leverage_limits: true           # Respect leverage limits
+    
+  # Monitoring & Alerts
+  monitoring:
+    real_time_dashboard: true       # Live dashboard updates
+    performance_alerts: true        # Alert on significant performance changes
+    learning_insights: true         # Show ML learning progress
+    risk_monitoring: true           # Monitor virtual risk metrics
+
 trading:
   funding_rate_interval: 300        # seconds
   position_interval: 30             # seconds

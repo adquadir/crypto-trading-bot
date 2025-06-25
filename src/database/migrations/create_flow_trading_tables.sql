@@ -101,3 +101,4 @@ CREATE TRIGGER flow_performance_updated_at
     BEFORE UPDATE ON flow_performance
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+ 

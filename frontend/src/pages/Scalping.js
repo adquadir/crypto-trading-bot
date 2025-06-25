@@ -77,7 +77,7 @@ const Scalping = () => {
     // Set error state from WebSocket connection
     if (connectionError) {
       setError(connectionError);
-    } else {
+      } else {
       setError(null);
     }
     
@@ -392,14 +392,14 @@ const Scalping = () => {
                 {signal.symbol}
               </Typography>
               <Stack direction="row" spacing={0.5} alignItems="center">
-                {capitalReturn >= 7 && (
-                  <Chip 
+        {capitalReturn >= 7 && (
+            <Chip 
                     icon={<FlashIcon fontSize="small" />}
                     label="HIGH" 
-                    color="error" 
-                    size="small"
+              color="error" 
+              size="small"
                     sx={{ fontWeight: 'bold', fontSize: '0.6rem', height: '20px' }}
-                  />
+            />
                 )}
                 <Chip
                   icon={getDirectionIcon(signal.direction)}
@@ -466,38 +466,38 @@ const Scalping = () => {
           {/* Compact Price Levels */}
           <Box mb={1}>
             <Grid container spacing={0.5}>
-              <Grid item xs={4}>
+            <Grid item xs={4}>
                 <Box textAlign="center" p={0.5} bgcolor="background.default" borderRadius={1}>
                   <Typography variant="caption" color="textSecondary" fontSize="0.6rem">
-                    Entry
-                  </Typography>
+                  Entry
+                </Typography>
                   <Typography variant="caption" fontWeight="bold" display="block" fontSize="0.7rem">
                     ${entry.toFixed(4)}
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={4}>
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={4}>
                 <Box textAlign="center" p={0.5} bgcolor="success.light" borderRadius={1}>
                   <Typography variant="caption" color="textSecondary" fontSize="0.6rem">
-                    TP
-                  </Typography>
+                  TP
+                </Typography>
                   <Typography variant="caption" fontWeight="bold" color="success.dark" display="block" fontSize="0.7rem">
                     ${tp.toFixed(4)}
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={4}>
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={4}>
                 <Box textAlign="center" p={0.5} bgcolor="error.light" borderRadius={1}>
                   <Typography variant="caption" color="textSecondary" fontSize="0.6rem">
-                    SL
-                  </Typography>
+                  SL
+                </Typography>
                   <Typography variant="caption" fontWeight="bold" color="error.dark" display="block" fontSize="0.7rem">
                     ${sl.toFixed(4)}
-                  </Typography>
-                </Box>
-              </Grid>
+                </Typography>
+              </Box>
             </Grid>
-          </Box>
+          </Grid>
+            </Box>
 
 
 
@@ -680,7 +680,7 @@ const Scalping = () => {
   };
 
   if (loading && signals.length === 0) {
-    return (
+  return (
       <Container maxWidth="xl">
         <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
           <CircularProgress size={isMobile ? 40 : 60} />
@@ -710,11 +710,11 @@ const Scalping = () => {
             <Typography variant={isMobile ? "h5" : "h4"} fontWeight="bold">
               ⚡ High-Speed Scalping
             </Typography>
-            <Chip
+              <Chip
               icon={isConnected ? <WifiIcon /> : <WifiOffIcon />}
               label={isConnected ? 'LIVE' : connectionError ? 'ERROR' : 'CONNECTING'}
               color={isConnected ? 'success' : connectionError ? 'error' : 'warning'}
-              size="small"
+                size="small"
               sx={{ 
                 fontWeight: 'bold',
                 animation: isConnected ? 'pulse 2s infinite' : 'none',
@@ -724,7 +724,7 @@ const Scalping = () => {
                   '100%': { opacity: 1 },
                 }
               }}
-            />
+              />
           </Box>
           <Typography 
             variant="body1" 
@@ -881,7 +881,7 @@ const Scalping = () => {
                 <ScalpingCard signal={signal} />
               </Grid>
             ))}
-        </Grid>
+          </Grid>
       )}
 
       {/* Success/Error Snackbar */}
@@ -892,7 +892,7 @@ const Scalping = () => {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
         <Alert 
-          severity={snackbar.severity} 
+          severity={snackbar.severity}
           onClose={() => setSnackbar({ ...snackbar, open: false })}
           sx={{ width: '100%' }}
         >

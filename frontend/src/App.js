@@ -29,22 +29,22 @@ const createResponsiveTheme = () => {
   const prefersDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
   
   return createTheme({
-    palette: {
-      mode: 'dark',
-      primary: {
-        main: '#90caf9',
+  palette: {
+    mode: 'dark',
+    primary: {
+      main: '#90caf9',
         light: '#e3f2fd',
         dark: '#42a5f5',
-      },
-      secondary: {
-        main: '#f48fb1',
+    },
+    secondary: {
+      main: '#f48fb1',
         light: '#fce4ec',
         dark: '#e91e63',
-      },
-      background: {
-        default: '#121212',
-        paper: '#1e1e1e',
-      },
+    },
+    background: {
+      default: '#121212',
+      paper: '#1e1e1e',
+    },
       success: {
         main: '#4caf50',
         light: '#81c784',
@@ -409,8 +409,8 @@ const createResponsiveTheme = () => {
           },
         },
       },
-    },
-  });
+  },
+});
 };
 
 function App() {
@@ -431,8 +431,8 @@ function App() {
             <Route path="/profit-scraping" element={<ProfitScraping />} />
             <Route path="/positions" element={<Positions />} />
             <Route path="/performance" element={<Performance />} />
-            <Route path="/backtesting" element={<Backtesting />} />
-            <Route path="/learning" element={<Learning />} />
+                          <Route path="/backtesting" element={<Backtesting />} />
+              <Route path="/learning" element={<Learning />} />
             <Route path="/strategies" element={<Strategies />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

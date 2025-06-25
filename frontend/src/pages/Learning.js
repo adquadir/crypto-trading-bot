@@ -155,8 +155,8 @@ export default function Learning() {
             fontWeight="bold"
             sx={{ fontSize: { xs: '1.5rem', sm: '2rem', md: '2.125rem' } }}
           >
-            🧠 Intelligent Learning System
-          </Typography>
+          🧠 Intelligent Learning System
+        </Typography>
         </Box>
         <Typography 
           variant="subtitle1" 
@@ -686,28 +686,28 @@ export default function Learning() {
                             size="small"
                           />
                         </TableCell>
-                        <TableCell>
-                          <Chip 
+                      <TableCell>
+                        <Chip 
                             label={strategy.virtualGolden}
                             color={strategy.virtualGolden > 0 ? 'warning' : 'default'}
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Chip 
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
                             label={avgReturn > 0 ? `+${avgReturn.toFixed(2)}%` : 'N/A'}
                             color={avgReturn > 0 ? 'success' : 'default'}
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Chip 
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
                             label={learningOutcome}
                             color={learningOutcome === 'High Fakeout Risk' ? 'error' : 
                                    learningOutcome === 'Learning Potential' ? 'success' : 'default'}
-                            size="small"
-                          />
-                        </TableCell>
+                          size="small"
+                        />
+                      </TableCell>
                         {!isMobile && (
                           <TableCell>
                             <Typography variant="caption" color="text.secondary">
@@ -715,7 +715,7 @@ export default function Learning() {
                             </Typography>
                           </TableCell>
                         )}
-                      </TableRow>
+                    </TableRow>
                     );
                   }) : (
                     <TableRow>
