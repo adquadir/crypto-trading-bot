@@ -60,18 +60,18 @@ const PaperTrading = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [statusRes, positionsRes, performanceRes, insightsRes] = await Promise.all([
-        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/status`),
-        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/positions`),
-        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/performance`),
-        axios.get(`${config.API_BASE_URL}/api/v1/trading/paper-trading/learning-insights`)
+      const [statusResponse, positionsResponse, performanceResponse, insightsResponse] = await Promise.all([
+        axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/status`),
+        axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/positions`),
+        axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/performance`),
+        axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/learning-insights`)
       ]);
 
-      setStatus(statusRes.data.data);
-      setPositions(positionsRes.data.data);
-      setPerformance(performanceRes.data.data);
-      setLearningInsights(insightsRes.data.data);
-      setIsRunning(statusRes.data.data.enabled);
+      setStatus(statusResponse.data.data);
+      setPositions(positionsResponse.data.data);
+      setPerformance(performanceResponse.data.data);
+      setLearningInsights(insightsResponse.data.data);
+      setIsRunning(statusResponse.data.data.enabled);
       setError(null);
     } catch (error) {
       console.error('Error fetching paper trading data:', error);
@@ -83,7 +83,7 @@ const PaperTrading = () => {
 
   const handleStart = async () => {
     try {
-      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/start`);
+      await axios.post(`${config.API_BASE_URL}/api/v1/paper-trading/start`);
       setIsRunning(true);
       await fetchData();
     } catch (error) {
@@ -94,7 +94,7 @@ const PaperTrading = () => {
 
   const handleStop = async () => {
     try {
-      await axios.post(`${config.API_BASE_URL}/api/v1/trading/paper-trading/stop`);
+      await axios.post(`${config.API_BASE_URL}/api/v1/paper-trading/stop`);
       setIsRunning(false);
       await fetchData();
     } catch (error) {
