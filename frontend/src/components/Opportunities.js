@@ -425,7 +425,7 @@ const Opportunities = () => {
   const fetchSignals = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${config.API_BASE_URL}/api/v1/trading/opportunities`);
+      const response = await axios.get(`${config.API_BASE_URL}/api/v1/opportunities`);
       
       if (response.data && response.data.length > 0) {
         setSignals(response.data);
