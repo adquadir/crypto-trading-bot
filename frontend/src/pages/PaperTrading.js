@@ -345,7 +345,7 @@ const PaperTrading = () => {
                     <Grid item xs={12/7} key={index}>
                       <Box textAlign="center" p={1}>
                         <Typography variant="caption" color="text.secondary">
-                          {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })}
+                          {new Date(day.timestamp).toLocaleDateString('en-US', { weekday: 'short' })}
                         </Typography>
                         <Box
                           sx={{
@@ -359,8 +359,8 @@ const PaperTrading = () => {
                           <Box
                             sx={{
                               width: '80%',
-                              height: `${Math.max(Math.abs(day.pnl / 3), 10)}px`,
-                              bgcolor: day.pnl > 0 ? 'success.main' : 'error.main',
+                              height: `${Math.max(Math.abs(day.daily_pnl / 3), 10)}px`,
+                              bgcolor: day.daily_pnl > 0 ? 'success.main' : 'error.main',
                               borderRadius: 1
                             }}
                           />
@@ -368,13 +368,13 @@ const PaperTrading = () => {
                         <Typography
                           variant="caption"
                           fontWeight="bold"
-                          color={day.pnl > 0 ? 'success.main' : 'error.main'}
+                          color={day.daily_pnl > 0 ? 'success.main' : 'error.main'}
                         >
-                          ${day.pnl?.toFixed(0)}
+                          ${day.daily_pnl?.toFixed(0)}
                         </Typography>
                         <br />
                         <Typography variant="caption" color="text.secondary">
-                          {day.trades} trades
+                          {day.total_trades} trades
                         </Typography>
                       </Box>
                     </Grid>
