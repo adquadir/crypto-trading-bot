@@ -87,6 +87,7 @@ class PaperTradingEngine:
         # Performance tracking
         self.performance_history = []
         self.last_daily_update = None
+        self.daily_pnl = 0.0  # Initialize daily PnL tracking
         
         # ML learning data
         self.learning_data = {
