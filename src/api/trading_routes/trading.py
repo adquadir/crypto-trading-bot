@@ -50,44 +50,26 @@ class ManualTradeRequest(BaseModel):
 
 @router.get("/opportunities")
 async def get_trading_opportunities():
-    """Get current trading opportunities (main trading endpoint)."""
+    """Get current trading opportunities."""
     try:
         if not opportunity_manager:
             return {
                 "status": "initializing",
-                "message": "Opportunity manager is still initializing",
-                "trading_mode": current_trading_mode,
                 "data": [],
-                "scan_progress": {
-                    "in_progress": False,
-                    "opportunities_found": 0
-                }
+                "message": "Opportunity manager is still initializing"
             }
             
-        # get_opportunities() is synchronous, not async
         opportunities = opportunity_manager.get_opportunities()
-        
         return {
-            "status": "complete" if opportunities else "scanning",
-            "message": f"Found {len(opportunities)} opportunities in {current_trading_mode} mode",
-            "trading_mode": current_trading_mode,
-            "data": opportunities or [],
-            "scan_progress": {
-                "in_progress": False,
-                "opportunities_found": len(opportunities) if opportunities else 0
-            }
+            "status": "success",
+            "data": opportunities or []
         }
     except Exception as e:
         logger.error(f"Error getting trading opportunities: {e}")
         return {
             "status": "error", 
-            "message": f"Error fetching opportunities: {str(e)}",
-            "trading_mode": current_trading_mode,
             "data": [],
-            "scan_progress": {
-                "in_progress": False,
-                "opportunities_found": 0
-            }
+            "message": f"Error fetching opportunities: {str(e)}"
         }
 
 @router.get("/mode")
@@ -123,24 +105,14 @@ async def set_trading_mode(mode: str):
 async def get_trading_stats():
     """Get trading statistics."""
     try:
-        db = Database()
-        session = db.SessionLocal()
-        
-        # Get total trades
-        total_trades = session.query(Trade).count()
-        
-        # Get winning trades
-        winning_trades = session.query(Trade).filter(Trade.pnl > 0).count()
-        
-        # Get total PnL
-        total_pnl = session.query(func.sum(Trade.pnl)).scalar() or 0
-        
+        # Return mock stats for now
         stats = {
-            "total_trades": total_trades,
-            "winning_trades": winning_trades,
-            "win_rate": (winning_trades / total_trades * 100) if total_trades > 0 else 0,
-            "total_pnl": total_pnl,
-            "trading_mode": current_trading_mode
+            "total_trades": 0,
+            "winning_trades": 0,
+            "win_rate": 0,
+            "total_pnl": 0,
+            "daily_pnl": 0,
+            "weekly_pnl": 0
         }
         
         return {
@@ -149,9 +121,11 @@ async def get_trading_stats():
         }
     except Exception as e:
         logger.error(f"Error getting trading stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
+        return {
+            "status": "error",
+            "data": {},
+            "message": "Error fetching trading stats"
+        }
 
 @router.get("/positions")
 async def get_trading_positions():
@@ -1069,4 +1043,35 @@ async def get_learning_insights():
         
     except Exception as e:
         logger.error(f"Error getting learning insights: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/refresh-scalping")
+async def refresh_scalping_signals():
+    """Manually refresh scalping signals scan."""
+    try:
+        if not opportunity_manager:
+            return {
+                "status": "error",
+                "message": "Opportunity manager not initialized"
+            }
+        
+        logger.info("Manual scalping refresh requested")
+        await opportunity_manager.scan_scalping_opportunities()
+        
+        scalping_signals = opportunity_manager.get_scalping_opportunities()
+        
+        return {
+            "status": "success",
+            "message": f"Scalping scan completed - found {len(scalping_signals)} opportunities",
+            "signals_found": len(scalping_signals),
+            "refresh_timestamp": datetime.now().isoformat(),
+            "next_auto_scan": "60 seconds"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error refreshing scalping signals: {e}")
+        return {
+            "status": "error", 
+            "message": f"Failed to refresh scalping signals: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        } 
