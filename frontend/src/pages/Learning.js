@@ -54,7 +54,7 @@ export default function Learning() {
   const fetchLearningInsights = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/trading/learning-insights`);
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/learning-insights`);
       
       if (response.status === 404) {
         // Learning endpoints not yet implemented

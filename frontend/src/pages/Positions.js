@@ -80,12 +80,12 @@ const Positions = () => {
       setLoading(true);
       
       // Fetch positions
-      const positionsResponse = await axios.get(`${config.API_BASE_URL}/api/v1/trading/positions`, {
+      const positionsResponse = await axios.get(`${config.API_BASE_URL}/api/v1/positions`, {
         timeout: 5000
       });
       
       // Fetch trading status
-      const statusResponse = await axios.get(`${config.API_BASE_URL}/api/v1/trading/status`, {
+      const statusResponse = await axios.get(`${config.API_BASE_URL}/api/v1/status`, {
         timeout: 5000
       });
       

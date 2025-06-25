@@ -89,7 +89,7 @@ const Scalping = () => {
 
   const fetchTradingStatus = async () => {
     try {
-      const response = await axios.get(`${config.API_BASE_URL}/api/v1/trading/status`);
+      const response = await axios.get(`${config.API_BASE_URL}/api/v1/status`);
       if (response.data.status === 'success') {
         setTradingStatus(response.data.data);
       }
