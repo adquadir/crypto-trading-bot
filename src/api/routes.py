@@ -189,7 +189,7 @@ async def manual_scan():
             "message": f"Scan failed: {str(e)}"
         }
 
-@router.get("/api/v1/trading/scalping-signals")
+@router.get("/trading/scalping-signals")
 async def get_scalping_signals():
     """Get precision scalping signals targeting 3-10% capital returns."""
     try:
@@ -268,7 +268,7 @@ async def get_scalping_signals():
             }
         }
 
-@router.post("/api/v1/trading/refresh-scalping")
+@router.post("/trading/refresh-scalping")
 async def refresh_scalping_signals():
     """Manually refresh scalping signals scan."""
     try:

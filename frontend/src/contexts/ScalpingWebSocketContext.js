@@ -159,7 +159,7 @@ export const ScalpingWebSocketProvider = ({ children }) => {
 
   const forceRefresh = useCallback(async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/refresh-scalping`, {
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/trading/refresh-scalping`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
