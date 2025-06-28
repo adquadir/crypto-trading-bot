@@ -64,3 +64,6 @@ frontend/build/
 .env
 frontend/.env
 nohup.out
+
+server.log
+*.log
