@@ -1,28 +1,57 @@
-# Core dependencies
+# Core Trading Dependencies
 python-binance==1.0.17
 ccxt>=4.1.13
 pandas>=2.1.4
 numpy>=1.26.0
 scikit-learn>=1.3.0
 xgboost>=2.0.0
-fastapi==0.95.2
-uvicorn==0.22.0
-sqlalchemy==2.0.12
-psycopg2-binary==2.9.6
-asyncpg==0.30.0              # 🔥 NEW: Required for signal tracking database
-redis>=5.0.0
-aiohttp>=3.9.1            # 🛠️ Updated for Python 3.12 compatibility
-websockets==11.0.3
-python-dotenv==1.0.0
-pydantic==1.10.7
 ta>=0.10.2,<0.11.0
-pytest==7.3.1
-pytest-asyncio==0.23.5
-pytest-cov==4.1.0
-python-dateutil==2.8.2
-pytz==2023.3.post1
+
+# Web Framework & API
+fastapi>=0.104.0              # 🔥 Updated for latest features
+uvicorn>=0.24.0               # 🔥 Updated for better performance
+starlette>=0.27.0             # 🔥 Enhanced WebSocket support
+pydantic>=2.0.0               # 🔥 Updated for v2 performance improvements
+python-multipart>=0.0.6      # Form handling
 python-jose==3.3.0
 passlib==1.7.4
 bcrypt==4.0.1
-python-multipart==0.0.6
+
+# Database & Storage
+sqlalchemy==2.0.12
+psycopg2-binary==2.9.6
+asyncpg==0.30.0              # 🔥 Async PostgreSQL for signal tracking
+redis>=5.0.0
+
+# Network & WebSocket
+aiohttp>=3.9.1               # 🛠️ Updated for Python 3.12 compatibility
+websockets==11.0.3           # 🔥 Real-time WebSocket scalping
+requests>=2.31.0             # HTTP requests
+
+# Utilities & Configuration
+python-dotenv==1.0.0
+python-dateutil==2.8.2
+pytz==2023.3.post1
 pyyaml>=6.0.1
+typing-extensions>=4.0.0     # 🔥 Enhanced type hints
+
+# Testing
+pytest==7.3.1
+pytest-asyncio==0.23.5
+pytest-cov==4.1.0
+
+# Paper Trading & Flow Trading Dependencies
+dataclasses-json>=0.6.0      # 🔥 Enhanced dataclass serialization
+uuid                          # Position ID generation (built-in)
+asyncio                       # Async operations (built-in)
+logging                       # System logging (built-in)
+collections                   # Data structures (built-in)
+datetime                      # Time handling (built-in)
+json                          # JSON operations (built-in)
+traceback                     # Error tracking (built-in)
+
+# Optional ML & Analytics
+matplotlib>=3.7.0            # Plotting and visualization
+seaborn>=0.12.0              # Statistical visualization
+plotly>=5.15.0               # Interactive charts
+jupyter>=1.0.0               # Notebook support for analysis

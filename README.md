@@ -1,8 +1,8 @@
 # 🚀 Revolutionary Adaptive Crypto Trading System
 
-**The only trading bot that learns REALITY, not just rules - featuring breakthrough real-time WebSocket scalping, dual-reality tracking, mobile-responsive interface, and intelligent signal prioritization.**
+**The only trading bot that learns REALITY, not just rules - featuring breakthrough real-time WebSocket scalping, dual-reality tracking, enhanced paper trading, flow trading system, mobile-responsive interface, and intelligent signal prioritization.**
 
-A sophisticated cryptocurrency trading system featuring **real-time WebSocket scalping**, **signal lifecycle management**, **dual-reality performance monitoring**, **fakeout detection**, **adaptive market analysis**, **HIGH priority signal detection**, **mobile-responsive interface**, and **comprehensive learning insights** - designed to think and learn from true market behavior with live signal updates.
+A sophisticated cryptocurrency trading system featuring **real-time WebSocket scalping**, **enhanced paper trading engine**, **flow trading system**, **profit scraping**, **signal lifecycle management**, **dual-reality performance monitoring**, **fakeout detection**, **adaptive market analysis**, **HIGH priority signal detection**, **mobile-responsive interface**, and **comprehensive learning insights** - designed to think and learn from true market behavior with live signal updates.
 
 ---
 
@@ -21,6 +21,43 @@ A sophisticated cryptocurrency trading system featuring **real-time WebSocket sc
 - **No Refresh Needed**: Signals appear/disappear automatically without page refresh
 
 **🔥 PROBLEM SOLVED:** Traditional systems require manual refresh and show stale signals. Our real-time WebSocket system ensures traders always see fresh signals within the optimal 0-15 minute scalping window with live updates.
+
+### 💰 **Enhanced Paper Trading Engine** ⭐ **NEW BREAKTHROUGH**
+**"Risk-free trading with unlimited positions and real-time ML learning"**
+
+- **Unlimited Positions**: No artificial position limits - take ALL validated signals
+- **Fixed Capital Per Position**: $200 per trade for consistent risk management
+- **10x Leverage**: Amplified returns with controlled risk
+- **Advanced Risk Management**: 25% stop loss, 15% take profit
+- **Real-Time PnL Tracking**: Live percentage calculations and position monitoring
+- **ML Data Collection**: Every trade contributes to AI learning
+- **Database Integration**: All trades stored in flow_trades table
+- **Separate Counters**: ML Training Trades (completed) vs Active Positions
+- **Auto-Execution**: Processes signals from opportunity manager automatically
+
+**🔥 PROBLEM SOLVED:** Traditional paper trading has position limits and poor tracking. Our enhanced engine provides unlimited scalability with real-time learning and accurate performance metrics.
+
+### 🌊 **Flow Trading System** ⭐ **INSTITUTIONAL-GRADE**
+**"Advanced flow detection and institutional trade analysis"**
+
+- **Flow Detection**: Identifies large institutional movements and order flows
+- **Multi-Timeframe Analysis**: Comprehensive market structure analysis
+- **Volume Profile Analysis**: Advanced volume-based trading signals
+- **Institutional Trade Tracking**: Monitors whale movements and smart money
+- **Flow Performance Monitoring**: Dedicated performance tracking system
+- **Real-Time Flow Signals**: Live detection of market flow changes
+- **Flow Configuration**: Customizable flow detection parameters
+- **Database Storage**: Comprehensive flow_trades and flow_performance tables
+
+### 💎 **Profit Scraping System** ⭐ **PROFIT MAXIMIZER**
+**"Automated profit extraction from micro-movements"**
+
+- **Micro-Movement Detection**: Captures small but consistent profit opportunities
+- **Automated Execution**: Hands-free profit extraction
+- **Risk-Controlled Scalping**: Precise entry and exit timing
+- **Performance Tracking**: Dedicated profit scraping analytics
+- **Real-Time Monitoring**: Live profit scraping status and results
+- **Configurable Parameters**: Customizable profit targets and risk levels
 
 ### 🧠 **Dual-Reality Tracking System** ⭐ **REVOLUTIONARY BREAKTHROUGH**
 **"Learn from ACTUAL market behavior, not artificial stop loss constraints"**
@@ -85,26 +122,6 @@ A sophisticated cryptocurrency trading system featuring **real-time WebSocket sc
 - **Strategy Optimization**: Identifies best performing strategies and symbols
 - **Success Replication**: System adapts to replicate golden signal patterns
 
-### 🎯 **Precision Scalping Engine** ⭐ **CAPITAL FOCUSED**
-**Compact, mobile-optimized scalping with 3-10% capital returns**
-
-- **Compact Signal Cards**: Space-efficient mobile-first design
-- **Dual Timeframes**: 15m precision + 1h trend confirmation
-- **Small Market Moves**: 0.15-2.0% movements amplified by smart leverage
-- **Priority System**: HIGH priority signals (7%+ returns) clearly marked
-- **Capital Return Focus**: Targets YOUR capital growth, not market percentages
-- **Market-Aware Signals**: Signals persist until TP/SL hit or 0.5% price drift
-- **One-Click Trading**: Touch-friendly "Enter Trade" buttons
-
-### 📈 **Learning Insights Dashboard** ⭐ **INTELLIGENCE VISUALIZATION**
-**Complete visibility into how the system learns and adapts**
-
-- **Fakeout Analysis**: View stop losses that rebounded to profit
-- **Virtual Golden Signals**: See signals that would have been profitable without SL
-- **Reality vs Virtual Metrics**: Compare actual exits vs natural outcomes
-- **Learning Impact Analysis**: False negative rates and rebound statistics
-- **Strategy Reality Comparison**: True performance vs stop loss distorted data
-
 ---
 
 ## 🏗️ **SYSTEM ARCHITECTURE**
@@ -113,6 +130,9 @@ A sophisticated cryptocurrency trading system featuring **real-time WebSocket sc
 ```
 📱 Modern Mobile-First Trading Interface
 ├── 🎯 Scalping Page - Compact signal cards with HIGH priority system
+├── 💰 Paper Trading Page - Enhanced paper trading with unlimited positions
+├── 🌊 Flow Trading Page - Institutional flow detection and analysis
+├── 💎 Profit Scraping Page - Automated profit extraction interface
 ├── 📊 Positions Page - Real-time position monitoring (mobile-optimized)
 ├── 🧠 Learning Page - Dual-reality insights with responsive tables  
 ├── 📈 Performance Page - Mobile-friendly analytics dashboard
@@ -125,6 +145,9 @@ A sophisticated cryptocurrency trading system featuring **real-time WebSocket sc
 ```
 🚀 High-Performance Real-Time API Server
 ├── ⚡ Real-Time Scalping Manager - WebSocket signal lifecycle management
+├── 💰 Enhanced Paper Trading Engine - Unlimited positions with ML learning
+├── 🌊 Flow Trading System - Institutional flow detection and analysis
+├── 💎 Profit Scraping Engine - Automated micro-profit extraction
 ├── 🌐 WebSocket Server - Live signal broadcasting (/ws/scalping)
 ├── 🎯 Opportunity Manager - Signal generation with priority calculation
 ├── 🧠 Enhanced Signal Tracker - Dual-reality performance monitoring
@@ -138,7 +161,7 @@ A sophisticated cryptocurrency trading system featuring **real-time WebSocket sc
 
 ### **Enhanced Database Schema**
 ```sql
-📊 Comprehensive Dual-Reality Tracking
+📊 Comprehensive Multi-System Tracking
 ├── enhanced_signals - Full dual-reality signal lifecycle tracking
 │   ├── virtual_tp_hit - Would have hit take profit after SL?
 │   ├── fakeout_detected - Stop loss that rebounded to profit
@@ -146,6 +169,17 @@ A sophisticated cryptocurrency trading system featuring **real-time WebSocket sc
 │   ├── learning_outcome - 'false_negative', 'would_have_won'
 │   ├── expected_capital_return_pct - Priority calculation basis
 │   └── is_virtual_golden - Would be golden without SL interference
+├── flow_trades - Flow trading system transactions
+│   ├── symbol, strategy_type, trade_type, entry_price, exit_price
+│   ├── quantity, pnl, pnl_pct, fees, confidence_score, ml_score
+│   ├── entry_reason, exit_reason, duration_minutes
+│   ├── market_regime, volatility_regime, entry_time, exit_time
+│   └── Flow-specific tracking fields
+├── flow_performance - Flow trading performance metrics
+│   ├── symbol, strategy_type, total_pnl, trades_count
+│   ├── winning_trades, losing_trades, win_rate
+│   ├── max_drawdown_pct, sharpe_ratio, avg_trade_duration
+│   └── Performance aggregation by strategy and symbol
 ├── pnl_snapshots - Interval performance data
 ├── golden_signals - Top performer identification  
 ├── strategy_performance - Aggregated strategy metrics
@@ -183,6 +217,25 @@ ACCOUNT_BALANCE=10000
 # API Keys
 BINANCE_API_KEY=your_api_key_here
 BINANCE_API_SECRET=your_api_secret_here
+
+# Enhanced Paper Trading
+PAPER_TRADING_ENABLED=true
+PAPER_TRADING_UNLIMITED_POSITIONS=true
+PAPER_TRADING_CAPITAL_PER_POSITION=200
+PAPER_TRADING_LEVERAGE=10.0
+PAPER_TRADING_STOP_LOSS_PCT=0.25    # 25%
+PAPER_TRADING_TAKE_PROFIT_PCT=0.15  # 15%
+
+# Flow Trading System
+FLOW_TRADING_ENABLED=true
+FLOW_DETECTION_ENABLED=true
+INSTITUTIONAL_FLOW_TRACKING=true
+VOLUME_PROFILE_ANALYSIS=true
+
+# Profit Scraping
+PROFIT_SCRAPING_ENABLED=true
+MICRO_MOVEMENT_DETECTION=true
+AUTOMATED_PROFIT_EXTRACTION=true
 
 # Enhanced Tracking
 ENABLE_SIGNAL_TRACKING=true
@@ -222,6 +275,7 @@ sudo -u postgres createuser -P crypto_user
 sudo -u postgres createdb -O crypto_user crypto_trading
 
 # Tables auto-created on first run with dual-reality columns
+# Includes: enhanced_signals, flow_trades, flow_performance, pnl_snapshots
 ```
 
 ### **4. Launch System**
@@ -242,6 +296,42 @@ open http://YOUR_IP:3000
 ---
 
 ## 🎮 **USING THE SYSTEM**
+
+### **💰 Enhanced Paper Trading Page**
+```
+✅ Unlimited position capacity (no 5-position limit)
+✅ Fixed $200 capital per position for consistent risk
+✅ 10x leverage for amplified returns
+✅ 25% stop loss, 15% take profit
+✅ Real-time PnL percentage calculations
+✅ Separate ML Training Trades vs Active Positions counters
+✅ Auto-execution of validated signals (confidence ≥ 0.7)
+✅ Real-time position monitoring with live updates
+✅ Database integration for comprehensive tracking
+✅ Mobile-responsive interface with touch controls
+```
+
+### **🌊 Flow Trading Page**
+```
+✅ Institutional flow detection and analysis
+✅ Multi-timeframe flow monitoring
+✅ Volume profile analysis
+✅ Large order flow tracking
+✅ Flow performance metrics
+✅ Real-time flow signal generation
+✅ Customizable flow detection parameters
+✅ Mobile-optimized flow interface
+```
+
+### **💎 Profit Scraping Page**
+```
+✅ Automated micro-profit extraction
+✅ Real-time profit scraping status
+✅ Performance tracking and analytics
+✅ Risk-controlled scalping parameters
+✅ Configurable profit targets
+✅ Mobile-friendly profit monitoring
+```
 
 ### **⚡ Real-Time Mobile Scalping Page**
 ```
@@ -285,6 +375,7 @@ open http://YOUR_IP:3000
 ✅ Advanced filtering by symbol, side, strategy
 ✅ Trading mode warnings and account balance
 ✅ Mobile-optimized card layouts for phone viewing
+✅ Paper trading and flow trading position separation
 ```
 
 ### **📈 Performance Page - Analytics Dashboard**
@@ -293,21 +384,55 @@ open http://YOUR_IP:3000
 ⭐ Golden Signals - Quick 3% gainers showcase  
 🔴 Live Tracking - Active signals being monitored
 🧠 Adaptive Assessment - Current market regime analysis
+💰 Paper Trading Performance - Unlimited position analytics
+🌊 Flow Trading Metrics - Institutional flow performance
+💎 Profit Scraping Results - Micro-profit extraction stats
 📱 Mobile-friendly charts and responsive layouts
 ```
-
-### **🎯 HIGH Priority Signal Workflow**
-1. **Signal Generation**: System creates signals with capital return calculation
-2. **Priority Assessment**: 7%+ capital return = HIGH priority badge
-3. **Visual Prioritization**: RED badges, GREEN borders, priority sorting
-4. **Mobile Optimization**: Touch-friendly interface for mobile trading
-5. **One-Click Entry**: "Enter Trade" buttons with automatic position sizing
-6. **Auto-Tracking**: Immediate dual-reality tracking begins
-7. **Learning Integration**: All outcomes feed back into system intelligence
 
 ---
 
 ## 🚀 **API ENDPOINTS**
+
+### **💰 Paper Trading Endpoints**
+```http
+# Enhanced paper trading with unlimited positions
+POST /api/v1/paper-trading/start           # Start paper trading engine
+POST /api/v1/paper-trading/stop            # Stop paper trading engine
+GET  /api/v1/paper-trading/status          # Get status with new fields
+GET  /api/v1/paper-trading/positions       # Get active positions
+GET  /api/v1/paper-trading/performance     # Get performance analytics
+GET  /api/v1/paper-trading/account         # Get account details
+GET  /api/v1/paper-trading/trades          # Get trade history
+POST /api/v1/paper-trading/trade           # Execute manual trade
+POST /api/v1/paper-trading/positions/{id}/close  # Close specific position
+POST /api/v1/paper-trading/reset           # Reset account
+GET  /api/v1/paper-trading/ml-data         # Get ML training data
+POST /api/v1/paper-trading/simulate-signals # Simulate trading signals
+GET  /api/v1/paper-trading/health          # Health check
+```
+
+### **🌊 Flow Trading Endpoints**
+```http
+# Institutional flow detection and analysis
+POST /api/v1/flow-trading/start            # Start flow trading system
+POST /api/v1/flow-trading/stop             # Stop flow trading system
+GET  /api/v1/flow-trading/status           # Get flow trading status
+GET  /api/v1/flow-trading/flows            # Get detected flows
+GET  /api/v1/flow-trading/performance      # Get flow performance
+GET  /api/v1/flow-trading/config           # Get flow configuration
+POST /api/v1/flow-trading/config           # Update flow configuration
+```
+
+### **💎 Profit Scraping Endpoints**
+```http
+# Automated profit extraction system
+POST /api/v1/profit-scraping/start         # Start profit scraping
+POST /api/v1/profit-scraping/stop          # Stop profit scraping
+GET  /api/v1/profit-scraping/status        # Get scraping status
+GET  /api/v1/profit-scraping/results       # Get scraping results
+GET  /api/v1/profit-scraping/performance   # Get performance metrics
+```
 
 ### **🎯 Trading Endpoints**
 ```http
@@ -345,6 +470,28 @@ POST /api/v1/signals/enable-adaptive-mode
 
 ## 📊 **PERFORMANCE FEATURES**
 
+### **💰 Enhanced Paper Trading Metrics**
+- **Unlimited Positions**: No artificial caps - process ALL validated signals
+- **Fixed Capital**: $200 per position for consistent risk and learning data
+- **Leverage Amplification**: 10x leverage for enhanced returns
+- **Advanced Risk Management**: 25% stop loss, 15% take profit
+- **Real-Time Tracking**: Live PnL percentages and position monitoring
+- **Separate Counters**: ML Training Trades vs Active Positions
+- **Database Integration**: Comprehensive trade storage and analysis
+
+### **🌊 Flow Trading Performance**
+- **Institutional Detection**: Large order flow and whale movement tracking
+- **Multi-Timeframe Analysis**: Comprehensive market structure insights
+- **Volume Profile**: Advanced volume-based signal generation
+- **Flow Performance Metrics**: Dedicated institutional trading analytics
+- **Real-Time Flow Signals**: Live detection of market flow changes
+
+### **💎 Profit Scraping Metrics**
+- **Micro-Profit Extraction**: Consistent small profit opportunities
+- **Automated Execution**: Hands-free profit generation
+- **Risk-Controlled**: Precise entry/exit with minimal drawdown
+- **Performance Analytics**: Dedicated scraping performance tracking
+
 ### **🎯 HIGH Priority Signal Metrics**
 - **Capital Return Threshold**: 7%+ expected returns marked as HIGH priority
 - **Priority Distribution**: Typically 3-5 HIGH priority signals from 15-20 total
@@ -376,7 +523,7 @@ POST /api/v1/signals/enable-adaptive-mode
 ### **⭐ Golden Signal Criteria**
 - **Speed**: Hit 3% profit within 60 minutes
 - **Virtual Detection**: Would have been golden without SL interference
-- **Pattern Learning**: System identifies common characteristics
+- **Pattern Recognition**: System identifies common characteristics
 - **Success Replication**: Adapts criteria to find more golden signals
 
 ---
@@ -422,6 +569,24 @@ Intelligent Adaptation → 🚀 Better Future Signals
 - **Strategy Count**: Multiple real strategies with actual performance data
 - **Market Coverage**: 400+ USDT symbols continuously monitored
 - **Mobile Performance**: Sub-2s page loads, <1s interaction response
+
+### **💰 Enhanced Paper Trading Success**
+- **Unlimited Scalability**: No position limits enable maximum opportunity capture
+- **Consistent Risk**: $200 fixed capital provides reliable learning data
+- **Real-Time Performance**: Live PnL tracking with accurate percentages
+- **ML Integration**: Every trade contributes to system intelligence
+- **Database Reliability**: Comprehensive trade storage and analysis
+
+### **🌊 Flow Trading Achievements**
+- **Institutional Detection**: Successfully identifies large order flows
+- **Multi-Timeframe Accuracy**: Comprehensive market structure analysis
+- **Volume Profile Success**: Advanced volume-based signal generation
+- **Performance Tracking**: Dedicated flow trading analytics
+
+### **💎 Profit Scraping Results**
+- **Micro-Profit Consistency**: Regular small profit extraction
+- **Automated Efficiency**: Hands-free profit generation
+- **Risk Control**: Minimal drawdown with precise execution
 
 ### **🎯 HIGH Priority Signal Success**
 - **Capital Returns**: 7-20% expected returns on HIGH priority signals
@@ -470,51 +635,90 @@ Intelligent Adaptation → 🚀 Better Future Signals
 
 ## 🔧 **CUSTOMIZATION & OPTIMIZATION**
 
+### **💰 Enhanced Paper Trading Configuration**
+```python
+# Paper Trading Engine
+PAPER_TRADING_UNLIMITED_POSITIONS = true    # No position limits
+PAPER_TRADING_CAPITAL_PER_POSITION = 200    # Fixed $200 per trade
+PAPER_TRADING_LEVERAGE = 10.0               # 10x leverage
+PAPER_TRADING_STOP_LOSS_PCT = 0.25          # 25% stop loss
+PAPER_TRADING_TAKE_PROFIT_PCT = 0.15        # 15% take profit
+PAPER_TRADING_AUTO_EXECUTION = true         # Auto-process signals
+PAPER_TRADING_ML_LEARNING = true            # Contribute to ML training
+
+# Risk Management
+PAPER_TRADING_MAX_DAILY_LOSS_PCT = 0.05     # 5% daily loss limit
+PAPER_TRADING_MAX_TOTAL_EXPOSURE_PCT = 0.10 # 10% total exposure
+PAPER_TRADING_CONFIDENCE_THRESHOLD = 0.7    # Minimum signal confidence
+```
+
+### **🌊 Flow Trading Configuration**
+```python
+# Flow Detection
+FLOW_DETECTION_ENABLED = true               # Enable flow detection
+INSTITUTIONAL_FLOW_TRACKING = true          # Track large orders
+VOLUME_PROFILE_ANALYSIS = true              # Volume-based signals
+FLOW_SIGNAL_CONFIDENCE_MIN = 0.75           # Minimum flow confidence
+
+# Flow Performance
+FLOW_PERFORMANCE_TRACKING = true            # Track flow performance
+FLOW_DATABASE_STORAGE = true                # Store in flow_trades table
+```
+
+### **💎 Profit Scraping Configuration**
+```python
+# Profit Scraping
+PROFIT_SCRAPING_ENABLED = true              # Enable profit scraping
+MICRO_MOVEMENT_DETECTION = true             # Detect small movements
+AUTOMATED_PROFIT_EXTRACTION = true          # Auto-extract profits
+PROFIT_SCRAPING_MIN_PROFIT_PCT = 0.005      # 0.5% minimum profit
+```
+
 ### **⚙️ HIGH Priority Configuration**
 ```python
 # Priority System
-HIGH_PRIORITY_THRESHOLD = 7.0           # 7%+ capital return = HIGH priority
-PRIORITY_VISUAL_SYSTEM = true           # RED badges, GREEN borders
-MOBILE_TOUCH_TARGETS = 48               # Minimum touch target size (px)
-RESPONSIVE_BREAKPOINTS = {              # Material-UI breakpoints
+HIGH_PRIORITY_THRESHOLD = 7.0               # 7%+ capital return = HIGH priority
+PRIORITY_VISUAL_SYSTEM = true               # RED badges, GREEN borders
+MOBILE_TOUCH_TARGETS = 48                   # Minimum touch target size (px)
+RESPONSIVE_BREAKPOINTS = {                  # Material-UI breakpoints
     'xs': 0, 'sm': 600, 'md': 900, 'lg': 1200, 'xl': 1536
 }
 
 # Mobile Optimization
-MOBILE_FIRST_DESIGN = true              # Mobile-first responsive approach
-TOUCH_FRIENDLY_CONTROLS = true          # Large touch targets
-BATTERY_EFFICIENT_RENDERING = true      # Optimized for mobile devices
+MOBILE_FIRST_DESIGN = true                  # Mobile-first responsive approach
+TOUCH_FRIENDLY_CONTROLS = true              # Large touch targets
+BATTERY_EFFICIENT_RENDERING = true          # Optimized for mobile devices
 ```
 
 ### **⚙️ Dual-Reality Configuration**
 ```python
 # Dual Reality Tracking
-LEARNING_IGNORE_STOP_LOSS = true        # Continue tracking after SL
-DUAL_REALITY_TRACKING = true            # Track both outcomes
-VIRTUAL_TRADE_MAX_DURATION = 120        # 2 hours virtual tracking
-TRACK_POST_SL_PERFORMANCE = true        # Monitor rebound patterns
-TRACK_FAKEOUTS = true                   # Learn from false stops
+LEARNING_IGNORE_STOP_LOSS = true            # Continue tracking after SL
+DUAL_REALITY_TRACKING = true                # Track both outcomes
+VIRTUAL_TRADE_MAX_DURATION = 120            # 2 hours virtual tracking
+TRACK_POST_SL_PERFORMANCE = true            # Monitor rebound patterns
+TRACK_FAKEOUTS = true                       # Learn from false stops
 
 # Learning Mode
-LEARNING_MODE = true                    # Prioritize learning over profits
-INTELLIGENT_STOP_PLACEMENT = true       # AI-adjusted stop losses
-FIXED_CAPITAL_LEARNING = 200            # $200 per trade for consistency
+LEARNING_MODE = true                        # Prioritize learning over profits
+INTELLIGENT_STOP_PLACEMENT = true           # AI-adjusted stop losses
+FIXED_CAPITAL_LEARNING = 200                # $200 per trade for consistency
 
 # Enhanced tracking
-ENABLE_SIGNAL_TRACKING = true           # Real-time performance monitoring
-TRACKING_INTERVALS = [15,30,60,120,240] # Snapshot intervals (minutes)
-GOLDEN_SIGNAL_THRESHOLD = 0.03         # 3% profit threshold
-GOLDEN_SIGNAL_TIME_LIMIT = 60          # 60 minutes time limit
+ENABLE_SIGNAL_TRACKING = true               # Real-time performance monitoring
+TRACKING_INTERVALS = [15,30,60,120,240]     # Snapshot intervals (minutes)
+GOLDEN_SIGNAL_THRESHOLD = 0.03             # 3% profit threshold
+GOLDEN_SIGNAL_TIME_LIMIT = 60              # 60 minutes time limit
 
 # Real-Time WebSocket Configuration
-WEBSOCKET_ENABLED = true                # Enable WebSocket broadcasting
-SIGNAL_GENERATION_INTERVAL = 30        # Generate signals every 30 seconds
-SIGNAL_VALIDATION_INTERVAL = 15        # Validate existing signals every 15 seconds  
-SIGNAL_CLEANUP_INTERVAL = 60           # Cleanup expired signals every 60 seconds
-SIGNAL_AGE_LIMIT = 900                 # 15 minutes maximum signal age
-SIGNAL_STALE_WARNING = 600             # 10 minutes stale warning threshold
-WEBSOCKET_BROADCAST_INTERVAL = 2       # Broadcast updates every 2 seconds
-AUTO_INVALIDATE_ON_TP_SL = true        # Auto-remove signals when TP/SL hit
+WEBSOCKET_ENABLED = true                    # Enable WebSocket broadcasting
+SIGNAL_GENERATION_INTERVAL = 30            # Generate signals every 30 seconds
+SIGNAL_VALIDATION_INTERVAL = 15            # Validate existing signals every 15 seconds  
+SIGNAL_CLEANUP_INTERVAL = 60               # Cleanup expired signals every 60 seconds
+SIGNAL_AGE_LIMIT = 900                     # 15 minutes maximum signal age
+SIGNAL_STALE_WARNING = 600                 # 10 minutes stale warning threshold
+WEBSOCKET_BROADCAST_INTERVAL = 2           # Broadcast updates every 2 seconds
+AUTO_INVALIDATE_ON_TP_SL = true            # Auto-remove signals when TP/SL hit
 ```
 
 ---
@@ -526,7 +730,7 @@ AUTO_INVALIDATE_ON_TP_SL = true        # Auto-remove signals when TP/SL hit
 # VPS with 4GB+ RAM, 2+ CPU cores
 # Ubuntu 20.04+ with Node.js and Python support
 
-# Database optimization for dual-reality data
+# Database optimization for multi-system data
 postgresql.conf: shared_buffers = 512MB, max_connections = 200
 
 # PM2 Process Management Configuration
@@ -618,10 +822,10 @@ location /manifest.json {
 
 ## 🏆 **THE REVOLUTIONARY DIFFERENCE**
 
-### **Traditional Bots vs. Our Mobile-First Dual-Reality System**
+### **Traditional Bots vs. Our Multi-System Platform**
 
-| Traditional Bots | Our Dual-Reality System |
-|------------------|-------------------|
+| Traditional Bots | Our Multi-System Platform |
+|------------------|---------------------------|
 | ❌ Learn from corrupted data (SL hits) | ✅ Learn from true market behavior |
 | ❌ Can't detect fakeouts | ✅ Identifies and learns from fakeouts |
 | ❌ Stop tracking at SL | ✅ Continues virtual tracking for 2 hours |
@@ -631,11 +835,14 @@ location /manifest.json {
 | ❌ Desktop-only interfaces | ✅ Mobile-first responsive design |
 | ❌ No signal prioritization | ✅ HIGH priority system with visual cues |
 | ❌ Manual position sizing | ✅ Auto-calculated optimal leverage |
+| ❌ Limited paper trading | ✅ Enhanced unlimited paper trading |
+| ❌ No institutional flow detection | ✅ Advanced flow trading system |
+| ❌ No micro-profit extraction | ✅ Automated profit scraping |
 
 ### **🎯 Core Philosophy**
-**"Learn from REALITY, not rules. Track what ACTUALLY happens, not what stop loss logic dictates. Trade anywhere, anytime with mobile-first design."**
+**"Learn from REALITY, not rules. Track what ACTUALLY happens, not what stop loss logic dictates. Trade anywhere, anytime with mobile-first design. Capture ALL opportunities with unlimited systems."**
 
-This system represents a fundamental breakthrough in algorithmic trading: from learning corrupted data to learning true market behavior, combined with mobile-first design for trading freedom, enabling genuine artificial intelligence that understands real market dynamics.
+This system represents a fundamental breakthrough in algorithmic trading: from learning corrupted data to learning true market behavior, combined with mobile-first design for trading freedom, enhanced paper trading for unlimited learning, institutional flow detection, and automated profit extraction - enabling genuine artificial intelligence that understands real market dynamics across multiple trading systems.
 
 ---
 
@@ -645,19 +852,25 @@ This system represents a fundamental breakthrough in algorithmic trading: from l
 
 ---
 
-**🚀 Ready to revolutionize your crypto trading with TRUE learning and mobile freedom? Start with small amounts, let the dual-reality system learn from actual market behavior, and watch it become a genuinely intelligent trading partner!**
+**🚀 Ready to revolutionize your crypto trading with TRUE learning, mobile freedom, and multi-system intelligence? Start with small amounts, let the dual-reality system learn from actual market behavior, utilize unlimited paper trading for risk-free learning, capture institutional flows, and extract micro-profits - watch it become a genuinely intelligent multi-system trading partner!**
 
-**Current System Status: ✅ ALL SERVICES RUNNING + REAL-TIME WEBSOCKET + MOBILE-OPTIMIZED + DUAL-REALITY ACTIVE**
+**Current System Status: ✅ ALL SERVICES RUNNING + MULTI-SYSTEM ACTIVE**
 - ⚡ Real-Time WebSocket Server: Broadcasting live signals on /ws/scalping
+- 💰 Enhanced Paper Trading: Unlimited positions with 10x leverage active
+- 🌊 Flow Trading System: Institutional flow detection operational
+- 💎 Profit Scraping Engine: Automated micro-profit extraction running
 - 🚀 API Server: Running on port 8000 with WebSocket support
 - 📱 Mobile-Responsive Frontend: Running on port 3000 with live updates
-- 💾 Database: PostgreSQL operational with dual-reality schema
+- 💾 Database: PostgreSQL operational with multi-system schema
 - 🔄 Signal Lifecycle Manager: 30s generation, 15s validation, 60s cleanup
 - 🧠 Enhanced Tracking: 70+ signals tracked with real-time updates
 - 🔥 Dual-Reality Learning: Active fakeout detection and virtual tracking
 - 🎯 Signal Generation: Priority system with HIGH priority detection
 - 📊 Learning Dashboard: http://localhost:3000/learning
 - ⚡ Real-Time Scalping: http://localhost:3000/scalping (live signals)
+- 💰 Paper Trading: http://localhost:3000/paper-trading (unlimited positions)
+- 🌊 Flow Trading: http://localhost:3000/flow-trading (institutional flows)
+- 💎 Profit Scraping: http://localhost:3000/profit-scraping (micro-profits)
 - 🌍 External Access: http://71.164.76.192:3000 (mobile-friendly + WebSocket)
 - 📱 Mobile Optimization: Touch-friendly, responsive, battery-efficient, real-time updates
 - 🕐 Eastern Time Display: Consistent timezone reference across all interfaces
