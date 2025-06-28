@@ -628,11 +628,19 @@ class EnhancedPaperTradingEngine:
             return None
     
     def _calculate_position_size(self, symbol: str, price: float, confidence: float) -> float:
-        """Calculate position size based on fixed $200 per position"""
+        """Calculate position size with 10x leverage applied"""
         try:
-            # Fixed $200 capital per position
-            position_value = 200.0
-            position_size = position_value / price
+            # Base capital per position
+            base_capital = 200.0
+            
+            # Apply 10x leverage
+            leverage = 10.0
+            leveraged_capital = base_capital * leverage  # $2,000 effective position size
+            
+            # Calculate position size based on leveraged capital
+            position_size = leveraged_capital / price
+            
+            logger.info(f"💰 Position sizing: Base ${base_capital} × {leverage}x leverage = ${leveraged_capital} → {position_size:.6f} {symbol}")
             
             return position_size
             
@@ -641,20 +649,23 @@ class EnhancedPaperTradingEngine:
             return 0.0
     
     def _calculate_stop_loss(self, entry_price: float, side: str, symbol: str) -> float:
-        """Calculate stop loss price"""
+        """Calculate stop loss price at 15% to avoid false negatives"""
         try:
-            # 25% stop loss
-            stop_loss_pct = 0.25
+            # 15% stop loss - gives more room for temporary reversals
+            stop_loss_pct = 0.15
             
             if side == 'LONG':
-                return entry_price * (1 - stop_loss_pct)
+                sl_price = entry_price * (1 - stop_loss_pct)
             else:  # SHORT
-                return entry_price * (1 + stop_loss_pct)
+                sl_price = entry_price * (1 + stop_loss_pct)
+            
+            logger.info(f"🛡️ Stop Loss: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({stop_loss_pct:.1%})")
+            return sl_price
                 
         except Exception as e:
             logger.error(f"Error calculating stop loss: {e}")
             # Fallback to default
-            stop_loss_pct = 0.25
+            stop_loss_pct = 0.15
             if side == 'LONG':
                 return entry_price * (1 - stop_loss_pct)
             else:

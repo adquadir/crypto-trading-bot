@@ -308,7 +308,7 @@ const PaperTrading = () => {
               <Grid item xs={6} sm={3}>
                 <Box textAlign="center">
                   <Typography variant="h6" color="info.main" fontWeight="bold">
-                    25%
+                    15%
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Stop Loss
