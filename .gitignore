@@ -63,3 +63,4 @@ Thumbs.dblogs/frontend.log
 frontend/build/
 .env
 frontend/.env
+nohup.out
