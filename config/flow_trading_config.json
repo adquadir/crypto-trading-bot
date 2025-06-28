@@ -1,0 +1,72 @@
+{
+  "scalping": {
+    "profit_target_pct": 0.005,
+    "stop_loss_pct": 0.003,
+    "trailing_stop_pct": 0.002,
+    "min_confidence": 0.75,
+    "max_position_time_minutes": 30,
+    "atr_multiplier": 2.0,
+    "volume_threshold": 1.5
+  },
+  "grid_trading": {
+    "default_levels": 5,
+    "default_spacing_pct": 0.004,
+    "profit_per_level_pct": 0.003,
+    "max_grid_exposure_pct": 0.02,
+    "volatility_adjustment": true,
+    "min_volatility_threshold": 0.01,
+    "max_volatility_threshold": 0.08,
+    "rebalance_threshold_pct": 0.05
+  },
+  "risk_management": {
+    "max_portfolio_exposure_pct": 0.1,
+    "max_single_position_pct": 0.02,
+    "max_correlation_concentration": 0.7,
+    "max_portfolio_var_1d": 0.05,
+    "max_portfolio_var_5d": 0.12,
+    "max_drawdown_threshold": 0.15,
+    "stress_test_scenarios": {
+      "flash_crash": {
+        "market_drop_pct": -10.0,
+        "volatility_spike": 3.0
+      },
+      "market_correction": {
+        "market_drop_pct": -20.0,
+        "volatility_spike": 2.0
+      },
+      "crypto_winter": {
+        "market_drop_pct": -50.0,
+        "volatility_spike": 4.0
+      }
+    }
+  },
+  "ml": {
+    "signal_confidence_threshold": 0.6,
+    "model_retrain_interval_hours": 24,
+    "feature_importance_threshold": 0.05,
+    "prediction_horizon_minutes": 60,
+    "ensemble_models": true,
+    "online_learning": true,
+    "model_validation_split": 0.2,
+    "max_training_samples": 10000
+  },
+  "monitoring": {
+    "performance_check_interval_minutes": 5,
+    "risk_check_interval_minutes": 1,
+    "health_check_interval_minutes": 2,
+    "alert_thresholds": {
+      "performance_degradation_pct": -5.0,
+      "risk_breach_multiplier": 1.5,
+      "system_error_count": 10,
+      "latency_threshold_ms": 1000
+    },
+    "notification_channels": {
+      "email": false,
+      "slack": false,
+      "webhook": true,
+      "database": true
+    }
+  },
+  "symbols": [],
+  "last_updated": "2025-06-27T02:15:32.896042"
+}

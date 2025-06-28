@@ -54,9 +54,9 @@ const PaperTrading = () => {
   const fetchData = async () => {
     try {
       const [statusRes, positionsRes, performanceRes] = await Promise.all([
-        fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/status`),
-        fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/positions`),
-        fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/performance`)
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/status`),
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/positions`),
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/performance`)
       ]);
 
       if (statusRes.ok) {
@@ -103,7 +103,7 @@ const PaperTrading = () => {
 
   const handleStart = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/force-start`, {
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -125,7 +125,7 @@ const PaperTrading = () => {
 
   const handleStop = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/trading/paper-trading/stop`, {
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -205,7 +205,7 @@ const PaperTrading = () => {
       {/* Status Overview */}
       {status && (
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Card>
               <CardContent sx={{ textAlign: 'center', p: 2 }}>
                 <BalanceIcon color="primary" sx={{ mb: 1 }} />
@@ -218,7 +218,7 @@ const PaperTrading = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Card>
               <CardContent sx={{ textAlign: 'center', p: 2 }}>
                 <TrendingUpIcon sx={{ mb: 1, color: getReturnColor(status.total_return_pct) }} />
@@ -235,7 +235,7 @@ const PaperTrading = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Card>
               <CardContent sx={{ textAlign: 'center', p: 2 }}>
                 <SpeedIcon color="success" sx={{ mb: 1 }} />
@@ -248,7 +248,7 @@ const PaperTrading = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={6} sm={3}>
+          <Grid item xs={6} sm={2.4}>
             <Card>
               <CardContent sx={{ textAlign: 'center', p: 2 }}>
                 <AnalyticsIcon color="info" sx={{ mb: 1 }} />
@@ -261,7 +261,73 @@ const PaperTrading = () => {
               </CardContent>
             </Card>
           </Grid>
+          <Grid item xs={6} sm={2.4}>
+            <Card>
+              <CardContent sx={{ textAlign: 'center', p: 2 }}>
+                <TimelineIcon color="warning" sx={{ mb: 1 }} />
+                <Typography variant="h5" fontWeight="bold" color="warning.main">
+                  {status.active_positions || 0}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Active Positions
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
+      )}
+
+      {/* Trading Configuration */}
+      {status && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" fontWeight="bold" gutterBottom>
+              💰 Trading Configuration
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={6} sm={3}>
+                <Box textAlign="center">
+                  <Typography variant="h6" color="primary" fontWeight="bold">
+                    ${status.capital_per_position || 200}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Capital Per Position
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Box textAlign="center">
+                  <Typography variant="h6" color="success.main" fontWeight="bold">
+                    {status.leverage || 10}x
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Leverage
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Box textAlign="center">
+                  <Typography variant="h6" color="info.main" fontWeight="bold">
+                    25%
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Stop Loss
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Box textAlign="center">
+                  <Typography variant="h6" color="warning.main" fontWeight="bold">
+                    15%
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Take Profit
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
       )}
 
       {/* Learning Insights Alert */}
@@ -597,4 +663,4 @@ const PaperTrading = () => {
   );
 };
 
-export default PaperTrading; 
+export default PaperTrading;

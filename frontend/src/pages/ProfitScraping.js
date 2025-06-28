@@ -125,9 +125,9 @@ const ProfitScraping = () => {
     try {
       const symbols = settings.symbols;
       const signalPromises = symbols.map(async (symbol) => {
-        const response = await fetch(`${config.API_BASE_URL}/api/v1/advanced/signals/${symbol}`);
+        const response = await fetch(`${config.API_BASE_URL}/api/v1/profit-scraping/api/v1/advanced/signals/${symbol}`);
         const data = await response.json();
-        return { symbol, data };
+        return { symbol, data: data.data };
       });
       
       const results = await Promise.all(signalPromises);
@@ -143,9 +143,9 @@ const ProfitScraping = () => {
 
   const fetchRiskAnalysis = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/advanced/risk-analysis`);
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/profit-scraping/api/v1/advanced/risk-analysis`);
       const data = await response.json();
-      setRiskAnalysis(data);
+      setRiskAnalysis(data.data);
     } catch (err) {
       console.error('Failed to fetch risk analysis:', err);
     }
@@ -153,9 +153,9 @@ const ProfitScraping = () => {
 
   const fetchPerformanceAnalytics = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/advanced/performance-analytics`);
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/profit-scraping/api/v1/advanced/performance-analytics`);
       const data = await response.json();
-      setPerformanceAnalytics(data);
+      setPerformanceAnalytics(data.data);
     } catch (err) {
       console.error('Failed to fetch performance analytics:', err);
     }
@@ -202,7 +202,7 @@ const ProfitScraping = () => {
 
   const handleOptimizePortfolio = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/advanced/optimize-portfolio`, {
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/profit-scraping/api/v1/advanced/optimize-portfolio`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -710,4 +710,4 @@ const ProfitScraping = () => {
   );
 };
 
-export default ProfitScraping; 
+export default ProfitScraping;

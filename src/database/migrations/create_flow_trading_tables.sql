@@ -1,82 +1,153 @@
--- Flow Trading Tables for PostgreSQL
--- Drop existing tables if they exist
-DROP TABLE IF EXISTS flow_performance CASCADE;
-DROP TABLE IF EXISTS strategy_switches CASCADE;
-DROP TABLE IF EXISTS grid_configurations CASCADE;
-DROP TABLE IF EXISTS flow_positions CASCADE;
+-- Flow Trading Performance Tables
+-- Migration: Create flow trading performance tracking tables
 
--- Flow trading positions (supports multiple per symbol)
-CREATE TABLE flow_positions (
+-- Flow trading performance summary table
+CREATE TABLE IF NOT EXISTS flow_performance (
     id SERIAL PRIMARY KEY,
     symbol VARCHAR(20) NOT NULL,
-    strategy_type VARCHAR(20) NOT NULL, -- 'scalping' or 'grid_trading'
-    entry_price DECIMAL(20,8) NOT NULL,
-    quantity DECIMAL(20,8) NOT NULL,
-    side VARCHAR(10) NOT NULL, -- 'BUY' or 'SELL'
-    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE', 'FILLED', 'CANCELLED'
-    order_id VARCHAR(100) NULL,
-    grid_level INTEGER NULL, -- for grid trades
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    filled_at TIMESTAMP NULL
-);
-
--- Strategy switches log
-CREATE TABLE strategy_switches (
-    id SERIAL PRIMARY KEY,
-    symbol VARCHAR(20) NOT NULL,
-    from_strategy VARCHAR(20) NOT NULL,
-    to_strategy VARCHAR(20) NOT NULL,
-    reason TEXT NOT NULL,
-    market_regime VARCHAR(20) NOT NULL,
-    switch_count INTEGER DEFAULT 1,
-    performance_score DECIMAL(10,4) NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Grid configurations per symbol
-CREATE TABLE grid_configurations (
-    id SERIAL PRIMARY KEY,
-    symbol VARCHAR(20) NOT NULL,
-    center_price DECIMAL(20,8) NOT NULL,
-    grid_spacing DECIMAL(20,8) NOT NULL,
-    levels_count INTEGER NOT NULL DEFAULT 5,
-    position_size_usd DECIMAL(10,2) NOT NULL DEFAULT 50.00,
-    spacing_multiplier DECIMAL(5,2) NOT NULL DEFAULT 1.0,
-    max_spread_pct DECIMAL(5,2) NOT NULL DEFAULT 2.0,
-    breakout_threshold_pct DECIMAL(5,2) NOT NULL DEFAULT 3.0,
-    active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Flow trading performance tracking
-CREATE TABLE flow_performance (
-    id SERIAL PRIMARY KEY,
-    symbol VARCHAR(20) NOT NULL,
-    strategy_type VARCHAR(20) NOT NULL, -- 'scalping' or 'grid_trading'
-    date DATE NOT NULL DEFAULT CURRENT_DATE,
-    total_pnl DECIMAL(20,8) DEFAULT 0,
+    strategy_type VARCHAR(50) NOT NULL, -- 'scalping', 'grid_trading', 'adaptive'
+    total_pnl DECIMAL(15, 8) DEFAULT 0.0,
     trades_count INTEGER DEFAULT 0,
-    win_rate DECIMAL(5,4) DEFAULT 0, -- 0.0 to 1.0
-    avg_profit DECIMAL(20,8) DEFAULT 0,
-    max_drawdown DECIMAL(20,8) DEFAULT 0,
-    total_volume DECIMAL(20,8) DEFAULT 0,
+    winning_trades INTEGER DEFAULT 0,
+    losing_trades INTEGER DEFAULT 0,
+    win_rate DECIMAL(5, 4) DEFAULT 0.0,
+    avg_trade_duration_minutes INTEGER DEFAULT 0,
+    max_drawdown_pct DECIMAL(8, 4) DEFAULT 0.0,
+    sharpe_ratio DECIMAL(8, 4) DEFAULT 0.0,
+    sortino_ratio DECIMAL(8, 4) DEFAULT 0.0,
+    profit_factor DECIMAL(8, 4) DEFAULT 0.0,
+    total_volume DECIMAL(20, 8) DEFAULT 0.0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Individual flow trading trades table
+CREATE TABLE IF NOT EXISTS flow_trades (
+    id SERIAL PRIMARY KEY,
+    symbol VARCHAR(20) NOT NULL,
+    strategy_type VARCHAR(50) NOT NULL,
+    trade_type VARCHAR(10) NOT NULL, -- 'LONG', 'SHORT'
+    entry_price DECIMAL(20, 8) NOT NULL,
+    exit_price DECIMAL(20, 8),
+    quantity DECIMAL(20, 8) NOT NULL,
+    pnl DECIMAL(15, 8) DEFAULT 0.0,
+    pnl_pct DECIMAL(8, 4) DEFAULT 0.0,
+    fees DECIMAL(15, 8) DEFAULT 0.0,
+    confidence_score DECIMAL(5, 4) DEFAULT 0.0,
+    ml_score DECIMAL(5, 4) DEFAULT 0.0,
+    entry_reason TEXT,
+    exit_reason VARCHAR(100),
+    duration_minutes INTEGER DEFAULT 0,
+    market_regime VARCHAR(50),
+    volatility_regime VARCHAR(50),
+    entry_time TIMESTAMP NOT NULL,
+    exit_time TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Grid trading specific performance table
+CREATE TABLE IF NOT EXISTS grid_performance (
+    id SERIAL PRIMARY KEY,
+    symbol VARCHAR(20) NOT NULL,
+    grid_id VARCHAR(100) NOT NULL,
+    center_price DECIMAL(20, 8) NOT NULL,
+    grid_spacing DECIMAL(20, 8) NOT NULL,
+    total_levels INTEGER NOT NULL,
+    active_levels INTEGER DEFAULT 0,
+    filled_levels INTEGER DEFAULT 0,
+    total_profit DECIMAL(15, 8) DEFAULT 0.0,
+    total_fees DECIMAL(15, 8) DEFAULT 0.0,
+    grid_efficiency_score DECIMAL(5, 4) DEFAULT 0.0,
+    uptime_minutes INTEGER DEFAULT 0,
+    rebalance_count INTEGER DEFAULT 0,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'active', -- 'active', 'stopped', 'completed'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ML model performance tracking
+CREATE TABLE IF NOT EXISTS ml_performance (
+    id SERIAL PRIMARY KEY,
+    model_type VARCHAR(50) NOT NULL, -- 'signal_generator', 'regime_detector', 'risk_predictor'
+    symbol VARCHAR(20),
+    prediction_type VARCHAR(50) NOT NULL,
+    predicted_value DECIMAL(10, 6),
+    actual_value DECIMAL(10, 6),
+    accuracy_score DECIMAL(5, 4),
+    confidence_score DECIMAL(5, 4),
+    feature_importance JSONB,
+    model_version VARCHAR(20),
+    prediction_time TIMESTAMP NOT NULL,
+    validation_time TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Risk metrics tracking
+CREATE TABLE IF NOT EXISTS risk_metrics (
+    id SERIAL PRIMARY KEY,
+    portfolio_var_1d DECIMAL(10, 6) DEFAULT 0.0,
+    portfolio_var_5d DECIMAL(10, 6) DEFAULT 0.0,
+    max_drawdown_pct DECIMAL(8, 4) DEFAULT 0.0,
+    sharpe_ratio DECIMAL(8, 4) DEFAULT 0.0,
+    sortino_ratio DECIMAL(8, 4) DEFAULT 0.0,
+    correlation_concentration DECIMAL(5, 4) DEFAULT 0.0,
+    total_exposure_usd DECIMAL(15, 2) DEFAULT 0.0,
+    total_exposure_pct DECIMAL(5, 4) DEFAULT 0.0,
+    active_strategies INTEGER DEFAULT 0,
+    stress_test_results JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Strategy configuration table
+CREATE TABLE IF NOT EXISTS strategy_configs (
+    id SERIAL PRIMARY KEY,
+    strategy_name VARCHAR(100) NOT NULL UNIQUE,
+    strategy_type VARCHAR(50) NOT NULL,
+    config_data JSONB NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance alerts table
+CREATE TABLE IF NOT EXISTS performance_alerts (
+    id SERIAL PRIMARY KEY,
+    alert_type VARCHAR(50) NOT NULL, -- 'performance_degradation', 'risk_breach', 'system_error'
+    severity VARCHAR(20) NOT NULL, -- 'low', 'medium', 'high', 'critical'
+    symbol VARCHAR(20),
+    strategy_type VARCHAR(50),
+    message TEXT NOT NULL,
+    alert_data JSONB,
+    is_resolved BOOLEAN DEFAULT false,
+    resolved_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- System health monitoring
+CREATE TABLE IF NOT EXISTS system_health (
+    id SERIAL PRIMARY KEY,
+    component_name VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL, -- 'healthy', 'degraded', 'failed'
+    cpu_usage_pct DECIMAL(5, 2),
+    memory_usage_pct DECIMAL(5, 2),
+    response_time_ms INTEGER,
+    error_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    uptime_minutes INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_flow_positions_symbol_strategy ON flow_positions(symbol, strategy_type);
-CREATE INDEX IF NOT EXISTS idx_flow_positions_status ON flow_positions(status);
-CREATE INDEX IF NOT EXISTS idx_flow_positions_created_at ON flow_positions(created_at);
-
-CREATE INDEX IF NOT EXISTS idx_strategy_switches_symbol ON strategy_switches(symbol);
-CREATE INDEX IF NOT EXISTS idx_strategy_switches_timestamp ON strategy_switches(timestamp);
-CREATE INDEX IF NOT EXISTS idx_strategy_switches_transition ON strategy_switches(from_strategy, to_strategy);
-
-CREATE INDEX IF NOT EXISTS idx_grid_configurations_symbol_active ON grid_configurations(symbol, active);
-CREATE INDEX IF NOT EXISTS idx_flow_performance_symbol_date ON flow_performance(symbol, date);
+CREATE INDEX IF NOT EXISTS idx_flow_performance_symbol_date ON flow_performance(symbol, created_at);
+CREATE INDEX IF NOT EXISTS idx_flow_trades_symbol_date ON flow_trades(symbol, entry_time);
+CREATE INDEX IF NOT EXISTS idx_flow_trades_strategy ON flow_trades(strategy_type, entry_time);
+CREATE INDEX IF NOT EXISTS idx_grid_performance_symbol ON grid_performance(symbol, start_time);
+CREATE INDEX IF NOT EXISTS idx_ml_performance_model_time ON ml_performance(model_type, prediction_time);
+CREATE INDEX IF NOT EXISTS idx_risk_metrics_date ON risk_metrics(created_at);
+CREATE INDEX IF NOT EXISTS idx_performance_alerts_type_date ON performance_alerts(alert_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_system_health_component_date ON system_health(component_name, created_at);
 
 -- Create triggers for updated_at timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -87,18 +158,6 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER flow_positions_updated_at
-    BEFORE UPDATE ON flow_positions
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER grid_configurations_updated_at
-    BEFORE UPDATE ON grid_configurations
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER flow_performance_updated_at
-    BEFORE UPDATE ON flow_performance
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
- 
+CREATE TRIGGER update_flow_performance_updated_at BEFORE UPDATE ON flow_performance FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_grid_performance_updated_at BEFORE UPDATE ON grid_performance FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_strategy_configs_updated_at BEFORE UPDATE ON strategy_configs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

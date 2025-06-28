@@ -209,7 +209,7 @@ const Performance = () => {
             color="text.secondary"
             sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
           >
-            Real-time signal tracking and adaptive learning insights
+            Track how signals from the Opportunities page perform in real market conditions
             {realTimeActive && !isMobile && (
               <Chip 
                 label="🔴 LIVE (3s)" 
@@ -218,6 +218,17 @@ const Performance = () => {
                 sx={{ ml: 2 }}
               />
             )}
+          </Typography>
+          <Typography 
+            variant="body2" 
+            color="info.main"
+            sx={{ 
+              fontSize: { xs: '0.75rem', sm: '0.875rem' },
+              fontStyle: 'italic',
+              mt: 0.5
+            }}
+          >
+            📊 Analytics dashboard showing success rates, golden signals, and live tracking of trading opportunities
           </Typography>
         </Box>
         

@@ -14,9 +14,11 @@ sys.path.insert(0, str(project_root))
 
 from src.api.main import app
 from src.api.websocket import set_websocket_components
+from src.api.routes import set_components
+from src.api.trading_routes.paper_trading_routes import initialize_paper_trading_engine, set_paper_engine
 from src.opportunity.opportunity_manager import OpportunityManager
 from src.signals.realtime_scalping_manager import RealtimeScalpingManager
-from src.api.trading_routes.flow_trading_routes import initialize_flow_trading_components
+from src.signals.enhanced_signal_tracker import EnhancedSignalTracker
 from src.market_data.exchange_client import ExchangeClient
 from src.risk.risk_manager import RiskManager
 from src.strategy.strategy_manager import StrategyManager
@@ -32,12 +34,14 @@ logger = logging.getLogger(__name__)
 # Global components
 opportunity_manager = None
 realtime_scalping_manager = None
+enhanced_signal_tracker = None
 flow_manager = None
 grid_engine = None
+paper_trading_engine = None
 
 async def initialize_all_components():
     """Initialize all trading components"""
-    global opportunity_manager, realtime_scalping_manager, flow_manager, grid_engine
+    global opportunity_manager, realtime_scalping_manager, enhanced_signal_tracker, flow_manager, grid_engine
     
     try:
         logger.info("🚀 Initializing trading components...")
@@ -63,40 +67,71 @@ async def initialize_all_components():
         opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager)
         logger.info("✅ Opportunity manager initialized")
         
+        # Initialize enhanced signal tracker
+        logger.info("Initializing enhanced signal tracker...")
+        enhanced_signal_tracker = EnhancedSignalTracker()
+        await enhanced_signal_tracker.initialize()
+        logger.info("✅ Enhanced signal tracker initialized")
+        
+        # Attach enhanced signal tracker to opportunity manager
+        if opportunity_manager:
+            opportunity_manager.enhanced_signal_tracker = enhanced_signal_tracker
+            logger.info("✅ Enhanced signal tracker attached to opportunity manager")
+        
         # Initialize realtime scalping manager
         logger.info("Initializing realtime scalping manager...")
         from src.api.connection_manager import ConnectionManager
         connection_manager = ConnectionManager()
         realtime_scalping_manager = RealtimeScalpingManager(opportunity_manager, exchange_client, connection_manager)
-        logger.info("✅ Realtime scalping manager initialized")
+        await realtime_scalping_manager.start()
+        logger.info("✅ Realtime scalping manager initialized and started")
         
-        # Initialize flow trading components
-        logger.info("Initializing flow trading components...")
+        # Initialize paper trading engine
+        logger.info("Initializing enhanced paper trading engine...")
         try:
-            flow_success = await initialize_flow_trading_components(
-                risk_manager, 
-                exchange_client, 
-                realtime_scalping_manager
+            # Load paper trading config with defaults
+            paper_config = config.get('paper_trading', {}) if config else {}
+            paper_config.setdefault('initial_balance', 10000.0)
+            paper_config.setdefault('enabled', True)
+            
+            paper_trading_engine = await initialize_paper_trading_engine(
+                {'paper_trading': paper_config}, 
+                exchange_client,
+                opportunity_manager
             )
             
-            if flow_success:
-                logger.info("✅ Flow trading components initialized")
-                
-                # Get references to initialized components
-                from src.api.trading_routes.flow_trading_routes import get_flow_manager
-                flow_manager = get_flow_manager()
-                logger.info(f"Flow manager retrieved: {flow_manager is not None}")
-                
+            if paper_trading_engine:
+                set_paper_engine(paper_trading_engine)
+                logger.info("🟢 Enhanced paper trading engine initialized")
             else:
-                logger.warning("⚠️ Flow trading initialization failed")
+                logger.warning("🟡 Paper trading engine initialization failed")
                 
         except Exception as e:
-            logger.error(f"❌ Flow trading initialization error: {e}")
+            logger.error(f"Paper trading engine initialization failed: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
         
-        # Set WebSocket dependencies
+        # Flow trading components are initialized via their router
+        logger.info("✅ Flow trading components ready")
+        
+        # Set WebSocket dependencies - PROPERLY pass all components
         set_websocket_components(
             opportunity_manager, 
-            realtime_scalping_manager
+            exchange_client,
+            enhanced_signal_tracker,
+            realtime_scalping_manager,
+            flow_manager,
+            grid_engine
+        )
+        
+        # Set components to routes
+        set_components(
+            opportunity_manager, 
+            exchange_client,
+            strategy_manager,
+            risk_manager,
+            realtime_scalping_manager,
+            enhanced_signal_tracker
         )
         
         logger.info("✅ All components initialized successfully!")
@@ -123,8 +158,9 @@ async def lifespan(app):
         # Cleanup components
         try:
             if realtime_scalping_manager:
-                realtime_scalping_manager.cleanup()
-                
+                await realtime_scalping_manager.stop()
+            if enhanced_signal_tracker:
+                await enhanced_signal_tracker.close()
         except Exception as e:
             logger.warning(f"Cleanup error: {e}")
 
@@ -158,4 +194,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main() 
+    main()

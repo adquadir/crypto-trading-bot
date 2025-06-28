@@ -141,3 +141,4 @@ class IntegratedProfitManager:
     def stop(self):
         """Wrapper method for API compatibility - calls stop_integrated_scraping"""
         self.stop_integrated_scraping()
+ 

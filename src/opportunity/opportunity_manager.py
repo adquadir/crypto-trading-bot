@@ -54,8 +54,8 @@ class OpportunityManager:
         
         # Initialize signal generator (simple fallback for now)
         self.signal_generator = None  # Will be initialized later if needed
-        self.last_scan_time = 0
-        self.scan_interval = 60  # Scan every 60 seconds for new opportunities
+        self.last_scan_time = time.time()  # FIX: Initialize to current time to avoid "stale" messages
+        self.scan_interval = 30  # Scan every 30 seconds for new opportunities (reduced from 60)
         self.last_opportunities = []  # Cache last opportunities
         self.direct_fetcher = DirectMarketDataFetcher()  # Direct API access
         
@@ -68,18 +68,23 @@ class OpportunityManager:
         # Check if we need to refresh opportunities
         current_time = time.time()
         if current_time - self.last_scan_time > self.scan_interval:
-            logger.info(f"Opportunities are stale (last scan: {int(current_time - self.last_scan_time)}s ago)")
-            # Return cached opportunities immediately, refresh will happen in background
-            if self.last_opportunities:
-                logger.info("Returning cached opportunities while refresh happens in background")
-                return self.last_opportunities
+            logger.info(f"Opportunities are stale (last scan: {int(current_time - self.last_scan_time)}s ago), triggering background refresh")
+            # Trigger background scan but return current data immediately
+            asyncio.create_task(self.scan_opportunities_incremental())
+            self.last_scan_time = current_time  # Update to prevent multiple concurrent scans
         
-                # Convert dict of opportunities to list format expected by frontend
+        # Convert dict of opportunities to list format expected by frontend
         opportunities = list(self.opportunities.values())
         if opportunities:
             self.last_opportunities = opportunities  # Cache for fast access
-
-        return opportunities
+            return opportunities
+        elif self.last_opportunities:
+            # Return cached opportunities if current dict is empty but cache exists
+            logger.info("Returning cached opportunities (current dict empty)")
+            return self.last_opportunities
+        else:
+            # No opportunities at all
+            return []
         
     async def scan_opportunities(self) -> None:
         """Scan for new trading opportunities using enhanced signal generator."""
@@ -183,6 +188,11 @@ class OpportunityManager:
             # Process symbols one by one with stability checks
             for i, symbol in enumerate(symbols_to_scan):
                 try:
+                    # CRITICAL FIX: Check if symbol already has a signal FIRST
+                    if symbol in self.opportunities:
+                        logger.debug(f"⏭️  Skipping {symbol} - already has signal in current scan")
+                        continue
+                    
                     # Check if we need to update this symbol's signal
                     should_update_signal = self._should_update_signal(symbol, current_time)
                     
@@ -570,17 +580,15 @@ class OpportunityManager:
                     if current_price <= take_profit:
                         return f"REAL take profit hit: {current_price:.6f} ≤ {take_profit:.6f}"
                 
-                # Signal is still valid - real market hasn't hit stops
-                return None
+                return None  # No invalidation
                 
             except Exception as e:
-                logger.debug(f"Could not get real market data for {symbol}: {e}")
-                # If we can't get real data, DON'T invalidate the signal
-                return None
+                logger.debug(f"Could not fetch real market data for {symbol}: {e}")
+                return None  # No invalidation if we can't get data
                 
         except Exception as e:
-            logger.error(f"Error checking real market invalidation for {symbol}: {e}")
-            return None  # Don't invalidate on error
+            logger.error(f"Error in real market invalidation check for {symbol}: {e}")
+            return None  # No invalidation on error
 
     def _is_signal_market_invalidated(self, signal: Dict[str, Any], symbol: str) -> Optional[str]:
         """
@@ -3051,14 +3059,27 @@ class OpportunityManager:
             adjusted_rr = adjusted_reward / adjusted_risk if adjusted_risk > 0 else 0
             
             # 📊 STEP 5: Comprehensive Validation Summary
-            # Final tradability check - ADJUSTED FOR 3% PRECISION TRADING
-            # Daily timeframes with high confidence can accept lower R/R ratios due to precision
-            min_rr_required = 0.8  # Reduced to 0.8 for high-confidence daily precision trading
+            # Final tradability check - ADJUSTED FOR SCALPING vs SWING TRADING
+            # Scalping signals need more lenient R/R due to quick execution with lower slippage impact
+            strategy = opportunity.get('strategy', '')
+            is_scalping = 'scalp' in strategy.lower() or opportunity.get('timeframe') == '15m'
+            
+            if is_scalping:
+                # More lenient requirements for scalping (quick execution, lower actual slippage)
+                min_rr_required = 0.5  # Scalping can accept lower R/R due to speed and frequency
+                min_move_required = 0.5  # Smaller moves acceptable for scalping
+                min_confidence_required = 0.65  # Higher confidence needed for scalping
+            else:
+                # Standard requirements for swing/daily trading
+                min_rr_required = 0.8  # Daily timeframes need higher R/R after slippage
+                min_move_required = 2.0  # Larger moves required for daily trading
+                min_confidence_required = 0.6  # Lower confidence acceptable for daily
+            
             tradable = (
                 volume_ratio >= 0.5 and
                 adjusted_rr >= min_rr_required and
-                adjusted_move >= 2.0 and
-                confidence >= 0.6
+                adjusted_move >= min_move_required and
+                confidence >= min_confidence_required
             )
             
             # 🎯 HIGH-CERTAINTY CLASSIFICATION ONLY FOR TRADABLE SIGNALS
@@ -3169,11 +3190,14 @@ class OpportunityManager:
                 certainty_factors = ["Failed validation"]
                 
                 if adjusted_rr < min_rr_required:
-                    opportunity['rejection_reason'] = f"Poor R:R after slippage ({adjusted_rr:.2f}:1, need {min_rr_required:.1f}:1)"
-                elif adjusted_move < 2.0:
-                    opportunity['rejection_reason'] = f"Move too small after slippage ({adjusted_move:.2f}%)"
+                    signal_type = "scalping" if is_scalping else "swing"
+                    opportunity['rejection_reason'] = f"Poor R:R after slippage for {signal_type} ({adjusted_rr:.2f}:1, need {min_rr_required:.1f}:1)"
+                elif adjusted_move < min_move_required:
+                    signal_type = "scalping" if is_scalping else "swing"
+                    opportunity['rejection_reason'] = f"Move too small for {signal_type} after slippage ({adjusted_move:.2f}%, need {min_move_required:.1f}%)"
                 else:
-                    opportunity['rejection_reason'] = f"Low confidence ({confidence*100:.0f}%)"
+                    signal_type = "scalping" if is_scalping else "swing"
+                    opportunity['rejection_reason'] = f"Low confidence for {signal_type} ({confidence*100:.0f}%, need {min_confidence_required*100:.0f}%)"
             
             # Add validation metadata with CERTAINTY CLASSIFICATION
             opportunity.update({

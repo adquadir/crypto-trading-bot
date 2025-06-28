@@ -121,14 +121,62 @@ class RealtimeScalpingManager:
         try:
             logger.debug("🔍 Scanning for fresh scalping opportunities...")
             
-            # Trigger scalping opportunity scan
-            await self.opportunity_manager.scan_scalping_opportunities()
+            # Get opportunities from the opportunity manager
+            opportunities = self.opportunity_manager.get_opportunities()
             
-            # Get fresh signals
-            if hasattr(self.opportunity_manager, 'scalping_opportunities'):
-                fresh_signals = self.opportunity_manager.scalping_opportunities
-            else:
-                fresh_signals = {}
+            if not opportunities:
+                logger.debug("No opportunities available from opportunity manager")
+                return
+            
+            # Filter for scalping criteria (high confidence >= 70%, optimized post-slippage R/R >= 0.5)
+            fresh_signals = {}
+            for opp in opportunities:
+                confidence = opp.get('confidence', 0)
+                # Use adjusted R/R ratio if available (post-slippage), otherwise fall back to original
+                risk_reward = opp.get('adjusted_rr_ratio', opp.get('risk_reward', 0))
+                tradable = opp.get('tradable', True)  # Only include tradable signals
+                
+                # Enhanced scalping filter: confidence >= 0.7, reasonable post-slippage R/R >= 0.5, and tradable
+                # Lower R/R threshold since validation now accounts for scalping-specific requirements
+                if confidence >= 0.7 and risk_reward >= 0.5 and tradable:
+                    # Generate stable signal ID based on CORE trading parameters only
+                    # This prevents duplicate signals for the same opportunity
+                    symbol = opp.get('symbol', 'UNKNOWN')
+                    direction = opp.get('direction', 'UNKNOWN')
+                    entry_price = opp.get('adjusted_entry', opp.get('entry_price', 0))
+                    
+                    # FIXED: Create stable ID based on symbol and direction only
+                    # Don't include strategy or entry price as they can vary slightly
+                    # This ensures one signal per symbol per direction
+                    signal_id = f"{symbol}_{direction}"
+                    
+                    # Transform to scalping signal format with adjusted values
+                    scalping_signal = {
+                        'symbol': opp.get('symbol', 'Unknown'),
+                        'direction': opp.get('direction', 'UNKNOWN'),
+                        'strategy': opp.get('strategy', 'Unknown'),
+                        'confidence': confidence,
+                        'risk_reward': risk_reward,
+                        # Use adjusted entry/exit prices if available for more accurate scalping
+                        'entry_price': opp.get('adjusted_entry', opp.get('entry_price', 0)),
+                        'stop_loss': opp.get('stop_loss', 0),
+                        'take_profit': opp.get('adjusted_take_profit', opp.get('take_profit', 0)),
+                        'expected_capital_return_pct': opp.get('expected_capital_return_pct', min(confidence * 10, 8.5)),
+                        'optimal_leverage': opp.get('optimal_leverage', min(confidence * 4, 3.0)),
+                        'scalping_type': 'momentum_scalp' if confidence >= 0.85 else 'mean_reversion_scalp',
+                        'timestamp': opp.get('timestamp', datetime.now().isoformat()),
+                        # Include validation data for transparency
+                        'tradable': tradable,
+                        'original_rr_ratio': opp.get('risk_reward', 0),
+                        'adjusted_rr_ratio': risk_reward,
+                        'expected_slippage_pct': opp.get('expected_slippage_pct', 0),
+                        'volume_score': opp.get('volume_score', 'Unknown'),
+                        'verdict': opp.get('verdict', 'Tradable')
+                    }
+                    
+                    fresh_signals[signal_id] = scalping_signal
+            
+            logger.info(f"🔍 Filtered {len(fresh_signals)} scalping signals from {len(opportunities)} opportunities")
             
             # Process new signals
             new_signals_count = 0
@@ -413,4 +461,15 @@ class RealtimeScalpingManager:
         logger.info("🔄 Forcing immediate signal refresh...")
         await self._generate_fresh_signals()
         await self._validate_active_signals()
-        await self._cleanup_expired_signals() 
+        await self._cleanup_expired_signals()
+
+    def cleanup(self):
+        """Cleanup method for graceful shutdown."""
+        logger.info("🧹 Cleaning up RealtimeScalpingManager...")
+        try:
+            # Stop the manager if running
+            if self.running:
+                asyncio.create_task(self.stop())
+            logger.info("✅ RealtimeScalpingManager cleanup completed")
+        except Exception as e:
+            logger.error(f"❌ Error during RealtimeScalpingManager cleanup: {e}")

@@ -207,10 +207,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 # Get real-time scalping signals
                 try:
+                    # Use the RealtimeScalpingManager (original architecture) not opportunity_manager
                     if realtime_scalping_manager:
-                        payload["scalping_signals"] = realtime_scalping_manager.get_active_signals()
-                        payload["scalping_summary"] = realtime_scalping_manager.get_signal_summary()
+                        scalping_signals = realtime_scalping_manager.get_active_signals()
+                        scalping_summary = realtime_scalping_manager.get_signal_summary()
+                        
+                        payload["scalping_signals"] = scalping_signals
+                        payload["scalping_summary"] = scalping_summary
                     else:
+                        # Fallback if RealtimeScalpingManager not initialized yet
                         payload["scalping_signals"] = []
                         payload["scalping_summary"] = {
                             "total_signals": 0,
@@ -220,9 +225,15 @@ async def websocket_endpoint(websocket: WebSocket):
                             "avg_age_minutes": 0
                         }
                 except Exception as e:
-                    logger.error(f"Error getting scalping signals: {e}")
+                    logger.error(f"Error getting real-time scalping signals: {e}")
                     payload["scalping_signals"] = []
-                    payload["scalping_summary"] = {}
+                    payload["scalping_summary"] = {
+                        "total_signals": 0,
+                        "avg_expected_return": 0,
+                        "high_priority_count": 0,
+                        "stale_signals_count": 0,
+                        "avg_age_minutes": 0
+                    }
                 
                 # Send the complete payload
                 await websocket.send_json({

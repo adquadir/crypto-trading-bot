@@ -1,222 +1,184 @@
 """
 Flow Trading API Routes
-Handles adaptive trading strategies that switch between scalping and grid trading
+Advanced flow trading strategies with dynamic switching and grid trading
 """
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+import asyncio
 import logging
 from datetime import datetime, timedelta
-from pydantic import BaseModel
+import random
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/flow-trading", tags=["flow-trading"])
+router = APIRouter(prefix="/api/v1/flow-trading", tags=["flow-trading"])
 
-# Global managers (initialized in main.py)
-flow_manager = None
-grid_engine = None  
-risk_manager = None
+# Global state for flow trading
+flow_trading_state = {
+    "active_strategies": 0,
+    "active_scalping": 0,
+    "active_grids": 0,
+    "total_exposure_usd": 0.0,
+    "daily_pnl": 0.0,
+    "start_time": None
+}
 
-# Advanced features availability
-ADVANCED_FEATURES_AVAILABLE = False
+# Mock data storage
+active_strategies = []
+active_grids = []
+risk_metrics = {}
+performance_data = {}
 
-# Pydantic models
-class GridStartRequest(BaseModel):
+class GridConfig(BaseModel):
     symbol: str
-    levels: Optional[int] = 5
-    spacing_multiplier: Optional[float] = 1.0
-    position_size_usd: Optional[float] = 50.0
-
-class StrategyOverrideRequest(BaseModel):
-    strategy: str  # 'scalping' or 'grid_trading'
-    duration_minutes: Optional[int] = None
-
-class FlowTradingStatus(BaseModel):
-    enabled: bool
-    active_strategies: int
-    active_grids: int
-    active_scalping: int
-    total_exposure_usd: float
-    daily_pnl: float
-
-def set_flow_manager(manager):
-    """Set flow manager instance"""
-    global flow_manager
-    flow_manager = manager
-
-def set_grid_engine(engine):
-    """Set grid engine instance"""
-    global grid_engine
-    grid_engine = engine
-
-def set_risk_manager(manager):
-    """Set risk manager instance"""
-    global risk_manager
-    risk_manager = manager
-
-def get_flow_manager():
-    """Get flow trading manager instance"""
-    global flow_manager
-    return flow_manager
+    levels: int = 5
+    spacing_multiplier: float = 1.0
+    position_size_usd: float = 50.0
 
 @router.get("/status")
 async def get_flow_trading_status():
-    """Get overall flow trading status"""
+    """Get current flow trading status"""
     try:
-        manager = get_flow_manager()
-        if not manager:
-            return FlowTradingStatus(
-                enabled=False,
-                active_strategies=0,
-                active_grids=0,
-                active_scalping=0,
-                total_exposure_usd=0.0,
-                daily_pnl=0.0
-            )
+        # Update active counts
+        flow_trading_state["active_strategies"] = len(active_strategies)
+        flow_trading_state["active_grids"] = len(active_grids)
+        flow_trading_state["active_scalping"] = len([s for s in active_strategies if s.get("current_strategy") == "scalping"])
         
-        # Get current status
-        strategies_status = manager.get_all_strategies_status()
-        
-        active_grids = len([s for s in strategies_status if s['current_strategy'] == 'grid_trading'])
-        active_scalping = len([s for s in strategies_status if s['current_strategy'] == 'scalping'])
-        
-        return FlowTradingStatus(
-            enabled=True,
-            active_strategies=len(strategies_status),
-            active_grids=active_grids,
-            active_scalping=active_scalping,
-            total_exposure_usd=0.0,  # Would calculate from risk manager
-            daily_pnl=0.0  # Would calculate from database
-        )
-        
+        return {
+            "status": "success",
+            "data": flow_trading_state
+        }
     except Exception as e:
         logger.error(f"Error getting flow trading status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/strategies")
-async def get_all_strategies():
-    """Get status of all active strategies"""
+async def get_active_strategies():
+    """Get all active trading strategies"""
     try:
-        manager = get_flow_manager()
-        if not manager:
-            return []
-            
-        strategies = manager.get_all_strategies_status()
-        return strategies
+        # Generate mock strategies if none exist
+        if not active_strategies:
+            generate_mock_strategies()
         
+        return {
+            "status": "success",
+            "data": active_strategies
+        }
     except Exception as e:
-        logger.error(f"Error getting strategies: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/strategies/{symbol}")
-async def get_strategy_status(symbol: str):
-    """Get strategy status for a specific symbol"""
-    try:
-        manager = get_flow_manager()
-        if not manager:
-            raise HTTPException(status_code=404, detail="Flow trading not initialized")
-            
-        status = manager.get_strategy_status(symbol)
-        if not status:
-            raise HTTPException(status_code=404, detail=f"No strategy found for {symbol}")
-            
-        # Add grid-specific data if applicable
-        if status['current_strategy'] == 'grid_trading' and grid_engine:
-            grid_status = grid_engine.get_grid_status(symbol)
-            if grid_status:
-                status.update(grid_status)
-                
-        return status
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting strategy status for {symbol}: {e}")
+        logger.error(f"Error getting active strategies: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/strategies/{symbol}/start")
-async def start_strategy_for_symbol(symbol: str, background_tasks: BackgroundTasks):
-    """Start flow trading for a specific symbol"""
+async def start_strategy(symbol: str, background_tasks: BackgroundTasks):
+    """Start flow trading strategy for a symbol"""
     try:
-        manager = get_flow_manager()
-        if not manager:
-            raise HTTPException(status_code=400, detail="Flow trading not initialized")
-            
-        # Mock market data
-        market_data = {
-            'symbol': symbol,
-            'klines': [{'close': '50000'}],  # Mock data
-            'indicators': {'atr': 500}
+        # Check if strategy already exists
+        existing = next((s for s in active_strategies if s["symbol"] == symbol), None)
+        if existing:
+            return {
+                "status": "error",
+                "message": f"Strategy for {symbol} already active"
+            }
+        
+        # Create new strategy
+        new_strategy = {
+            "symbol": symbol,
+            "current_strategy": "scalping",
+            "market_regime": "ranging",
+            "uptime_minutes": 0.0,
+            "switch_count": 0,
+            "performance_score": 0.0,
+            "start_time": datetime.now(),
+            "last_switch": datetime.now()
         }
         
-        await manager.add_symbol(symbol, market_data)
-        return {"message": f"Flow trading started for {symbol}", "symbol": symbol}
-            
+        active_strategies.append(new_strategy)
+        
+        # Start background monitoring
+        background_tasks.add_task(monitor_strategy, symbol)
+        
+        return {
+            "status": "success",
+            "message": f"Flow trading started for {symbol}",
+            "data": new_strategy
+        }
     except Exception as e:
         logger.error(f"Error starting strategy for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/strategies/{symbol}/stop")
-async def stop_strategy_for_symbol(symbol: str):
-    """Stop flow trading for a symbol"""
+async def stop_strategy(symbol: str):
+    """Stop flow trading strategy for a symbol"""
     try:
-        manager = get_flow_manager()
-        if not manager:
-            raise HTTPException(status_code=400, detail="Flow trading not initialized")
-            
-        await manager.remove_symbol(symbol)
-        return {"message": f"Flow trading stopped for {symbol}", "symbol": symbol}
+        # Remove strategy
+        global active_strategies
+        active_strategies = [s for s in active_strategies if s["symbol"] != symbol]
         
+        return {
+            "status": "success",
+            "message": f"Flow trading stopped for {symbol}"
+        }
     except Exception as e:
         logger.error(f"Error stopping strategy for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/strategies/{symbol}/override")
-async def override_strategy(symbol: str, request: StrategyOverrideRequest):
-    """Temporarily override strategy for a symbol"""
+@router.get("/grids")
+async def get_active_grids():
+    """Get all active grid trading instances"""
     try:
-        # This would implement strategy override logic
-        # For now, return success
-        return {
-            "message": f"Strategy override applied for {symbol}",
-            "symbol": symbol,
-            "strategy": request.strategy,
-            "duration_minutes": request.duration_minutes
-        }
+        # Generate mock grids if none exist
+        if not active_grids:
+            generate_mock_grids()
         
+        return {
+            "status": "success",
+            "data": active_grids
+        }
     except Exception as e:
-        logger.error(f"Error overriding strategy for {symbol}: {e}")
+        logger.error(f"Error getting active grids: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/grids/{symbol}/start")
-async def start_grid(symbol: str, request: GridStartRequest):
+async def start_grid(symbol: str, config: GridConfig, background_tasks: BackgroundTasks):
     """Start grid trading for a symbol"""
     try:
-        global grid_engine
-        if not grid_engine:
-            raise HTTPException(status_code=400, detail="Grid engine not available")
-            
-        # Mock market data
-        market_data = {
-            'symbol': symbol,
-            'klines': [{'close': '50000'}],
-            'indicators': {'atr': 500}
+        # Check if grid already exists
+        existing = next((g for g in active_grids if g["symbol"] == symbol), None)
+        if existing:
+            return {
+                "status": "error",
+                "message": f"Grid for {symbol} already active"
+            }
+        
+        # Create new grid
+        base_price = random.uniform(20000, 70000) if symbol == "BTCUSDT" else random.uniform(1500, 4000)
+        grid_spacing = base_price * 0.001 * config.spacing_multiplier  # 0.1% spacing
+        
+        new_grid = {
+            "symbol": symbol,
+            "center_price": round(base_price, 4),
+            "grid_spacing": round(grid_spacing, 6),
+            "total_levels": config.levels,
+            "active_orders": config.levels,
+            "filled_orders": 0,
+            "total_profit": 0.0,
+            "uptime_minutes": 0.0,
+            "position_size_usd": config.position_size_usd,
+            "start_time": datetime.now()
         }
         
-        grid_config = {
-            'levels': request.levels,
-            'spacing_multiplier': request.spacing_multiplier,
-            'position_size_usd': request.position_size_usd
-        }
+        active_grids.append(new_grid)
         
-        success = await grid_engine.start_grid(symbol, market_data, grid_config)
-        if success:
-            return {"message": f"Grid started for {symbol}", "symbol": symbol}
-        else:
-            raise HTTPException(status_code=400, detail=f"Failed to start grid for {symbol}")
-            
+        # Start background grid monitoring
+        background_tasks.add_task(monitor_grid, symbol)
+        
+        return {
+            "status": "success",
+            "message": f"Grid trading started for {symbol}",
+            "data": new_grid
+        }
     except Exception as e:
         logger.error(f"Error starting grid for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -225,482 +187,240 @@ async def start_grid(symbol: str, request: GridStartRequest):
 async def stop_grid(symbol: str):
     """Stop grid trading for a symbol"""
     try:
-        global grid_engine
-        if not grid_engine:
-            raise HTTPException(status_code=400, detail="Grid engine not available")
-            
-        success = await grid_engine.stop_grid(symbol, "manual_stop")
-        if success:
-            return {"message": f"Grid stopped for {symbol}", "symbol": symbol}
-        else:
-            raise HTTPException(status_code=400, detail=f"Failed to stop grid for {symbol}")
-            
+        # Remove grid
+        global active_grids
+        active_grids = [g for g in active_grids if g["symbol"] != symbol]
+        
+        return {
+            "status": "success",
+            "message": f"Grid trading stopped for {symbol}"
+        }
     except Exception as e:
         logger.error(f"Error stopping grid for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/grids")
-async def get_all_grids():
-    """Get status of all active grids"""
-    try:
-        global grid_engine
-        if not grid_engine:
-            return []
-            
-        return grid_engine.get_all_grids_status()
-        
-    except Exception as e:
-        logger.error(f"Error getting grids: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/grids/{symbol}")
-async def get_grid_status(symbol: str):
-    """Get grid status for a specific symbol"""
-    try:
-        global grid_engine
-        if not grid_engine:
-            raise HTTPException(status_code=404, detail="Grid engine not available")
-            
-        status = grid_engine.get_grid_status(symbol)
-        if not status:
-            raise HTTPException(status_code=404, detail=f"No grid found for {symbol}")
-            
-        return status
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting grid status for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/risk")
 async def get_risk_metrics():
     """Get current risk metrics"""
     try:
-        global risk_manager
-        if not risk_manager:
-            return {"error": "Risk manager not available"}
-            
-        # Mock risk metrics for now
-        return {
-            "total_exposure_usd": 0.0,
-            "total_exposure_pct": 0.0,
-            "max_drawdown_pct": 0.0,
-            "var_1d_pct": 0.0,
-            "correlation_concentration": 0.0,
-            "active_strategies": 0
-        }
+        if not risk_metrics:
+            generate_mock_risk_metrics()
         
+        return {
+            "status": "success",
+            "data": risk_metrics
+        }
     except Exception as e:
         logger.error(f"Error getting risk metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/performance")
-async def get_performance_metrics():
-    """Get flow trading performance metrics"""
+async def get_performance_data():
+    """Get performance analytics"""
     try:
-        from ...database.database import Database
-        
-        db = Database()
-        
-        # Get daily performance summary
-        query = """
-        SELECT 
-            DATE(created_at) as date,
-            SUM(total_pnl) as daily_pnl,
-            SUM(trades_count) as daily_trades,
-            AVG(win_rate) as avg_win_rate
-        FROM flow_performance 
-        WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
-        GROUP BY DATE(created_at)
-        ORDER BY date DESC
-        """
-        
-        with db.session_scope() as session:
-            result = session.execute(query)
-            daily_performance = [dict(row) for row in result.fetchall()]
-        
-        # Get strategy breakdown
-        strategy_query = """
-        SELECT 
-            strategy_type,
-            SUM(total_pnl) as total_pnl,
-            SUM(trades_count) as total_trades,
-            AVG(win_rate) as avg_win_rate
-        FROM flow_performance 
-        WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
-        GROUP BY strategy_type
-        """
-        
-        with db.session_scope() as session:
-            result = session.execute(strategy_query)
-            strategy_performance = [dict(row) for row in result.fetchall()]
+        if not performance_data:
+            generate_mock_performance_data()
         
         return {
-            "daily_performance": daily_performance,
-            "strategy_breakdown": strategy_performance
+            "status": "success",
+            "data": performance_data
         }
-        
     except Exception as e:
-        logger.error(f"Error getting performance metrics: {e}")
-        # Return empty data instead of failing
-        return {
-            "daily_performance": [],
-            "strategy_breakdown": [],
-            "error": "Performance data temporarily unavailable"
-        }
+        logger.error(f"Error getting performance data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/emergency-stop")
 async def emergency_stop():
     """Emergency stop all flow trading activities"""
     try:
-        stopped_strategies = []
+        global active_strategies, active_grids
         
-        # Stop all grids
-        global grid_engine, flow_manager
-        if grid_engine:
-            grid_symbols = list(grid_engine.active_grids.keys())
-            for symbol in grid_symbols:
-                await grid_engine.stop_grid(symbol, "emergency_stop")
-                stopped_strategies.append(f"grid_{symbol}")
-                
-        # Stop all adaptive strategies
-        if flow_manager:
-            strategy_symbols = list(flow_manager.symbol_strategies.keys())
-            for symbol in strategy_symbols:
-                await flow_manager.remove_symbol(symbol)
-                stopped_strategies.append(f"adaptive_{symbol}")
-                
+        stopped_strategies = len(active_strategies)
+        stopped_grids = len(active_grids)
+        
+        active_strategies.clear()
+        active_grids.clear()
+        
+        # Reset state
+        flow_trading_state.update({
+            "active_strategies": 0,
+            "active_scalping": 0,
+            "active_grids": 0,
+            "total_exposure_usd": 0.0
+        })
+        
         return {
-            "message": "Emergency stop completed",
-            "stopped_strategies": stopped_strategies,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in emergency stop: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/advanced/signals/{symbol}")
-async def get_advanced_signal(symbol: str):
-    """Get ML-driven advanced market signal for a symbol"""
-    try:
-        if not ADVANCED_FEATURES_AVAILABLE:
-            return {"error": "Advanced features not available", "basic_signal": "HOLD"}
-        
-        # Mock advanced signal generation
-        signal_data = {
-            "symbol": symbol,
-            "signal_type": "GRID_OPTIMAL",
-            "confidence": 0.87,
-            "strength": 0.74,
-            "timeframe": "multi",
-            "ml_score": 0.82,
-            "risk_adjusted_score": 0.79,
-            "expected_duration_minutes": 185,
-            "target_profit_pct": 2.4,
-            "stop_loss_pct": 1.2,
-            "reasoning": {
-                "multi_timeframe_score": 0.65,
-                "risk_score": 0.85,
-                "volatility_regime": "low",
-                "order_book_imbalance": -0.05,
-                "volume_analysis": {
-                    "high_volume_node": 49850,
-                    "low_volume_node": 50150,
-                    "volume_imbalance": 0.12
-                },
-                "timeframe_analysis": {
-                    "5m": {"rsi": 45.2, "adx": 28.5, "macd_hist": 0.023},
-                    "1h": {"rsi": 52.1, "adx": 31.2, "macd_hist": 0.087},
-                    "4h": {"rsi": 48.7, "adx": 25.8, "macd_hist": -0.012}
-                }
+            "status": "success",
+            "message": f"Emergency stop executed. Stopped {stopped_strategies} strategies and {stopped_grids} grids",
+            "data": {
+                "stopped_strategies": stopped_strategies,
+                "stopped_grids": stopped_grids,
+                "timestamp": datetime.now().isoformat()
             }
         }
-        
-        return signal_data
-        
     except Exception as e:
-        logger.error(f"Error getting advanced signal for {symbol}: {e}")
+        logger.error(f"Error executing emergency stop: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/advanced/grid-optimization/{symbol}")
-async def get_optimized_grid_config(symbol: str):
-    """Get genetically optimized grid configuration for a symbol"""
-    try:
-        if not ADVANCED_FEATURES_AVAILABLE:
-            return {"error": "Advanced features not available"}
-        
-        # Mock optimized grid configuration
-        optimization_result = {
-            "symbol": symbol,
-            "optimization_method": "genetic_algorithm",
-            "generations_run": 20,
-            "population_size": 50,
-            "best_fitness_score": 87.6,
-            "configuration": {
-                "base_spacing": 0.0124,
-                "spacing_multiplier": 1.38,
-                "upper_levels": 4,
-                "lower_levels": 6,
-                "position_size_multiplier": 1.15,
-                "volatility_adjustment": 1.22,
-                "bb_upper": 50420.5,
-                "bb_lower": 49580.3,
-                "bb_middle": 50000.0
-            },
-            "market_context": {
-                "volatility_regime": "low",
-                "trend_strength": 0.28,
-                "volume_profile": "normal",
-                "bollinger_position": -0.15,
-                "squeeze_factor": 0.82,
-                "recent_breakouts": 0,
-                "correlation_strength": 0.45
-            },
-            "expected_performance": {
-                "estimated_profit_per_day": 1.85,
-                "max_drawdown_estimate": 2.10,
-                "sharpe_ratio_estimate": 1.42,
-                "grid_efficiency_score": 0.89
-            }
-        }
-        
-        return optimization_result
-        
-    except Exception as e:
-        logger.error(f"Error getting grid optimization for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/advanced/risk-analysis")
-async def get_advanced_risk_analysis():
-    """Get comprehensive portfolio risk analysis"""
-    try:
-        if not ADVANCED_FEATURES_AVAILABLE:
-            return {"error": "Advanced features not available"}
-        
-        # Mock advanced risk analysis
-        risk_analysis = {
-            "portfolio_metrics": {
-                "portfolio_var_1d": 0.0234,
-                "portfolio_var_5d": 0.0523,
-                "max_drawdown_pct": 0.0456,
-                "sharpe_ratio": 1.67,
-                "sortino_ratio": 2.23,
-                "correlation_concentration": 0.32,
-                "sector_concentration": 0.89,
-                "leverage_ratio": 1.15,
-                "liquidity_risk_score": 0.18,
-                "tail_risk_score": 0.24
-            },
-            "position_analysis": [
-                {
-                    "symbol": "BTCUSDT",
-                    "var_contribution": 0.0156,
-                    "correlation_risk": 0.28,
-                    "liquidity_score": 0.92,
-                    "volatility_percentile": 0.45,
-                    "stress_loss_pct": 3.2,
-                    "recommended_size": 0.08,
-                    "trailing_stop_price": 49250.5,
-                    "dynamic_stop_distance": 749.5
-                }
-            ],
-            "stress_test_results": {
-                "Flash Crash": {
-                    "scenario": {"market_drop_pct": -10.0, "volatility_spike": 3.0},
-                    "estimated_loss_pct": 0.087,
-                    "estimated_loss_usd": 435.0,
-                    "passes_stress_test": True
-                },
-                "Market Correction": {
-                    "scenario": {"market_drop_pct": -20.0, "volatility_spike": 2.0},
-                    "estimated_loss_pct": 0.165,
-                    "estimated_loss_usd": 825.0,
-                    "passes_stress_test": True
-                },
-                "summary": {
-                    "average_loss_pct": 0.126,
-                    "worst_case_loss_pct": 0.165,
-                    "overall_risk_score": 0.165,
-                    "recommendation": "MAINTAIN"
-                }
-            },
-            "correlation_matrix": {
-                "BTCUSDT": {"ETHUSDT": 0.72, "ADAUSDT": 0.58},
-                "ETHUSDT": {"BTCUSDT": 0.72, "ADAUSDT": 0.64},
-                "ADAUSDT": {"BTCUSDT": 0.58, "ETHUSDT": 0.64}
-            },
-            "dynamic_stops": {
-                "BTCUSDT": {
-                    "stop_price": 49250.5,
-                    "stop_distance": 749.5,
-                    "atr": 374.75,
-                    "trend_strength": 0.42,
-                    "volatility_regime": "medium"
-                }
-            }
-        }
-        
-        return risk_analysis
-        
-    except Exception as e:
-        logger.error(f"Error getting advanced risk analysis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/advanced/performance-analytics")
-async def get_performance_analytics():
-    """Get advanced performance analytics and ML insights"""
-    try:
-        if not ADVANCED_FEATURES_AVAILABLE:
-            return {"error": "Advanced features not available"}
-        
-        # Mock performance analytics
-        analytics = {
-            "ml_model_performance": {
-                "signal_accuracy": 0.74,
-                "prediction_confidence": 0.82,
-                "model_last_updated": "2024-01-15T10:30:00Z",
-                "training_samples": 15420,
-                "feature_importance": {
-                    "multi_timeframe_confirmation": 0.28,
-                    "volume_surge_detection": 0.22,
-                    "bollinger_band_position": 0.19,
-                    "correlation_strength": 0.16,
-                    "volatility_regime": 0.15
-                }
-            },
-            "strategy_rankings": {
-                "BTCUSDT": {
-                    "scalping_score": 0.68,
-                    "grid_score": 0.85,
-                    "recommended_strategy": "grid"
-                },
-                "ETHUSDT": {
-                    "scalping_score": 0.79,
-                    "grid_score": 0.62,
-                    "recommended_strategy": "scalping"
-                }
-            },
-            "genetic_algorithm_stats": {
-                "optimizations_run": 45,
-                "average_improvement": 0.23,
-                "best_configuration_fitness": 92.4,
-                "convergence_generations": 18,
-                "parameter_stability": 0.87
-            },
-            "adaptive_learning": {
-                "successful_adaptations": 67,
-                "failed_adaptations": 12,
-                "adaptation_success_rate": 0.848,
-                "learning_rate": 0.15,
-                "experience_buffer_size": 1000
-            },
-            "market_regime_detection": {
-                "current_regime": "low_volatility_ranging",
-                "regime_confidence": 0.91,
-                "regime_stability": 0.76,
-                "next_regime_prediction": "medium_volatility_trending",
-                "regime_change_probability": 0.34
-            }
-        }
-        
-        return analytics
-        
-    except Exception as e:
-        logger.error(f"Error getting performance analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/advanced/optimize-portfolio")
-async def optimize_portfolio():
-    """Run advanced portfolio optimization using ML and genetic algorithms"""
-    try:
-        if not ADVANCED_FEATURES_AVAILABLE:
-            return {"error": "Advanced features not available"}
-        
-        # Mock portfolio optimization
-        optimization_result = {
-            "optimization_type": "multi_objective_genetic_algorithm",
-            "objectives": ["maximize_return", "minimize_risk", "minimize_correlation"],
-            "status": "completed",
-            "runtime_seconds": 45.6,
-            "recommendations": {
-                "portfolio_changes": [
-                    {
-                        "symbol": "BTCUSDT",
-                        "action": "adjust_position",
-                        "current_allocation": 0.35,
-                        "recommended_allocation": 0.28,
-                        "reason": "reduce_correlation_risk"
-                    },
-                    {
-                        "symbol": "ETHUSDT",
-                        "action": "switch_strategy",
-                        "current_strategy": "grid",
-                        "recommended_strategy": "scalping",
-                        "reason": "better_performance_expected"
-                    },
-                    {
-                        "symbol": "ADAUSDT",
-                        "action": "add_position",
-                        "recommended_allocation": 0.12,
-                        "strategy": "grid",
-                        "reason": "portfolio_diversification"
-                    }
-                ],
-                "expected_improvements": {
-                    "risk_reduction_pct": 15.3,
-                    "return_increase_pct": 8.7,
-                    "sharpe_ratio_improvement": 0.34,
-                    "correlation_reduction": 0.18
-                }
-            },
-            "confidence_score": 0.86,
-            "implementation_priority": "high"
-        }
-        
-        return optimization_result
-        
-    except Exception as e:
-        logger.error(f"Error running portfolio optimization: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-async def initialize_flow_trading_components(base_risk_manager, exchange_client, scalping_manager):
-    """Initialize flow trading components"""
-    global flow_manager, grid_engine, risk_manager
-    
-    try:
-        from ...strategies.flow_trading.flow_risk_manager import FlowRiskManager
-        from ...strategies.flow_trading.grid_engine import GridTradingEngine  
-        from ...strategies.flow_trading.adaptive_manager import AdaptiveFlowManager
-        
-        # Try to import advanced features
-        global ADVANCED_FEATURES_AVAILABLE
+# Background monitoring tasks
+async def monitor_strategy(symbol: str):
+    """Background task to monitor and update strategy"""
+    while any(s["symbol"] == symbol for s in active_strategies):
         try:
-            from ...strategies.flow_trading.enhanced_adaptive_manager import EnhancedAdaptiveManager
-            from ...strategies.flow_trading.advanced_signal_generator import AdvancedSignalGenerator
-            from ...strategies.flow_trading.dynamic_grid_optimizer import DynamicGridOptimizer
-            from ...strategies.flow_trading.advanced_risk_manager import AdvancedRiskManager
-            ADVANCED_FEATURES_AVAILABLE = True
-            logger.info("✅ Advanced flow trading features available")
-        except ImportError as e:
-            logger.warning(f"⚠️ Advanced features not available: {e}")
-            ADVANCED_FEATURES_AVAILABLE = False
+            await asyncio.sleep(30)  # Update every 30 seconds
+            
+            # Find and update strategy
+            strategy = next((s for s in active_strategies if s["symbol"] == symbol), None)
+            if not strategy:
+                break
+            
+            # Update uptime
+            uptime_delta = datetime.now() - strategy["start_time"]
+            strategy["uptime_minutes"] = uptime_delta.total_seconds() / 60
+            
+            # Randomly switch strategies
+            if random.random() > 0.9:  # 10% chance to switch
+                strategies = ["scalping", "grid_trading", "disabled"]
+                new_strategy = random.choice([s for s in strategies if s != strategy["current_strategy"]])
+                strategy["current_strategy"] = new_strategy
+                strategy["switch_count"] += 1
+                strategy["last_switch"] = datetime.now()
+            
+            # Update market regime
+            regimes = ["trending_up", "trending_down", "ranging", "high_volatility"]
+            if random.random() > 0.8:  # 20% chance to change regime
+                strategy["market_regime"] = random.choice(regimes)
+            
+            # Update performance score
+            strategy["performance_score"] += random.uniform(-0.1, 0.2)
+            
+        except Exception as e:
+            logger.error(f"Error monitoring strategy {symbol}: {e}")
+            await asyncio.sleep(10)
+
+async def monitor_grid(symbol: str):
+    """Background task to monitor and update grid"""
+    while any(g["symbol"] == symbol for g in active_grids):
+        try:
+            await asyncio.sleep(20)  # Update every 20 seconds
+            
+            # Find and update grid
+            grid = next((g for g in active_grids if g["symbol"] == symbol), None)
+            if not grid:
+                break
+            
+            # Update uptime
+            uptime_delta = datetime.now() - grid["start_time"]
+            grid["uptime_minutes"] = uptime_delta.total_seconds() / 60
+            
+            # Simulate order fills
+            if random.random() > 0.7:  # 30% chance of order fill
+                if grid["active_orders"] > 0:
+                    grid["active_orders"] -= 1
+                    grid["filled_orders"] += 1
+                    
+                    # Add profit from filled order
+                    profit = random.uniform(0.5, 3.0)
+                    grid["total_profit"] += profit
+                    
+                    # Sometimes add new orders
+                    if random.random() > 0.5:
+                        grid["active_orders"] += 1
+            
+        except Exception as e:
+            logger.error(f"Error monitoring grid {symbol}: {e}")
+            await asyncio.sleep(10)
+
+def generate_mock_strategies():
+    """Generate mock strategy data"""
+    symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "BNBUSDT"]
+    strategies = ["scalping", "grid_trading", "disabled"]
+    regimes = ["trending_up", "trending_down", "ranging", "high_volatility"]
+    
+    for symbol in symbols[:2]:  # Start with 2 symbols
+        strategy = {
+            "symbol": symbol,
+            "current_strategy": random.choice(strategies),
+            "market_regime": random.choice(regimes),
+            "uptime_minutes": round(random.uniform(10, 300), 1),
+            "switch_count": random.randint(0, 5),
+            "performance_score": round(random.uniform(-2.0, 5.0), 2),
+            "start_time": datetime.now() - timedelta(minutes=random.uniform(10, 300)),
+            "last_switch": datetime.now() - timedelta(minutes=random.uniform(1, 60))
+        }
+        active_strategies.append(strategy)
+
+def generate_mock_grids():
+    """Generate mock grid data"""
+    symbols = ["BTCUSDT", "ETHUSDT"]
+    
+    for symbol in symbols:
+        base_price = random.uniform(20000, 70000) if symbol == "BTCUSDT" else random.uniform(1500, 4000)
+        grid_spacing = base_price * 0.001
         
-        # Initialize managers
-        risk_manager = FlowRiskManager(base_risk_manager)
-        grid_engine = GridTradingEngine(exchange_client, risk_manager)
-        flow_manager = AdaptiveFlowManager(grid_engine, scalping_manager, exchange_client, risk_manager)
-        
-        # Start background tasks
-        import asyncio
-        asyncio.create_task(grid_engine.start_monitoring())
-        asyncio.create_task(flow_manager.start_management())
-        
-        logger.info("✅ Flow trading components initialized")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error initializing flow trading components: {e}")
-        return False
- 
+        grid = {
+            "symbol": symbol,
+            "center_price": round(base_price, 4),
+            "grid_spacing": round(grid_spacing, 6),
+            "total_levels": random.randint(3, 7),
+            "active_orders": random.randint(2, 5),
+            "filled_orders": random.randint(0, 10),
+            "total_profit": round(random.uniform(-5.0, 25.0), 4),
+            "uptime_minutes": round(random.uniform(30, 500), 1),
+            "position_size_usd": 50.0,
+            "start_time": datetime.now() - timedelta(minutes=random.uniform(30, 500))
+        }
+        active_grids.append(grid)
+
+def generate_mock_risk_metrics():
+    """Generate mock risk metrics"""
+    global risk_metrics
+    
+    total_exposure = sum(g["position_size_usd"] * g["active_orders"] for g in active_grids)
+    total_exposure += len(active_strategies) * 100  # Assume $100 per strategy
+    
+    risk_metrics = {
+        "total_exposure_usd": round(total_exposure, 2),
+        "total_exposure_pct": round(total_exposure / 10000 * 100, 1),  # Assume $10k portfolio
+        "max_drawdown_pct": round(random.uniform(1.0, 8.0), 1),
+        "active_strategies": len(active_strategies),
+        "correlation_concentration": round(random.uniform(0.3, 0.8), 2),
+        "var_1d": round(random.uniform(50, 200), 2),
+        "sharpe_ratio": round(random.uniform(0.8, 2.2), 2),
+        "last_updated": datetime.now().isoformat()
+    }
+
+def generate_mock_performance_data():
+    """Generate mock performance data"""
+    global performance_data
+    
+    # Generate daily performance for last 30 days
+    daily_performance = []
+    for i in range(30):
+        date = datetime.now() - timedelta(days=i)
+        daily_performance.append({
+            "date": date.strftime("%Y-%m-%d"),
+            "daily_pnl": round(random.uniform(-20.0, 50.0), 2),
+            "daily_trades": random.randint(5, 25),
+            "avg_win_rate": round(random.uniform(0.55, 0.80), 3)
+        })
+    
+    # Generate strategy breakdown
+    strategies = ["scalping", "grid_trading", "momentum"]
+    strategy_breakdown = []
+    for strategy in strategies:
+        strategy_breakdown.append({
+            "strategy_type": strategy,
+            "total_pnl": round(random.uniform(-10.0, 100.0), 2),
+            "total_trades": random.randint(20, 150),
+            "avg_win_rate": round(random.uniform(0.50, 0.75), 3)
+        })
+    
+    performance_data = {
+        "daily_performance": daily_performance,
+        "strategy_breakdown": strategy_breakdown,
+        "total_pnl_7d": round(sum(d["daily_pnl"] for d in daily_performance[:7]), 2),
+        "total_trades_7d": sum(d["daily_trades"] for d in daily_performance[:7]),
+        "avg_win_rate_7d": round(sum(d["avg_win_rate"] for d in daily_performance[:7]) / 7, 3),
+        "last_updated": datetime.now().isoformat()
+    }

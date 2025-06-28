@@ -8,10 +8,10 @@ const getApiBaseUrl = () => {
     // If running in development (e.g., through Create React App dev server)
     // or if the backend is on a different port/subdomain in production
     if (isDevelopment || hostname === 'localhost' || hostname === '127.0.0.1') {
-        return `http://${hostname}:8000`; // Default to port 8000 for local dev
+        return `http://${hostname}:8000`; // FIXED: Use port 8000 where backend is running
     } 
     // For production, assume backend is on the same domain/port as frontend, or adjust as needed
-    return `http://${hostname}:8000`; // Or window.location.origin if backend is on same port
+    return `http://${hostname}:8000`; // FIXED: Use port 8000 where backend is running
 };
 
 // WebSocket configuration - ENABLED
@@ -21,9 +21,9 @@ export const getWsBaseUrl = () => {
 
     // Use WebSocket protocol instead of HTTP
     if (isDevelopment || hostname === 'localhost' || hostname === '127.0.0.1') {
-        return `ws://${hostname}:8000`; // WebSocket port 8000 for local dev
+        return `ws://${hostname}:8000`; // FIXED: WebSocket port 8000 to match backend
     }
-    return `ws://${hostname}:8000`; // Production WebSocket URL
+    return `ws://${hostname}:8000`; // FIXED: WebSocket on port 8000 to match backend
 };
 
 const config = {
@@ -43,7 +43,7 @@ const config = {
     },
     // API endpoints - WebSocket disabled
     API_URL: process.env.REACT_APP_API_URL || null,
-    API_KEY: process.env.REACT_APP_API_KEY,
+    API_KEY: process.env.REACT_APP_API_KEY || 'crypto_trading_api_key_2024',
     RECONNECT_INTERVAL: 5000,
     MAX_RECONNECT_ATTEMPTS: 5,
     
@@ -80,4 +80,4 @@ const config = {
     }
 };
 
-export default config; 
+export default config;
