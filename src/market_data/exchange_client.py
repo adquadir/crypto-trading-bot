@@ -306,6 +306,9 @@ class ExchangeClient:
             # Initialize Binance clients first
             await self._init_client()
             
+            # Initialize exchange (ccxt) - CRITICAL for position fetching
+            await self._initialize_exchange()
+            
             # Initialize WebSocket connections
             symbols = self.config.get('symbols', ['BTCUSDT'])
             self.ws_manager = MarketDataWebSocket(self, symbols)

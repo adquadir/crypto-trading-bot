@@ -42,13 +42,6 @@ pytest-cov==4.1.0
 
 # Paper Trading & Flow Trading Dependencies
 dataclasses-json>=0.6.0      # 🔥 Enhanced dataclass serialization
-uuid                          # Position ID generation (built-in)
-asyncio                       # Async operations (built-in)
-logging                       # System logging (built-in)
-collections                   # Data structures (built-in)
-datetime                      # Time handling (built-in)
-json                          # JSON operations (built-in)
-traceback                     # Error tracking (built-in)
 
 # Optional ML & Analytics
 matplotlib>=3.7.0            # Plotting and visualization
