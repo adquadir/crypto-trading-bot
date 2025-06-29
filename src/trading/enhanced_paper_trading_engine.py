@@ -139,10 +139,10 @@ class EnhancedPaperTradingEngine:
         self.ml_training_data = []
         self.feature_history = defaultdict(deque)
         
-        # Risk management
-        self.max_position_size = self.config.get('max_position_size_pct', 0.02)  # 2% per position
-        self.max_total_exposure = self.config.get('max_total_exposure_pct', 0.10)  # 10% total
-        self.max_daily_loss = self.config.get('max_daily_loss_pct', 0.05)  # 5% daily loss limit
+        # Risk management - RELAXED FOR AGGRESSIVE PAPER TRADING
+        self.max_position_size = self.config.get('max_position_size_pct', 0.02)  # Keep 2% per position
+        self.max_total_exposure = self.config.get('max_total_exposure_pct', 1.0)  # 100% total exposure allowed
+        self.max_daily_loss = self.config.get('max_daily_loss_pct', 0.50)  # 50% daily loss limit
         
         logger.info("🟢 Enhanced Paper Trading Engine initialized")
     
@@ -528,7 +528,7 @@ class EnhancedPaperTradingEngine:
                 await asyncio.sleep(60)
     
     async def _get_fresh_opportunities(self) -> List[Dict[str, Any]]:
-        """Get fresh trading opportunities from opportunity manager"""
+        """Get fresh trading opportunities from opportunity manager - AGGRESSIVE FILTERING"""
         try:
             if not self.opportunity_manager:
                 return []
@@ -536,12 +536,12 @@ class EnhancedPaperTradingEngine:
             # Get current opportunities
             opportunities = self.opportunity_manager.get_opportunities()
             
-            # Filter for high-confidence opportunities suitable for paper trading
+            # Filter for opportunities suitable for aggressive paper trading
             fresh_opportunities = []
             for opp in opportunities:
-                # Only trade opportunities with confidence >= 0.7
-                if opp.get('confidence', 0) >= 0.7:
-                    # Check if we haven't already traded this signal recently
+                # Lower confidence threshold for more trades (reduced from 0.7 to 0.5)
+                if opp.get('confidence', 0) >= 0.5:
+                    # Check if we haven't already traded this signal recently (1 minute cooldown)
                     symbol = opp.get('symbol')
                     if not self._recently_traded_symbol(symbol):
                         fresh_opportunities.append(opp)
@@ -573,23 +573,19 @@ class EnhancedPaperTradingEngine:
             return None
     
     def _should_trade_signal(self, signal: Dict[str, Any]) -> bool:
-        """Determine if we should trade this signal"""
+        """Determine if we should trade this signal - AGGRESSIVE PAPER TRADING"""
         try:
             # Basic filters
             if not signal.get('symbol') or not signal.get('side'):
                 return False
             
-            # Confidence threshold
-            if signal.get('confidence', 0) < 0.7:
+            # Lower confidence threshold for more trades
+            if signal.get('confidence', 0) < 0.5:  # Reduced from 0.7 to 0.5
                 return False
             
-            # Don't trade if we already have a position in this symbol
-            symbol = signal['symbol']
-            for position in self.positions.values():
-                if position.symbol == symbol:
-                    return False
+            # REMOVED: One position per symbol limit - allow multiple positions
+            # REMOVED: Position count limits - take all validated signals
             
-            # No position limit - take all validated signals
             return True
             
         except Exception as e:
@@ -597,10 +593,10 @@ class EnhancedPaperTradingEngine:
             return False
     
     def _recently_traded_symbol(self, symbol: str) -> bool:
-        """Check if we recently traded this symbol"""
+        """Check if we recently traded this symbol - RELAXED COOLDOWN"""
         try:
-            # Check if we traded this symbol in the last 30 minutes
-            cutoff_time = datetime.utcnow() - timedelta(minutes=30)
+            # Check if we traded this symbol in the last 1 minute (reduced from 30 minutes)
+            cutoff_time = datetime.utcnow() - timedelta(minutes=1)
             
             for trade in reversed(self.completed_trades):
                 if trade.symbol == symbol and trade.entry_time >= cutoff_time:
