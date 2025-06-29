@@ -93,10 +93,11 @@ class PaperAccount:
 class EnhancedPaperTradingEngine:
     """Enhanced paper trading engine with ML integration"""
     
-    def __init__(self, config: Dict[str, Any], exchange_client=None, opportunity_manager=None):
+    def __init__(self, config: Dict[str, Any], exchange_client=None, opportunity_manager=None, profit_scraping_engine=None):
         self.config = config.get('paper_trading', {})
         self.exchange_client = exchange_client
         self.opportunity_manager = opportunity_manager
+        self.profit_scraping_engine = profit_scraping_engine  # NEW: Direct connection to profit scraping
         
         # Initialize database - MUST work, no fallbacks
         self.db = Database()
@@ -528,29 +529,89 @@ class EnhancedPaperTradingEngine:
                 await asyncio.sleep(60)
     
     async def _get_fresh_opportunities(self) -> List[Dict[str, Any]]:
-        """Get fresh trading opportunities from opportunity manager - AGGRESSIVE FILTERING"""
+        """Get fresh trading opportunities from PROFIT SCRAPING ENGINE"""
         try:
-            if not self.opportunity_manager:
+            # PRIORITY 1: Use profit scraping engine if available
+            if self.profit_scraping_engine and self.profit_scraping_engine.active:
+                logger.info("🎯 Getting opportunities from PROFIT SCRAPING ENGINE")
+                
+                # Get profit scraping opportunities (these are the magnet level opportunities)
+                scraping_opportunities = self.profit_scraping_engine.get_opportunities()
+                
+                fresh_opportunities = []
+                for symbol, opportunities in scraping_opportunities.items():
+                    for opp in opportunities:
+                        # Check if we haven't already traded this symbol recently
+                        if not self._recently_traded_symbol(symbol):
+                            # Convert profit scraping opportunity to our format
+                            converted_opp = self._convert_scraping_opportunity(opp, symbol)
+                            if converted_opp:
+                                fresh_opportunities.append(converted_opp)
+                
+                logger.info(f"🎯 Profit Scraping: Found {len(fresh_opportunities)} magnet level opportunities")
+                return fresh_opportunities
+            
+            # FALLBACK: Use opportunity manager if profit scraping not available
+            elif self.opportunity_manager:
+                logger.info("🎯 Fallback: Using opportunity manager (generic signals)")
+                
+                opportunities = self.opportunity_manager.get_opportunities()
+                
+                fresh_opportunities = []
+                for opp in opportunities:
+                    if opp.get('confidence', 0) >= 0.5:
+                        symbol = opp.get('symbol')
+                        if not self._recently_traded_symbol(symbol):
+                            fresh_opportunities.append(opp)
+                
+                return fresh_opportunities
+            
+            else:
+                logger.warning("🎯 No profit scraping engine OR opportunity manager available")
                 return []
-            
-            # Get current opportunities
-            opportunities = self.opportunity_manager.get_opportunities()
-            
-            # Filter for opportunities suitable for aggressive paper trading
-            fresh_opportunities = []
-            for opp in opportunities:
-                # Lower confidence threshold for more trades (reduced from 0.7 to 0.5)
-                if opp.get('confidence', 0) >= 0.5:
-                    # Check if we haven't already traded this signal recently (1 minute cooldown)
-                    symbol = opp.get('symbol')
-                    if not self._recently_traded_symbol(symbol):
-                        fresh_opportunities.append(opp)
-            
-            return fresh_opportunities
             
         except Exception as e:
             logger.error(f"Error getting fresh opportunities: {e}")
             return []
+    
+    def _convert_scraping_opportunity(self, opp: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+        """Convert profit scraping opportunity to paper trading format"""
+        try:
+            # Extract data from profit scraping opportunity structure
+            level = opp.get('level', {})
+            targets = opp.get('targets', {})
+            magnet_level = opp.get('magnet_level', {})
+            
+            # Determine trade direction based on level type
+            level_type = level.get('level_type', 'support')
+            side = 'LONG' if level_type == 'support' else 'SHORT'
+            
+            # Use the opportunity score as confidence
+            confidence = opp.get('opportunity_score', 0) / 100.0  # Convert 0-100 to 0-1
+            
+            # Create the opportunity in our expected format
+            converted = {
+                'symbol': symbol,
+                'side': side,
+                'confidence': confidence,
+                'strategy_type': 'profit_scraping',
+                'level_price': level.get('price', 0),
+                'profit_target': targets.get('profit_target', 0),
+                'stop_loss': targets.get('stop_loss', 0),
+                'level_strength': level.get('strength_score', 0),
+                'magnet_strength': magnet_level.get('strength', 0) if magnet_level else 0,
+                'entry_reason': f"magnet_level_{level_type}",
+                'market_regime': 'profit_scraping',
+                'volatility_regime': 'medium'
+            }
+            
+            logger.info(f"🎯 Converted profit scraping opportunity: {symbol} {side} @ {level.get('price', 0):.2f} (confidence: {confidence:.2f})")
+            
+            return converted
+            
+        except Exception as e:
+            logger.error(f"Error converting scraping opportunity: {e}")
+            return None
     
     def _convert_opportunity_to_signal(self, opportunity: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Convert opportunity to trading signal"""

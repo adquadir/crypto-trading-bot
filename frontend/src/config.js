@@ -39,7 +39,31 @@ const config = {
         OPPORTUNITIES: '/api/v1/opportunities',
         OPPORTUNITY_STATS: '/api/v1/opportunities/stats',
         SYMBOL_OPPORTUNITY: (symbol) => `/api/v1/opportunities/${symbol}`,
-        EXECUTE_MANUAL_TRADE: '/api/v1/execute_manual_trade'
+        EXECUTE_MANUAL_TRADE: '/api/v1/execute_manual_trade',
+        
+        // Profit Scraping endpoints
+        PROFIT_SCRAPING: {
+            STATUS: '/api/v1/profit-scraping/status',
+            START: '/api/v1/profit-scraping/start',
+            STOP: '/api/v1/profit-scraping/stop',
+            OPPORTUNITIES: '/api/v1/profit-scraping/opportunities',
+            ACTIVE_TRADES: '/api/v1/profit-scraping/active-trades',
+            RECENT_TRADES: '/api/v1/profit-scraping/trades/recent',
+            PERFORMANCE: '/api/v1/profit-scraping/performance',
+            LEVELS: (symbol) => `/api/v1/profit-scraping/levels/${symbol}`,
+            ANALYZE: (symbol) => `/api/v1/profit-scraping/analyze/${symbol}`
+        },
+        
+        // Paper Trading endpoints
+        PAPER_TRADING: {
+            STATUS: '/api/v1/paper-trading/status',
+            START: '/api/v1/paper-trading/start',
+            STOP: '/api/v1/paper-trading/stop',
+            POSITIONS: '/api/v1/paper-trading/positions',
+            PERFORMANCE: '/api/v1/paper-trading/performance',
+            TRADES: '/api/v1/paper-trading/trades',
+            ACCOUNT: '/api/v1/paper-trading/account'
+        }
     },
     // API endpoints - WebSocket disabled
     API_URL: process.env.REACT_APP_API_URL || null,

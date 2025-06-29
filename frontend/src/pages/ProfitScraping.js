@@ -103,9 +103,9 @@ const ProfitScraping = () => {
 
   const fetchScrapingStatus = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/profit-scraping/status`);
+      const response = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.PROFIT_SCRAPING.STATUS}`);
       const data = await response.json();
-      setScrapingStatus(data);
+      setScrapingStatus(data.status === 'success' ? data.data : data);
     } catch (err) {
       console.error('Failed to fetch scraping status:', err);
     }
@@ -113,7 +113,7 @@ const ProfitScraping = () => {
 
   const fetchRecentTrades = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/profit-scraping/trades/recent`);
+      const response = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.PROFIT_SCRAPING.RECENT_TRADES}`);
       const data = await response.json();
       setRecentTrades(data.trades || []);
     } catch (err) {
@@ -163,7 +163,7 @@ const ProfitScraping = () => {
 
   const handleStartScraping = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/profit-scraping/start`, {
+      const response = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.PROFIT_SCRAPING.START}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -186,7 +186,7 @@ const ProfitScraping = () => {
 
   const handleStopScraping = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/profit-scraping/stop`, {
+      const response = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.PROFIT_SCRAPING.STOP}`, {
         method: 'POST'
       });
       
@@ -589,8 +589,22 @@ const ProfitScraping = () => {
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom sx={{ mb: 3 }}>
         <SmartToy sx={{ mr: 1, verticalAlign: 'middle' }} />
-        Advanced Profit Scraping
+        Profit Scraping - REAL MONEY TRADING
       </Typography>
+
+      {/* Real Money Warning */}
+      <Alert severity="warning" sx={{ mb: 3 }}>
+        <Typography variant="h6" fontWeight="bold" gutterBottom>
+          ⚠️ REAL MONEY TRADING WARNING
+        </Typography>
+        <Typography variant="body2">
+          <strong>This page executes REAL trades with REAL money.</strong> Only use this after:
+          <br />• Testing extensively with Paper Trading first
+          <br />• Proving profitability in virtual environment
+          <br />• Setting up proper API keys and funding
+          <br />• Understanding all risks involved
+        </Typography>
+      </Alert>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

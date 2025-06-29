@@ -277,13 +277,19 @@ const PaperTrading = () => {
         </Grid>
       )}
 
-      {/* Trading Configuration */}
+      {/* Profit Scraping Strategy Configuration */}
       {status && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="h6" fontWeight="bold" gutterBottom>
-              💰 Trading Configuration
+              🎯 Profit Scraping Strategy (Virtual Testing)
             </Typography>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                <strong>Virtual Money Testing:</strong> This uses the sophisticated profit scraping strategy with magnet level detection, 
+                but with $10,000 virtual money. No real trades are executed.
+              </Typography>
+            </Alert>
             <Grid container spacing={3}>
               <Grid item xs={6} sm={3}>
                 <Box textAlign="center">
@@ -291,7 +297,7 @@ const PaperTrading = () => {
                     ${status.capital_per_position || 200}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Capital Per Position
+                    Virtual Capital Per Position
                   </Typography>
                 </Box>
               </Grid>
@@ -301,27 +307,27 @@ const PaperTrading = () => {
                     {status.leverage || 10}x
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Leverage
+                    Virtual Leverage
                   </Typography>
                 </Box>
               </Grid>
               <Grid item xs={6} sm={3}>
                 <Box textAlign="center">
                   <Typography variant="h6" color="info.main" fontWeight="bold">
-                    15%
+                    Magnet Levels
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Stop Loss
+                    Price Level Detection
                   </Typography>
                 </Box>
               </Grid>
               <Grid item xs={6} sm={3}>
                 <Box textAlign="center">
                   <Typography variant="h6" color="warning.main" fontWeight="bold">
-                    15%
+                    Statistical
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Take Profit
+                    Probability Analysis
                   </Typography>
                 </Box>
               </Grid>

@@ -568,18 +568,23 @@ async def paper_trading_health_check():
         }
 
 # Initialize paper trading engine
-async def initialize_paper_trading_engine(config, exchange_client=None, opportunity_manager=None):
-    """Initialize paper trading engine"""
+async def initialize_paper_trading_engine(config, exchange_client=None, opportunity_manager=None, profit_scraping_engine=None):
+    """Initialize paper trading engine with profit scraping integration"""
     try:
         global paper_engine
         
         paper_engine = EnhancedPaperTradingEngine(
             config=config,
             exchange_client=exchange_client,
-            opportunity_manager=opportunity_manager
+            opportunity_manager=opportunity_manager,
+            profit_scraping_engine=profit_scraping_engine  # NEW: Connect profit scraping engine
         )
         
-        logger.info("✅ Paper Trading Engine initialized and ready")
+        if profit_scraping_engine:
+            logger.info("✅ Paper Trading Engine initialized with PROFIT SCRAPING integration")
+        else:
+            logger.info("✅ Paper Trading Engine initialized (fallback to opportunity manager)")
+        
         return paper_engine
         
     except Exception as e:

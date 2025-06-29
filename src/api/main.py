@@ -41,10 +41,11 @@ realtime_scalping_manager = None
 enhanced_signal_tracker = None
 integrated_profit_manager = None
 paper_trading_engine = None
+profit_scraping_engine = None  # NEW: Profit scraping engine
 
 async def initialize_components():
     """Initialize all trading components in the background."""
-    global exchange_client, strategy_manager, risk_manager, opportunity_manager, config, realtime_scalping_manager, enhanced_signal_tracker, integrated_profit_manager, paper_trading_engine
+    global exchange_client, strategy_manager, risk_manager, opportunity_manager, config, realtime_scalping_manager, enhanced_signal_tracker, integrated_profit_manager, paper_trading_engine, profit_scraping_engine
     
     try:
         logger.info("Initializing components...")
@@ -133,7 +134,20 @@ async def initialize_components():
             logger.error(f"Realtime scalping manager initialization failed: {e}")
             realtime_scalping_manager = None
         
-        # Initialize enhanced paper trading engine
+        # Initialize profit scraping engine
+        logger.info("🎯 Initializing PROFIT SCRAPING ENGINE...")
+        try:
+            from src.strategies.profit_scraping.profit_scraping_engine import ProfitScrapingEngine
+            profit_scraping_engine = ProfitScrapingEngine(
+                exchange_client=exchange_client,
+                paper_trading_engine=None  # Will be set after paper trading engine is created
+            )
+            logger.info("🎯 Profit scraping engine initialized successfully")
+        except Exception as e:
+            logger.error(f"🎯 Profit scraping engine initialization failed: {e}")
+            profit_scraping_engine = None
+        
+        # Initialize enhanced paper trading engine WITH profit scraping
         logger.info("Initializing enhanced paper trading engine...")
         try:
             # Load paper trading config with defaults
@@ -144,7 +158,8 @@ async def initialize_components():
             paper_trading_engine = await initialize_paper_trading_engine(
                 {'paper_trading': paper_config}, 
                 exchange_client,  # Can be None
-                opportunity_manager  # Can be None
+                opportunity_manager,  # Can be None
+                profit_scraping_engine  # NEW: Connect profit scraping engine
             )
             
             if paper_trading_engine:
