@@ -3,7 +3,6 @@ import os
 from contextlib import contextmanager
 from typing import Generator, Optional, Dict, List, Any
 from datetime import datetime, timedelta
-import pandas as pd
 from sqlalchemy import create_engine, inspect, text, Column, Integer, String, Float, DateTime, Boolean, ForeignKey, JSON, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, scoped_session, relationship
@@ -252,4 +251,4 @@ def get_db():
 create_db_tables()
 add_initial_strategies()
 
-__all__ = ['Database', 'SessionLocal', 'init_db', 'db'] 
+__all__ = ['Database', 'SessionLocal', 'init_db', 'db']
