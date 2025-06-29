@@ -624,19 +624,18 @@ class EnhancedPaperTradingEngine:
             return None
     
     def _calculate_position_size(self, symbol: str, price: float, confidence: float) -> float:
-        """Calculate position size with 10x leverage applied"""
+        """Calculate position size with REAL Binance-style 10x leverage"""
         try:
-            # Base capital per position
-            base_capital = 200.0
-            
-            # Apply 10x leverage
+            # REAL LEVERAGE CALCULATION
+            margin_per_trade = 200.0  # Only $200 margin required per trade
             leverage = 10.0
-            leveraged_capital = base_capital * leverage  # $2,000 effective position size
+            notional_value = margin_per_trade * leverage  # $2,000 notional position
             
-            # Calculate position size based on leveraged capital
-            position_size = leveraged_capital / price
+            # Calculate crypto quantity based on notional value
+            position_size = notional_value / price
             
-            logger.info(f"💰 Position sizing: Base ${base_capital} × {leverage}x leverage = ${leveraged_capital} → {position_size:.6f} {symbol}")
+            logger.info(f"💰 REAL Leverage: Margin ${margin_per_trade} × {leverage}x = ${notional_value} notional → {position_size:.6f} {symbol}")
+            logger.info(f"💰 Risk: Only ${margin_per_trade} at risk (not ${notional_value})")
             
             return position_size
             
@@ -692,23 +691,50 @@ class EnhancedPaperTradingEngine:
         return sum(pos.unrealized_pnl for pos in self.positions.values())
     
     async def _check_risk_limits(self, symbol: str, price: float) -> bool:
-        """Check if trade passes risk limits"""
+        """Check if trade passes risk limits - WITH DETAILED LOGGING"""
         try:
+            logger.info(f"🔍 Risk Check for {symbol}: Starting detailed analysis...")
+            
             # Check daily loss limit
-            if self.account.daily_pnl < -self.account.balance * self.max_daily_loss:
+            daily_loss_limit = -self.account.balance * self.max_daily_loss
+            logger.info(f"🔍 Daily P&L: ${self.account.daily_pnl:.2f}, Limit: ${daily_loss_limit:.2f}")
+            
+            if self.account.daily_pnl < daily_loss_limit:
+                logger.warning(f"❌ REJECTED {symbol}: Daily loss limit exceeded (${self.account.daily_pnl:.2f} < ${daily_loss_limit:.2f})")
                 return False
             
-            # Check total exposure
-            current_exposure = sum(pos.quantity * pos.current_price for pos in self.positions.values())
+            # Check total MARGIN exposure (REAL leverage calculation)
+            current_margin_used = 0.0
+            for pos in self.positions.values():
+                # Each position uses $200 margin regardless of notional value
+                current_margin_used += 200.0  # Fixed $200 margin per position
+            
             max_exposure = self.account.balance * self.max_total_exposure
+            margin_per_trade = 200.0  # Only $200 margin required per trade
             
-            if current_exposure >= max_exposure:
+            logger.info(f"🔍 Current Margin Used: ${current_margin_used:.2f}")
+            logger.info(f"🔍 Max Exposure: ${max_exposure:.2f} ({self.max_total_exposure * 100:.0f}% of ${self.account.balance:.2f})")
+            logger.info(f"🔍 New Position Margin: ${margin_per_trade:.2f}")
+            logger.info(f"🔍 Total Margin After Trade: ${current_margin_used + margin_per_trade:.2f}")
+            logger.info(f"🔍 Active Positions: {len(self.positions)}")
+            logger.info(f"🔍 Max Possible Positions: {max_exposure / margin_per_trade:.0f}")
+            
+            # Check margin usage (this is the real constraint)
+            if current_margin_used >= max_exposure:
+                logger.warning(f"❌ REJECTED {symbol}: Margin limit exceeded (${current_margin_used:.2f} >= ${max_exposure:.2f})")
                 return False
             
+            # Check if new position would exceed margin limit
+            if (current_margin_used + margin_per_trade) > max_exposure:
+                logger.warning(f"❌ REJECTED {symbol}: New position would exceed margin limit (${current_margin_used + margin_per_trade:.2f} > ${max_exposure:.2f})")
+                logger.info(f"🔍 Note: With ${max_exposure:.2f} available, you can have {max_exposure/200:.0f} simultaneous positions")
+                return False
+            
+            logger.info(f"✅ PASSED {symbol}: All risk checks passed")
             return True
             
         except Exception as e:
-            logger.error(f"Error checking risk limits: {e}")
+            logger.error(f"❌ Error checking risk limits for {symbol}: {e}")
             return False
     
     def _update_strategy_performance(self, trade: PaperTrade):
