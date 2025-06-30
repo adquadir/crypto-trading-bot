@@ -14,6 +14,16 @@ from .price_level_analyzer import PriceLevelAnalyzer, PriceLevel
 from .magnet_level_detector import MagnetLevelDetector, MagnetLevel
 from .statistical_calculator import StatisticalCalculator, TradingTargets
 
+# Import ML learning service
+try:
+    from src.ml.ml_learning_service import get_ml_learning_service, TradeOutcome
+except ImportError:
+    async def get_ml_learning_service():
+        return None
+    
+    class TradeOutcome:
+        pass
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -374,17 +384,26 @@ class ProfitScrapingEngine:
                 else:  # SHORT
                     stop_hit = current_price >= trade.stop_loss
                 
-                # Check for time-based exit (max 60 minutes)
-                time_elapsed = (current_time - trade.entry_time).total_seconds() / 60
-                time_exit = time_elapsed > 60
+                # REMOVED: Arbitrary 60-minute time limit
+                # Real trading doesn't close profitable positions just because time passed
+                # Let positions run until they hit stop-loss or take-profit naturally
+                
+                # Optional: Add safety net for extremely long positions (24 hours)
+                # Only close if position is losing money to prevent runaway losses
+                time_elapsed = (current_time - trade.entry_time).total_seconds() / 3600  # Convert to hours
+                safety_time_exit = time_elapsed > 24 and (
+                    (trade.side == 'LONG' and current_price < trade.entry_price * 0.95) or
+                    (trade.side == 'SHORT' and current_price > trade.entry_price * 1.05)
+                )
                 
                 # Exit trade if any condition met
                 if profit_hit:
                     await self._close_trade(trade_id, "PROFIT_TARGET")
                 elif stop_hit:
                     await self._close_trade(trade_id, "STOP_LOSS")
-                elif time_exit:
-                    await self._close_trade(trade_id, "TIME_EXIT")
+                elif safety_time_exit:
+                    await self._close_trade(trade_id, "SAFETY_TIME_EXIT")
+                    logger.warning(f"⚠️ Closing losing position {trade_id} after 24 hours for safety")
             
         except Exception as e:
             logger.error(f"Error monitoring active trades: {e}")

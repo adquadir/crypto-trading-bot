@@ -18,6 +18,7 @@ from src.api.trading_routes.flow_trading_routes import router as flow_trading_ro
 from src.api.trading_routes.profit_scraping_routes import router as profit_scraping_router
 from src.api.trading_routes.signal_tracking_routes import router as signal_tracking_router
 from src.api.trading_routes.paper_trading_routes import router as paper_trading_router, initialize_paper_trading_engine, set_paper_engine
+from src.api.trading_routes.real_trading_routes import router as real_trading_router
 from src.api.backtesting_routes import router as backtesting_router
 from src.api.websocket import router as ws_router, set_websocket_components
 from src.api.trading_routes.trading import set_trading_components
@@ -246,6 +247,7 @@ def create_app():
     app.include_router(profit_scraping_router, prefix="/api/v1")
     app.include_router(signal_tracking_router, prefix="/api/v1")
     app.include_router(paper_trading_router, prefix="/api/v1")
+    app.include_router(real_trading_router, prefix="/api/v1")
     app.include_router(backtesting_router, prefix="/api/v1")
     app.include_router(ws_router)
 

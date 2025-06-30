@@ -13,6 +13,7 @@ from collections import defaultdict, deque
 import uuid
 
 from src.database.database import Database
+from src.utils.time_utils import format_duration
 
 # Import with fallbacks for optional dependencies
 try:
@@ -26,6 +27,15 @@ try:
 except ImportError:
     def get_monitor():
         return None
+
+try:
+    from src.ml.ml_learning_service import get_ml_learning_service, TradeOutcome
+except ImportError:
+    async def get_ml_learning_service():
+        return None
+    
+    class TradeOutcome:
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -337,9 +347,10 @@ class EnhancedPaperTradingEngine:
             # Remove position
             del self.positions[position_id]
             
-            # Log trade
+            # Log trade with formatted duration
+            duration_formatted = format_duration(trade.duration_minutes)
             logger.info(f"📉 Paper Trade Closed: {position.symbol} {position.side} @ {current_price:.4f} "
-                       f"P&L: {net_pnl:.2f} ({pnl_pct:.2%}) Duration: {trade.duration_minutes}m")
+                       f"P&L: {net_pnl:.2f} ({pnl_pct:.2%}) Duration: {duration_formatted}")
             
             # Store in database
             await self._store_trade(trade)
@@ -386,11 +397,16 @@ class EnhancedPaperTradingEngine:
                            (position.side == 'SHORT' and current_price <= position.take_profit):
                             positions_to_close.append((position_id, "take_profit"))
                     
-                    # Check maximum hold time (24 hours for scalping)
-                    if position.strategy_type == 'scalping':
-                        hold_time = datetime.utcnow() - position.entry_time
-                        if hold_time > timedelta(hours=24):
-                            positions_to_close.append((position_id, "max_time"))
+                    # REMOVED: Arbitrary 24-hour time limit
+                    # Real trading doesn't close profitable positions just because time passed
+                    # Let positions run until they hit stop-loss or take-profit naturally
+                    
+                    # Optional: Add safety net for extremely long positions (7 days)
+                    # Only close if position is losing money to prevent runaway losses
+                    hold_time = datetime.utcnow() - position.entry_time
+                    if hold_time > timedelta(days=7) and position.unrealized_pnl < 0:
+                        positions_to_close.append((position_id, "safety_time_limit"))
+                        logger.warning(f"⚠️ Closing losing position {position_id} after 7 days for safety")
                 
                 # Close positions
                 for position_id, reason in positions_to_close:
@@ -840,8 +856,9 @@ class EnhancedPaperTradingEngine:
             return None
     
     async def _collect_ml_data(self, trade: PaperTrade):
-        """Collect ML training data from completed trade"""
+        """Collect ML training data from completed trade and store in persistent ML service"""
         try:
+            # Store in memory for backward compatibility
             ml_data = {
                 'trade_id': trade.id,
                 'symbol': trade.symbol,
@@ -859,12 +876,98 @@ class EnhancedPaperTradingEngine:
             
             self.ml_training_data.append(ml_data)
             
-            # Keep only recent data
-            if len(self.ml_training_data) > 10000:
-                self.ml_training_data = self.ml_training_data[-5000:]
+            # Keep only recent data in memory
+            if len(self.ml_training_data) > 1000:
+                self.ml_training_data = self.ml_training_data[-500:]
+            
+            # NEW: Store in persistent ML learning service
+            try:
+                ml_service = await get_ml_learning_service()
+                if ml_service:
+                    # Extract features for ML learning
+                    features = await self._extract_trade_features(trade)
+                    
+                    # Create TradeOutcome for ML service
+                    trade_outcome = TradeOutcome(
+                        trade_id=trade.id,
+                        symbol=trade.symbol,
+                        strategy_type=trade.strategy_type,
+                        system_type='paper_trading',
+                        confidence_score=trade.confidence_score,
+                        ml_score=trade.ml_score,
+                        entry_price=trade.entry_price,
+                        exit_price=trade.exit_price,
+                        pnl_pct=trade.pnl_pct,
+                        duration_minutes=trade.duration_minutes,
+                        market_regime=trade.market_regime,
+                        volatility_regime=trade.volatility_regime,
+                        exit_reason=trade.exit_reason,
+                        success=trade.pnl > 0,
+                        features=features,
+                        entry_time=trade.entry_time,
+                        exit_time=trade.exit_time
+                    )
+                    
+                    # Store in persistent ML service
+                    await ml_service.store_trade_outcome(trade_outcome)
+                    logger.info(f"🧠 ML Learning: Stored trade outcome for {trade.symbol} (Paper Trading)")
+                    
+            except Exception as ml_error:
+                logger.error(f"Error storing ML data in persistent service: {ml_error}")
+                # Continue without ML service - paper trading should work regardless
             
         except Exception as e:
             logger.error(f"Error collecting ML data: {e}")
+    
+    async def _extract_trade_features(self, trade: PaperTrade) -> Dict[str, Any]:
+        """Extract comprehensive features from a completed trade for ML learning"""
+        try:
+            features = {
+                # Basic trade features
+                'entry_price': trade.entry_price,
+                'exit_price': trade.exit_price,
+                'price_change_pct': ((trade.exit_price - trade.entry_price) / trade.entry_price) * 100,
+                'trade_side': trade.side,
+                'quantity': trade.quantity,
+                'fees': trade.fees,
+                
+                # Performance features
+                'pnl': trade.pnl,
+                'pnl_pct': trade.pnl_pct,
+                'duration_minutes': trade.duration_minutes,
+                'exit_reason': trade.exit_reason,
+                
+                # Signal quality features
+                'confidence_score': trade.confidence_score,
+                'ml_score': trade.ml_score,
+                'entry_reason': trade.entry_reason,
+                
+                # Market context features
+                'market_regime': trade.market_regime,
+                'volatility_regime': trade.volatility_regime,
+                
+                # Timing features
+                'entry_hour': trade.entry_time.hour,
+                'entry_day_of_week': trade.entry_time.weekday(),
+                'exit_hour': trade.exit_time.hour,
+                'exit_day_of_week': trade.exit_time.weekday(),
+                
+                # Strategy features
+                'strategy_type': trade.strategy_type,
+                
+                # Success indicator
+                'was_profitable': trade.pnl > 0,
+                'hit_take_profit': trade.exit_reason == 'take_profit',
+                'hit_stop_loss': trade.exit_reason == 'stop_loss',
+                'manual_exit': trade.exit_reason == 'manual',
+                'time_exit': trade.exit_reason == 'max_time'
+            }
+            
+            return features
+            
+        except Exception as e:
+            logger.error(f"Error extracting trade features: {e}")
+            return {}
     
     async def _store_position(self, position: PaperPosition):
         """Store position in database"""

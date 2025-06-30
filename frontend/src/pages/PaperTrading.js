@@ -38,6 +38,7 @@ import {
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
+import { formatDuration } from '../utils/timeUtils';
 
 const PaperTrading = () => {
   const theme = useTheme();
@@ -393,47 +394,84 @@ const PaperTrading = () => {
                 📊 Live Virtual Positions
               </Typography>
               {positions?.length > 0 ? (
-                <TableContainer component={Paper} sx={{ maxHeight: 300 }}>
+                <TableContainer component={Paper} sx={{ maxHeight: 400, overflowX: 'auto' }}>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
                         <TableCell>Symbol</TableCell>
                         <TableCell>Side</TableCell>
+                        <TableCell align="right">Entry Price</TableCell>
+                        <TableCell align="right">Current Price</TableCell>
+                        <TableCell align="right">Price Change</TableCell>
                         <TableCell align="right">PnL</TableCell>
                         <TableCell align="right">Age</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {positions.map((position, index) => (
-                        <TableRow key={index}>
-                          <TableCell>{position.symbol}</TableCell>
-                          <TableCell>
-                            <Chip
-                              label={position.side}
-                              color={position.side === 'LONG' ? 'success' : 'error'}
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography
-                              variant="body2"
-                              color={getPnLColor(position.unrealized_pnl)}
-                              fontWeight="bold"
-                            >
-                              ${position.unrealized_pnl?.toFixed(2)}
-                              <br />
-                              <Typography variant="caption" component="span">
-                                ({position.unrealized_pnl_pct?.toFixed(1)}%)
+                      {positions.map((position, index) => {
+                        const priceChange = position.current_price && position.entry_price 
+                          ? ((position.current_price - position.entry_price) / position.entry_price) * 100
+                          : 0;
+                        const priceChangeColor = priceChange > 0 ? 'success.main' : priceChange < 0 ? 'error.main' : 'text.secondary';
+                        
+                        return (
+                          <TableRow key={index}>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight="bold">
+                                {position.symbol}
                               </Typography>
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography variant="caption">
-                              {Math.floor(position.age_minutes)}m
-                            </Typography>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={position.side}
+                                color={position.side === 'LONG' ? 'success' : 'error'}
+                                size="small"
+                              />
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2" fontWeight="bold">
+                                ${position.entry_price?.toFixed(4) || '0.0000'}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography 
+                                variant="body2" 
+                                fontWeight="bold"
+                                color={priceChangeColor}
+                              >
+                                ${position.current_price?.toFixed(4) || '0.0000'}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography
+                                variant="body2"
+                                color={priceChangeColor}
+                                fontWeight="bold"
+                              >
+                                {priceChange > 0 ? '+' : ''}{priceChange.toFixed(2)}%
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography
+                                variant="body2"
+                                color={getPnLColor(position.unrealized_pnl)}
+                                fontWeight="bold"
+                              >
+                                ${position.unrealized_pnl?.toFixed(2)}
+                                <br />
+                                <Typography variant="caption" component="span">
+                                  ({position.unrealized_pnl_pct?.toFixed(1)}%)
+                                </Typography>
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="caption">
+                                {formatDuration(position.age_minutes)}
+                              </Typography>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </TableContainer>

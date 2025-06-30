@@ -13,6 +13,8 @@ from dataclasses import dataclass, asdict
 from ..market_data.exchange_client import ExchangeClient
 from ..database.database import Database
 from ..utils.logger import setup_logger
+from ..utils.time_utils import format_duration
+from .trade_sync_service import TradeSyncService
 
 logger = setup_logger(__name__)
 
@@ -60,18 +62,22 @@ class RealTradingEngine:
         self.winning_trades = 0
         self.start_time = None
         
-        # Risk management settings
-        self.max_positions = 10  # Maximum concurrent positions
-        self.max_daily_loss = 1000.0  # Maximum daily loss in USD
-        self.max_position_size = 0.1  # Maximum position size as % of account
-        self.leverage = 10.0  # Fixed 10x leverage
+        # Real trading configuration - CONSERVATIVE FOR REAL MONEY
+        self.max_daily_loss = 500.0  # Conservative $500 daily loss limit for real money
+        self.position_size_usd = 200.0  # Fixed $200 per position (same as paper)
+        self.leverage = 10.0  # Fixed 10x leverage (same as paper)
+        self.max_total_exposure = 1.0  # 100% exposure like paper trading
         
-        # Safety controls
+        # Minimal safety controls (only essential ones)
         self.emergency_stop = False
         self.daily_pnl = 0.0
         self.last_reset_date = datetime.now().date()
         
-        logger.info("🚀 Real Trading Engine initialized")
+        # Manual trade learning
+        self.trade_sync_service = TradeSyncService(self.exchange_client)
+        self.last_sync_time = datetime.now()
+        
+        logger.info("🚀 Real Trading Engine initialized with Trade Sync Service")
     
     async def start_trading(self, symbols: List[str]) -> bool:
         """Start real trading for specified symbols"""
@@ -98,6 +104,11 @@ class RealTradingEngine:
             
             self.is_running = True
             self.start_time = datetime.now()
+            
+            # Start trade sync service for manual trade learning
+            if self.trade_sync_service:
+                await self.trade_sync_service.start_sync()
+                logger.info("🔄 Trade synchronization service started")
             
             logger.info(f"🚀 Real Trading started for {symbols}")
             logger.warning("⚠️  REAL MONEY TRADING IS NOW ACTIVE")
@@ -142,7 +153,7 @@ class RealTradingEngine:
                 return None
             
             # Safety checks
-            if not self._safety_checks(signal):
+            if not await self._safety_checks(signal):
                 return None
             
             symbol = signal['symbol']
@@ -191,6 +202,10 @@ class RealTradingEngine:
             
             # Store in database
             await self._store_position_in_db(position)
+            
+            # Register with trade sync service for manual trade learning
+            if self.trade_sync_service:
+                await self.trade_sync_service.register_system_trade(position_id, position.to_dict())
             
             self.total_trades += 1
             
@@ -254,13 +269,24 @@ class RealTradingEngine:
             # Update in database
             await self._update_position_in_db(position)
             
+            # Unregister with trade sync service
+            if self.trade_sync_service:
+                close_data = {
+                    'exit_price': current_price,
+                    'exit_time': position.exit_time,
+                    'pnl': pnl,
+                    'reason': reason
+                }
+                await self.trade_sync_service.unregister_system_trade(position_id, close_data)
+            
             # Remove from active positions
             del self.active_positions[position_id]
             
-            duration = (position.exit_time - position.entry_time).total_seconds() / 60
+            duration_minutes = int((position.exit_time - position.entry_time).total_seconds() / 60)
+            duration_formatted = format_duration(duration_minutes)
             
             logger.info(f"📉 Real Position Closed: {position.symbol} {position.side} @ ${current_price:.2f} "
-                       f"P&L: ${pnl:.2f} ({pnl_pct:.2f}%) Duration: {duration:.0f}m")
+                       f"P&L: ${pnl:.2f} ({pnl_pct:.2f}%) Duration: {duration_formatted}")
             logger.warning(f"💰 REAL MONEY: P&L ${pnl:.2f}")
             
             # Check for emergency stop conditions
@@ -272,24 +298,37 @@ class RealTradingEngine:
             logger.error(f"Error closing real position: {e}")
             return False
     
-    def _safety_checks(self, signal: Dict[str, Any]) -> bool:
-        """Comprehensive safety checks before executing real trades"""
+    async def _safety_checks(self, signal: Dict[str, Any]) -> bool:
+        """Safety checks using SAME logic as successful paper trading"""
         try:
-            # Check daily loss limit
-            if self.daily_pnl <= -self.max_daily_loss:
-                logger.error(f"❌ SAFETY: Daily loss limit reached: ${self.daily_pnl:.2f}")
-                self.emergency_stop = True
-                return False
-            
-            # Check maximum positions
-            if len(self.active_positions) >= self.max_positions:
-                logger.warning(f"❌ SAFETY: Maximum positions reached: {len(self.active_positions)}")
-                return False
-            
-            # Check signal confidence
+            # Check signal confidence (HIGH threshold like paper trading)
             confidence = signal.get('confidence', 0)
-            if confidence < 0.7:  # Require high confidence for real trading
+            if confidence < 0.7:  # HIGH threshold like successful paper trading
                 logger.warning(f"❌ SAFETY: Signal confidence too low: {confidence:.2f}")
+                return False
+            
+            # Check daily loss limit (same as paper trading)
+            daily_loss_limit = -self.max_daily_loss
+            if self.daily_pnl < daily_loss_limit:
+                logger.warning(f"❌ SAFETY: Daily loss limit exceeded: ${self.daily_pnl:.2f} < ${daily_loss_limit:.2f}")
+                return False
+            
+            # Check margin exposure (same logic as paper trading)
+            current_margin_used = len(self.active_positions) * 200.0  # $200 per position
+            
+            # Get account balance
+            try:
+                balance_info = await self.exchange_client.get_account_balance()
+                account_balance = balance_info.get('total', 10000.0) if balance_info else 10000.0
+            except:
+                account_balance = 10000.0  # Fallback
+            
+            max_exposure = account_balance * self.max_total_exposure
+            margin_per_trade = 200.0
+            
+            if (current_margin_used + margin_per_trade) > max_exposure:
+                logger.warning(f"❌ SAFETY: Margin limit exceeded: ${current_margin_used + margin_per_trade:.2f} > ${max_exposure:.2f}")
+                logger.info(f"🔍 Available margin: ${max_exposure:.2f}, can have {max_exposure/200:.0f} positions")
                 return False
             
             # Reset daily P&L if new day
@@ -308,15 +347,13 @@ class RealTradingEngine:
     def _calculate_position_size(self, symbol: str, price: float, confidence: float) -> float:
         """Calculate position size based on risk management"""
         try:
-            # Base position size (conservative for real trading)
-            base_size_usd = 100.0  # $100 base position
-            
-            # Adjust based on confidence
-            confidence_multiplier = min(confidence * 2, 1.5)  # Max 1.5x for high confidence
+            # Fixed $200 per position as requested
+            position_size_usd = self.position_size_usd  # $200 fixed
             
             # Calculate position size in base currency
-            position_size_usd = base_size_usd * confidence_multiplier
             position_size = position_size_usd / price
+            
+            logger.info(f"Position size calculated: ${position_size_usd} = {position_size:.6f} {symbol}")
             
             return position_size
             
@@ -345,37 +382,43 @@ class RealTradingEngine:
     async def _execute_exchange_order(self, symbol: str, side: str, size: float, price: float) -> bool:
         """Execute order on real exchange"""
         try:
-            # This would execute a real order on the exchange
-            # For safety, we'll simulate this for now
-            logger.warning("⚠️  SIMULATED: Real exchange order execution")
-            logger.warning(f"⚠️  Would execute: {side} {size:.6f} {symbol} @ ${price:.2f}")
+            logger.warning(f"🚨 EXECUTING REAL ORDER: {side} {size:.6f} {symbol} @ ${price:.2f}")
+            logger.warning(f"💰 REAL MONEY: ${size * price:.2f} notional value")
             
-            # In real implementation:
-            # order = await self.exchange_client.create_market_order(symbol, side, size)
-            # return order['id'] if order else False
+            # Execute real order on exchange
+            order = await self.exchange_client.create_market_order(symbol, side, size)
             
-            return True  # Simulated success
+            if order and order.get('id'):
+                logger.info(f"✅ Real order executed successfully: Order ID {order['id']}")
+                return True
+            else:
+                logger.error(f"❌ Failed to execute real order: {order}")
+                return False
             
         except Exception as e:
-            logger.error(f"Error executing exchange order: {e}")
+            logger.error(f"❌ Error executing real exchange order: {e}")
             return False
     
     async def _execute_close_order(self, position: RealPosition, price: float) -> bool:
         """Execute close order on real exchange"""
         try:
-            # This would close the real position on the exchange
-            logger.warning("⚠️  SIMULATED: Real exchange close order")
-            logger.warning(f"⚠️  Would close: {position.side} {position.position_size:.6f} {position.symbol} @ ${price:.2f}")
+            logger.warning(f"🚨 CLOSING REAL POSITION: {position.side} {position.position_size:.6f} {position.symbol} @ ${price:.2f}")
             
-            # In real implementation:
-            # close_side = 'SELL' if position.side == 'LONG' else 'BUY'
-            # order = await self.exchange_client.create_market_order(position.symbol, close_side, position.position_size)
-            # return order['id'] if order else False
+            # Determine close side (opposite of entry)
+            close_side = 'SELL' if position.side == 'LONG' else 'BUY'
             
-            return True  # Simulated success
+            # Execute real close order on exchange
+            order = await self.exchange_client.create_market_order(position.symbol, close_side, position.position_size)
+            
+            if order and order.get('id'):
+                logger.info(f"✅ Real position closed successfully: Order ID {order['id']}")
+                return True
+            else:
+                logger.error(f"❌ Failed to close real position: {order}")
+                return False
             
         except Exception as e:
-            logger.error(f"Error executing close order: {e}")
+            logger.error(f"❌ Error executing real close order: {e}")
             return False
     
     async def _store_position_in_db(self, position: RealPosition):
@@ -401,18 +444,13 @@ class RealTradingEngine:
             logger.error(f"Error updating position in database: {e}")
     
     async def _check_emergency_conditions(self):
-        """Check for emergency stop conditions"""
+        """Check for emergency stop conditions - MINIMAL CHECKS ONLY"""
         try:
-            # Check daily loss limit
-            if self.daily_pnl <= -self.max_daily_loss:
-                logger.error(f"🚨 EMERGENCY STOP: Daily loss limit exceeded: ${self.daily_pnl:.2f}")
-                self.emergency_stop = True
-                await self.stop_trading()
+            # NO LOSS LIMITS - removed as requested
+            # Only check for critical system errors or manual emergency stop
             
-            # Check total loss limit
-            if self.total_pnl <= -self.max_daily_loss * 5:  # 5x daily limit
-                logger.error(f"🚨 EMERGENCY STOP: Total loss limit exceeded: ${self.total_pnl:.2f}")
-                self.emergency_stop = True
+            if self.emergency_stop:
+                logger.error("🚨 EMERGENCY STOP: Manual emergency stop activated")
                 await self.stop_trading()
             
         except Exception as e:

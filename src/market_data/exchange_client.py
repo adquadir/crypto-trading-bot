@@ -207,6 +207,7 @@ class ExchangeClient:
         self.client = None
         self.futures_client = None
         self.exchange = None
+        self.ccxt_client = None  # Add this line to fix the missing attribute
         
         # Initialize WebSocket tracking
         self.ws_clients = {}
@@ -1245,3 +1246,78 @@ class ExchangeClient:
     async def get_ohlcv(self, symbol: str, timeframe: str = '1m', limit: int = 100) -> List[Dict]:
         """Alias for get_klines to maintain compatibility with other parts of the codebase."""
         return await self.get_klines(symbol=symbol, interval=timeframe, limit=limit)
+
+    async def get_recent_trades(self, symbol: str, since: datetime) -> List[Dict]:
+        """Get recent trades for a symbol since a specific time"""
+        try:
+            if not self.ccxt_client:
+                logger.error("CCXT client not initialized")
+                return []
+            
+            # Convert datetime to timestamp
+            since_timestamp = int(since.timestamp() * 1000)
+            
+            # Fetch recent trades using CCXT
+            trades = await asyncio.to_thread(
+                self.ccxt_client.fetch_my_trades,
+                symbol=symbol,
+                since=since_timestamp,
+                limit=100
+            )
+            
+            logger.debug(f"Fetched {len(trades)} recent trades for {symbol}")
+            return trades
+            
+        except Exception as e:
+            logger.error(f"Error fetching recent trades for {symbol}: {e}")
+            return []
+
+    async def get_current_price(self, symbol: str) -> Optional[float]:
+        """Get current price for a symbol"""
+        try:
+            ticker = await self.get_ticker_24h(symbol)
+            if ticker and 'lastPrice' in ticker:
+                return float(ticker['lastPrice'])
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting current price for {symbol}: {e}")
+            return None
+
+    async def create_market_order(self, symbol: str, side: str, amount: float) -> Optional[Dict]:
+        """Create a market order"""
+        try:
+            if not self.ccxt_client:
+                logger.error("CCXT client not initialized")
+                return None
+            
+            # Execute market order using CCXT
+            order = await asyncio.to_thread(
+                self.ccxt_client.create_market_order,
+                symbol=symbol,
+                side=side.lower(),
+                amount=amount
+            )
+            
+            logger.info(f"Market order created: {order.get('id')} - {side} {amount} {symbol}")
+            return order
+            
+        except Exception as e:
+            logger.error(f"Error creating market order: {e}")
+            return None
+
+    async def get_account_balance(self) -> Optional[Dict]:
+        """Get account balance"""
+        try:
+            if not self.ccxt_client:
+                logger.error("CCXT client not initialized")
+                return None
+            
+            # Fetch balance using CCXT
+            balance = await asyncio.to_thread(self.ccxt_client.fetch_balance)
+            
+            return balance
+            
+        except Exception as e:
+            logger.error(f"Error getting account balance: {e}")
+            return None
