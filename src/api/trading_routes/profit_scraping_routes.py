@@ -44,7 +44,7 @@ async def get_profit_scraping_engine():
             # Create profit scraping engine with REAL TRADING ENGINE
             profit_scraping_engine = ProfitScrapingEngine(
                 exchange_client=exchange_client,
-                trading_engine=real_trading_engine
+                real_trading_engine=real_trading_engine
             )
             
             logger.info("✅ Profit scraping engine initialized with REAL TRADING ENGINE")

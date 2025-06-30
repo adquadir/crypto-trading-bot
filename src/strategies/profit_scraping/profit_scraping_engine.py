@@ -71,9 +71,14 @@ class ActiveTrade:
 class ProfitScrapingEngine:
     """Main profit scraping engine"""
     
-    def __init__(self, exchange_client=None, paper_trading_engine=None):
+    def __init__(self, exchange_client=None, paper_trading_engine=None, real_trading_engine=None):
         self.exchange_client = exchange_client
         self.paper_trading_engine = paper_trading_engine
+        self.real_trading_engine = real_trading_engine
+        
+        # Determine which trading engine to use
+        self.trading_engine = real_trading_engine if real_trading_engine else paper_trading_engine
+        self.is_real_trading = real_trading_engine is not None
         
         # Core components
         self.level_analyzer = PriceLevelAnalyzer()
@@ -322,8 +327,52 @@ class ProfitScrapingEngine:
                 opportunity.targets, self.account_balance, self.max_risk_per_trade
             )
             
-            # Execute trade through paper trading engine
-            if self.paper_trading_engine:
+            # Get ML recommendation before executing trade
+            ml_service = await get_ml_learning_service()
+            if ml_service:
+                signal_data = {
+                    'strategy_type': 'profit_scraping',
+                    'confidence': opportunity.targets.confidence_score / 100.0,
+                    'market_regime': 'level_based',
+                    'volatility_regime': 'medium',
+                    'symbol': opportunity.symbol,
+                    'side': side
+                }
+                
+                recommendation = await ml_service.get_signal_recommendation(signal_data)
+                
+                if not recommendation.should_take_trade:
+                    logger.info(f"❌ ML recommendation: Skip trade for {opportunity.symbol} - {recommendation.reasoning}")
+                    return
+                
+                # Adjust position size based on ML recommendation
+                position_size *= recommendation.recommended_position_size / 0.01  # Scale based on ML recommendation
+                logger.info(f"🧠 ML recommendation: Take trade with adjusted confidence {recommendation.confidence_adjustment:+.2f}")
+            
+            # Execute trade through appropriate trading engine
+            trade_result = None
+            
+            if self.is_real_trading and self.real_trading_engine:
+                # REAL TRADING EXECUTION
+                logger.warning(f"🚨 EXECUTING REAL TRADE: {side} {opportunity.symbol} @ ${current_price:.2f}")
+                logger.warning(f"💰 REAL MONEY: Position size {position_size:.6f}")
+                
+                # Create signal for real trading engine
+                signal = {
+                    'symbol': opportunity.symbol,
+                    'side': side,
+                    'confidence': opportunity.targets.confidence_score / 100.0,
+                    'strategy_type': 'profit_scraping',
+                    'entry_price': current_price,
+                    'profit_target': opportunity.targets.profit_target,
+                    'stop_loss': opportunity.targets.stop_loss
+                }
+                
+                position_id = await self.real_trading_engine.execute_trade(signal)
+                trade_result = {'success': position_id is not None, 'position_id': position_id}
+                
+            elif self.paper_trading_engine:
+                # PAPER TRADING EXECUTION
                 trade_result = await self.paper_trading_engine.execute_trade(
                     symbol=opportunity.symbol,
                     side=side,
@@ -333,29 +382,30 @@ class ProfitScrapingEngine:
                     profit_target=opportunity.targets.profit_target,
                     stop_loss=opportunity.targets.stop_loss
                 )
+            
+            if trade_result and trade_result.get('success'):
+                # Track active trade
+                trade_id = trade_result.get('position_id', f"{opportunity.symbol}_{datetime.now().strftime('%H%M%S')}")
                 
-                if trade_result and trade_result.get('success'):
-                    # Track active trade
-                    trade_id = f"{opportunity.symbol}_{datetime.now().strftime('%H%M%S')}"
-                    
-                    active_trade = ActiveTrade(
-                        trade_id=trade_id,
-                        symbol=opportunity.symbol,
-                        side=side,
-                        entry_price=current_price,
-                        quantity=position_size,
-                        leverage=self.leverage,
-                        profit_target=opportunity.targets.profit_target,
-                        stop_loss=opportunity.targets.stop_loss,
-                        entry_time=datetime.now(),
-                        level_type=opportunity.level.level_type,
-                        confidence_score=opportunity.targets.confidence_score
-                    )
-                    
-                    self.active_trades[trade_id] = active_trade
-                    self.total_trades += 1
-                    
-                    logger.info(f"✅ Trade executed: {trade_id} - {side} {opportunity.symbol} @ ${current_price:.2f}")
+                active_trade = ActiveTrade(
+                    trade_id=trade_id,
+                    symbol=opportunity.symbol,
+                    side=side,
+                    entry_price=current_price,
+                    quantity=position_size,
+                    leverage=self.leverage,
+                    profit_target=opportunity.targets.profit_target,
+                    stop_loss=opportunity.targets.stop_loss,
+                    entry_time=datetime.now(),
+                    level_type=opportunity.level.level_type,
+                    confidence_score=opportunity.targets.confidence_score
+                )
+                
+                self.active_trades[trade_id] = active_trade
+                self.total_trades += 1
+                
+                trading_type = "REAL" if self.is_real_trading else "PAPER"
+                logger.info(f"✅ {trading_type} Trade executed: {trade_id} - {side} {opportunity.symbol} @ ${current_price:.2f}")
             
         except Exception as e:
             logger.error(f"Error executing trade: {e}")
@@ -432,6 +482,44 @@ class ProfitScrapingEngine:
                 self.total_profit += pnl_amount
                 if pnl_amount > 0:
                     self.winning_trades += 1
+                
+                # Store trade outcome in ML learning service
+                ml_service = await get_ml_learning_service()
+                if ml_service:
+                    duration_minutes = int((datetime.now() - trade.entry_time).total_seconds() / 60)
+                    
+                    trade_outcome = TradeOutcome(
+                        trade_id=trade_id,
+                        symbol=trade.symbol,
+                        strategy_type='profit_scraping',
+                        system_type='profit_scraping' if self.is_real_trading else 'paper_trading',
+                        confidence_score=trade.confidence_score / 100.0,
+                        ml_score=None,
+                        entry_price=trade.entry_price,
+                        exit_price=current_price,
+                        pnl_pct=leveraged_pnl_pct,
+                        duration_minutes=duration_minutes,
+                        market_regime='level_based',
+                        volatility_regime='medium',
+                        exit_reason=exit_reason,
+                        success=pnl_amount > 0,
+                        features={
+                            'level_type': trade.level_type,
+                            'leverage': trade.leverage,
+                            'profit_target': trade.profit_target,
+                            'stop_loss': trade.stop_loss,
+                            'side': trade.side
+                        },
+                        entry_time=trade.entry_time,
+                        exit_time=datetime.now()
+                    )
+                    
+                    await ml_service.store_trade_outcome(trade_outcome)
+                    logger.info(f"🧠 Trade outcome stored in ML learning service")
+                
+                # Close position in real trading engine if applicable
+                if self.is_real_trading and self.real_trading_engine:
+                    await self.real_trading_engine.close_position(trade_id, exit_reason)
                 
                 logger.info(f"🔚 Trade closed: {trade_id} - {exit_reason} - P&L: ${pnl_amount:.2f}")
             
