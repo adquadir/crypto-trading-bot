@@ -115,6 +115,11 @@ class EnhancedPaperTradingEngine:
         
         # Trading state
         self.is_running = False
+        
+        # Uptime tracking
+        self.start_time = None
+        self.total_uptime_seconds = 0.0
+        self.last_stop_time = None
         self.account = PaperAccount(
             balance=self.config.get('initial_balance', 10000.0),
             equity=self.config.get('initial_balance', 10000.0),
@@ -164,6 +169,7 @@ class EnhancedPaperTradingEngine:
             return
         
         self.is_running = True
+        self.start_time = datetime.utcnow()  # Record start time for uptime calculation
         logger.info("🚀 Paper Trading Engine started")
         
         # Load existing state
@@ -186,8 +192,32 @@ class EnhancedPaperTradingEngine:
     
     def stop(self):
         """Stop paper trading engine"""
+        if self.is_running and self.start_time:
+            # Accumulate uptime before stopping
+            session_uptime = (datetime.utcnow() - self.start_time).total_seconds()
+            self.total_uptime_seconds += session_uptime
+            self.last_stop_time = datetime.utcnow()
+        
         self.is_running = False
+        self.start_time = None
         logger.info("🛑 Paper Trading Engine stopped")
+    
+    def get_uptime_hours(self) -> float:
+        """Get current uptime in hours"""
+        try:
+            current_session_seconds = 0.0
+            
+            # Add current session time if running
+            if self.is_running and self.start_time:
+                current_session_seconds = (datetime.utcnow() - self.start_time).total_seconds()
+            
+            # Total uptime = accumulated + current session
+            total_seconds = self.total_uptime_seconds + current_session_seconds
+            return total_seconds / 3600.0  # Convert to hours
+            
+        except Exception as e:
+            logger.error(f"Error calculating uptime: {e}")
+            return 0.0
     
     async def execute_trade(self, signal: Dict[str, Any]) -> Optional[str]:
         """Execute a paper trade based on signal"""

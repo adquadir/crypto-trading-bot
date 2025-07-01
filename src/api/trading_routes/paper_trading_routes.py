@@ -67,7 +67,7 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
                     "total_return_pct": ((account_status['account']['balance'] - 10000.0) / 10000.0) * 100,
                     "win_rate_pct": account_status['account']['win_rate'] * 100,
                     "completed_trades": account_status['account']['total_trades'],
-                    "uptime_hours": 0.0,
+                    "uptime_hours": engine.get_uptime_hours(),
                     "strategy_performance": account_status['strategy_performance']
                 }
             }
@@ -86,7 +86,7 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
                 "total_return_pct": ((account_status['account']['balance'] - 10000.0) / 10000.0) * 100,
                 "win_rate_pct": account_status['account']['win_rate'] * 100,
                 "completed_trades": account_status['account']['total_trades'],
-                "uptime_hours": 0.0,
+                "uptime_hours": engine.get_uptime_hours(),
                 "strategy_performance": account_status['strategy_performance']
             }
         }
@@ -119,7 +119,7 @@ async def stop_paper_trading():
                 "total_return_pct": ((account_status['account']['balance'] - 10000.0) / 10000.0) * 100,
                 "win_rate_pct": account_status['account']['win_rate'] * 100,
                 "completed_trades": account_status['account']['total_trades'],
-                "uptime_hours": 0.0,
+                "uptime_hours": engine.get_uptime_hours(),
                 "strategy_performance": account_status['strategy_performance']
             }
         }
@@ -143,7 +143,7 @@ async def get_paper_trading_status():
                     "total_return_pct": 0.0,
                     "win_rate_pct": 0.0,
                     "completed_trades": 0,
-                    "uptime_hours": 0.0,
+                    "uptime_hours": engine.get_uptime_hours() if engine else 0.0,
                     "strategy_performance": {}
                 }
             }
@@ -162,7 +162,7 @@ async def get_paper_trading_status():
                 "active_positions": account_status['account']['active_positions'],
                 "leverage": account_status['account']['leverage'],
                 "capital_per_position": account_status['account']['capital_per_position'],
-                "uptime_hours": 0.0,
+                "uptime_hours": engine.get_uptime_hours(),
                 "strategy_performance": account_status['strategy_performance']
             }
         }
