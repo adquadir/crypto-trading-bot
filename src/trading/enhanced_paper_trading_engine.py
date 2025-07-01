@@ -751,43 +751,46 @@ class EnhancedPaperTradingEngine:
             return 0.0
     
     def _calculate_stop_loss(self, entry_price: float, side: str, symbol: str) -> float:
-        """Calculate stop loss price at 15% to avoid false negatives"""
+        """Calculate stop loss price for PROFIT SCRAPING (0.3-1%)"""
         try:
-            # 15% stop loss - gives more room for temporary reversals
-            stop_loss_pct = 0.15
+            # PROFIT SCRAPING: Use tight stop loss for quick exits
+            stop_loss_pct = 0.005  # 0.5% stop loss for profit scraping
             
             if side == 'LONG':
                 sl_price = entry_price * (1 - stop_loss_pct)
             else:  # SHORT
                 sl_price = entry_price * (1 + stop_loss_pct)
             
-            logger.info(f"🛡️ Stop Loss: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({stop_loss_pct:.1%})")
+            logger.info(f"🛡️ PROFIT SCRAPING Stop Loss: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({stop_loss_pct:.1%})")
             return sl_price
                 
         except Exception as e:
             logger.error(f"Error calculating stop loss: {e}")
-            # Fallback to default
-            stop_loss_pct = 0.15
+            # Fallback to profit scraping default
+            stop_loss_pct = 0.005
             if side == 'LONG':
                 return entry_price * (1 - stop_loss_pct)
             else:
                 return entry_price * (1 + stop_loss_pct)
     
     def _calculate_take_profit(self, entry_price: float, side: str, symbol: str) -> float:
-        """Calculate take profit price"""
+        """Calculate take profit price for PROFIT SCRAPING (0.5-1%)"""
         try:
-            # 15% take profit
-            profit_target_pct = 0.15
+            # PROFIT SCRAPING: Use small profit targets for quick gains
+            profit_target_pct = 0.008  # 0.8% take profit for profit scraping
             
             if side == 'LONG':
-                return entry_price * (1 + profit_target_pct)
+                tp_price = entry_price * (1 + profit_target_pct)
             else:  # SHORT
-                return entry_price * (1 - profit_target_pct)
+                tp_price = entry_price * (1 - profit_target_pct)
+            
+            logger.info(f"🎯 PROFIT SCRAPING Take Profit: {side} @ {entry_price:.4f} → TP @ {tp_price:.4f} ({profit_target_pct:.1%})")
+            return tp_price
                 
         except Exception as e:
             logger.error(f"Error calculating take profit: {e}")
-            # Fallback to default
-            profit_target_pct = 0.15
+            # Fallback to profit scraping default
+            profit_target_pct = 0.008
             if side == 'LONG':
                 return entry_price * (1 + profit_target_pct)
             else:

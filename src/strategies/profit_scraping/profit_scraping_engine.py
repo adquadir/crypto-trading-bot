@@ -291,18 +291,35 @@ class ProfitScrapingEngine:
             logger.error(f"Error checking entry conditions for {symbol}: {e}")
     
     async def _validate_entry_conditions(self, opportunity: ScrapingOpportunity, current_price: float) -> bool:
-        """Validate additional entry conditions"""
+        """Validate additional entry conditions with TREND AWARENESS"""
         try:
-            # Check if we're approaching from the right direction
             level = opportunity.level
+            symbol = opportunity.symbol
+            
+            # CRITICAL FIX: Add trend-aware filtering
+            market_trend = await self._detect_market_trend(symbol)
             
             if level.level_type == 'support':
-                # For support, we want price coming down to the level
-                # Simple check: current price should be close to or at the level
+                # TREND CHECK: Don't go long at support in strong downtrends
+                if market_trend == 'strong_downtrend':
+                    logger.info(f"❌ TREND FILTER: Skipping LONG {symbol} - strong downtrend detected")
+                    return False
+                
+                # Validate support is holding (bounce confirmation)
+                if not await self._validate_support_bounce(symbol, level.price, current_price):
+                    logger.info(f"❌ SUPPORT VALIDATION: {symbol} support not confirmed")
+                    return False
+                
+                # Price approach validation
                 return current_price <= level.price * 1.005  # Within 0.5% above
             
             elif level.level_type == 'resistance':
-                # For resistance, we want price coming up to the level
+                # TREND CHECK: Don't go short at resistance in strong uptrends
+                if market_trend == 'strong_uptrend':
+                    logger.info(f"❌ TREND FILTER: Skipping SHORT {symbol} - strong uptrend detected")
+                    return False
+                
+                # Price approach validation
                 return current_price >= level.price * 0.995  # Within 0.5% below
             
             return True
@@ -434,14 +451,33 @@ class ProfitScrapingEngine:
                 else:  # SHORT
                     stop_hit = current_price >= trade.stop_loss
                 
-                # REMOVED: Arbitrary 60-minute time limit
-                # Real trading doesn't close profitable positions just because time passed
-                # Let positions run until they hit stop-loss or take-profit naturally
+                # PROFIT SCRAPING: Add time-based exits for quick scalping
+                time_elapsed_minutes = (current_time - trade.entry_time).total_seconds() / 60
                 
-                # Optional: Add safety net for extremely long positions (24 hours)
-                # Only close if position is losing money to prevent runaway losses
-                time_elapsed = (current_time - trade.entry_time).total_seconds() / 3600  # Convert to hours
-                safety_time_exit = time_elapsed > 24 and (
+                # Quick exit conditions for profit scraping
+                quick_exit = False
+                exit_reason_time = ""
+                
+                # Exit after 15 minutes if flat or slightly losing
+                if time_elapsed_minutes > 15:
+                    if trade.side == 'LONG':
+                        price_change_pct = (current_price - trade.entry_price) / trade.entry_price
+                    else:  # SHORT
+                        price_change_pct = (trade.entry_price - current_price) / trade.entry_price
+                    
+                    # Exit if flat or losing after 15 minutes
+                    if price_change_pct <= 0.002:  # Less than 0.2% profit
+                        quick_exit = True
+                        exit_reason_time = "TIME_EXIT_FLAT"
+                
+                # Force exit after 60 minutes regardless (profit scraping shouldn't hold this long)
+                elif time_elapsed_minutes > 60:
+                    quick_exit = True
+                    exit_reason_time = "TIME_EXIT_MAX"
+                
+                # Safety net for extremely long positions (24 hours) - only if losing
+                time_elapsed_hours = time_elapsed_minutes / 60
+                safety_time_exit = time_elapsed_hours > 24 and (
                     (trade.side == 'LONG' and current_price < trade.entry_price * 0.95) or
                     (trade.side == 'SHORT' and current_price > trade.entry_price * 1.05)
                 )
@@ -451,6 +487,9 @@ class ProfitScrapingEngine:
                     await self._close_trade(trade_id, "PROFIT_TARGET")
                 elif stop_hit:
                     await self._close_trade(trade_id, "STOP_LOSS")
+                elif quick_exit:
+                    await self._close_trade(trade_id, exit_reason_time)
+                    logger.info(f"⏰ Profit scraping time exit: {trade_id} after {time_elapsed_minutes:.1f} minutes - {exit_reason_time}")
                 elif safety_time_exit:
                     await self._close_trade(trade_id, "SAFETY_TIME_EXIT")
                     logger.warning(f"⚠️ Closing losing position {trade_id} after 24 hours for safety")
@@ -626,3 +665,77 @@ class ProfitScrapingEngine:
         except Exception as e:
             logger.error(f"Error getting levels for {symbol}: {e}")
             return {'price_levels': [], 'magnet_levels': []}
+    
+    async def _detect_market_trend(self, symbol: str) -> str:
+        """Detect market trend for trend-aware filtering"""
+        try:
+            # Get recent price data
+            historical_data = await self.level_analyzer._get_historical_data(symbol, self.exchange_client)
+            if historical_data is None or len(historical_data) < 20:
+                return 'neutral'
+            
+            # Calculate moving averages
+            recent_prices = historical_data['close'].tail(20).astype(float)
+            sma_5 = recent_prices.tail(5).mean()
+            sma_10 = recent_prices.tail(10).mean()
+            sma_20 = recent_prices.tail(20).mean()
+            
+            current_price = recent_prices.iloc[-1]
+            
+            # Determine trend strength
+            if sma_5 > sma_10 > sma_20 and current_price > sma_5 * 1.02:
+                return 'strong_uptrend'
+            elif sma_5 < sma_10 < sma_20 and current_price < sma_5 * 0.98:
+                return 'strong_downtrend'
+            elif sma_5 > sma_10 and current_price > sma_10:
+                return 'uptrend'
+            elif sma_5 < sma_10 and current_price < sma_10:
+                return 'downtrend'
+            else:
+                return 'neutral'
+                
+        except Exception as e:
+            logger.error(f"Error detecting market trend for {symbol}: {e}")
+            return 'neutral'
+    
+    async def _validate_support_bounce(self, symbol: str, support_level: float, current_price: float) -> bool:
+        """Validate that support level is actually holding with bounce confirmation"""
+        try:
+            # Get recent price data
+            historical_data = await self.level_analyzer._get_historical_data(symbol, self.exchange_client)
+            if historical_data is None or len(historical_data) < 10:
+                return True  # Default to allow if no data
+            
+            # Check recent 10 periods for bounce behavior
+            recent_data = historical_data.tail(10)
+            tolerance = support_level * 0.005  # 0.5% tolerance
+            
+            # Look for recent touches of this support level
+            touches = 0
+            bounces = 0
+            
+            for _, row in recent_data.iterrows():
+                low_price = float(row['low'])
+                high_price = float(row['high'])
+                
+                # Check if price touched support level
+                if low_price <= support_level + tolerance and low_price >= support_level - tolerance:
+                    touches += 1
+                    
+                    # Check if it bounced (high is significantly above support)
+                    if high_price > support_level * 1.003:  # At least 0.3% bounce
+                        bounces += 1
+            
+            # Require at least 1 recent touch with bounce, or no recent touches (fresh level)
+            if touches == 0:
+                return True  # Fresh level, allow
+            elif touches > 0 and bounces > 0:
+                bounce_rate = bounces / touches
+                return bounce_rate >= 0.5  # At least 50% bounce rate
+            else:
+                logger.info(f"❌ Support validation failed: {symbol} @ {support_level:.2f} - {touches} touches, {bounces} bounces")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error validating support bounce for {symbol}: {e}")
+            return True  # Default to allow on error
