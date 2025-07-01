@@ -226,7 +226,7 @@ async def get_active_positions():
 
 @router.get("/performance")
 async def get_performance_analytics():
-    """Get detailed performance analytics"""
+    """Get detailed performance analytics with FIXED daily performance calculation"""
     try:
         engine = get_paper_engine()
         if not engine:
@@ -243,43 +243,80 @@ async def get_performance_analytics():
         # Generate REAL daily performance from actual trades
         daily_performance = []
         
-        # Get trades from the last 7 days
-        end_date = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        # Get current date in UTC
+        now_utc = datetime.utcnow()
+        today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        for i in range(7):
-            day_start = end_date - timedelta(days=i)
+        # Generate last 7 days including today
+        for i in range(6, -1, -1):  # 6, 5, 4, 3, 2, 1, 0 (today)
+            day_start = today_start - timedelta(days=i)
             day_end = day_start + timedelta(days=1)
             
-            # Get trades for this day
-            day_trades = [
-                t for t in account_status['recent_trades'] 
-                if day_start <= datetime.fromisoformat(t['exit_time'].replace('Z', '+00:00').replace('+00:00', '')) < day_end
-            ]
+            # Get trades for this day with better datetime handling
+            day_trades = []
+            for trade in account_status['recent_trades']:
+                try:
+                    # Handle different datetime formats
+                    exit_time_str = trade.get('exit_time', '')
+                    if exit_time_str:
+                        # Parse datetime more robustly
+                        if 'T' in exit_time_str:
+                            # ISO format
+                            exit_time = datetime.fromisoformat(exit_time_str.replace('Z', '+00:00').replace('+00:00', ''))
+                        else:
+                            # Try other formats
+                            exit_time = datetime.strptime(exit_time_str, '%Y-%m-%d %H:%M:%S')
+                        
+                        # Check if trade is in this day
+                        if day_start <= exit_time < day_end:
+                            day_trades.append(trade)
+                except Exception as parse_error:
+                    logger.warning(f"Could not parse trade exit_time '{exit_time_str}': {parse_error}")
+                    continue
             
             # Calculate real daily P&L and trade count
-            daily_pnl = sum(t.get('pnl', 0) for t in day_trades)
+            daily_pnl = sum(float(t.get('pnl', 0)) for t in day_trades)
             trade_count = len(day_trades)
+            
+            # Format day for display
+            day_display = day_start.strftime('%Y-%m-%d')
             
             daily_performance.append({
                 "timestamp": day_start.isoformat(),
-                "daily_pnl": daily_pnl,
-                "total_trades": trade_count
+                "date": day_display,
+                "daily_pnl": round(daily_pnl, 2),
+                "total_trades": trade_count,
+                "is_today": i == 0  # Mark today for frontend
             })
+            
+            logger.info(f"Daily performance {day_display}: ${daily_pnl:.2f} from {trade_count} trades")
         
-        # Reverse to show oldest to newest
-        daily_performance.reverse()
+        # Add current day's active positions P&L if it's today
+        if daily_performance and daily_performance[-1]["is_today"]:
+            # Add unrealized P&L from active positions to today's performance
+            active_pnl = sum(float(pos.get('unrealized_pnl', 0)) for pos in account_status['positions'].values())
+            daily_performance[-1]["daily_pnl"] += active_pnl
+            daily_performance[-1]["includes_unrealized"] = True
+            logger.info(f"Added ${active_pnl:.2f} unrealized P&L to today's performance")
         
         return {
             "status": "success",
             "data": {
                 "daily_performance": daily_performance,
                 "account_performance": account,
-                "strategy_performance": account_status['strategy_performance']
+                "strategy_performance": account_status['strategy_performance'],
+                "debug_info": {
+                    "total_recent_trades": len(account_status['recent_trades']),
+                    "active_positions": len(account_status['positions']),
+                    "calculation_time": now_utc.isoformat()
+                }
             }
         }
         
     except Exception as e:
+        import traceback
         logger.error(f"Error getting performance analytics: {e}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/account")
