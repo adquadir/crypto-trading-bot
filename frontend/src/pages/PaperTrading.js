@@ -34,7 +34,8 @@ import {
   SmartToy as AIIcon,
   Timeline as TimelineIcon,
   AccountBalance as BalanceIcon,
-  Speed as SpeedIcon
+  Speed as SpeedIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -51,6 +52,7 @@ const PaperTrading = () => {
   const [loading, setLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState(null);
+  const [closingPositions, setClosingPositions] = useState(new Set());
 
   const fetchData = async () => {
     try {
@@ -156,6 +158,37 @@ const PaperTrading = () => {
     if (pnl > 0) return 'success.main';
     if (pnl < 0) return 'error.main';
     return 'text.primary';
+  };
+
+  const handleClosePosition = async (positionId) => {
+    try {
+      setClosingPositions(prev => new Set([...prev, positionId]));
+      
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/positions/${positionId}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exit_reason: 'manual_close' })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.message) {
+        // Success - refresh data to show updated positions
+        await fetchData();
+        setError(null);
+      } else {
+        setError(data.detail || 'Failed to close position');
+      }
+    } catch (error) {
+      console.error('Error closing position:', error);
+      setError('Failed to close position - Network error');
+    } finally {
+      setClosingPositions(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(positionId);
+        return newSet;
+      });
+    }
   };
 
   if (loading && !status) {
@@ -405,6 +438,7 @@ const PaperTrading = () => {
                         <TableCell align="right">Price Change</TableCell>
                         <TableCell align="right">PnL</TableCell>
                         <TableCell align="right">Age</TableCell>
+                        <TableCell align="center">Action</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -468,6 +502,19 @@ const PaperTrading = () => {
                               <Typography variant="caption">
                                 {formatDuration(position.age_minutes)}
                               </Typography>
+                            </TableCell>
+                            <TableCell align="center">
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="error"
+                                startIcon={closingPositions.has(position.id) ? <CircularProgress size={16} /> : <CloseIcon />}
+                                onClick={() => handleClosePosition(position.id)}
+                                disabled={closingPositions.has(position.id)}
+                                sx={{ minWidth: 'auto', px: 1 }}
+                              >
+                                {closingPositions.has(position.id) ? 'Closing...' : 'Close'}
+                              </Button>
                             </TableCell>
                           </TableRow>
                         );

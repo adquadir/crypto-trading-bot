@@ -128,9 +128,13 @@ async def test_profit_scraping_fixes():
             price=49000.0,
             level_type='support',
             strength_score=80,
-            touches=5,
-            last_touch=datetime.now(),
-            created_at=datetime.now()
+            touch_count=5,
+            bounce_count=4,
+            avg_bounce_distance=0.01,
+            max_bounce_distance=0.02,
+            last_tested=datetime.now(),
+            first_identified=datetime.now() - timedelta(days=7),
+            volume_confirmation=1000.0
         )
         
         targets = TradingTargets(
