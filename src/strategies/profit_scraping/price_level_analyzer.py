@@ -86,49 +86,51 @@ class PriceLevelAnalyzer:
             return []
     
     async def _get_historical_data(self, symbol: str, exchange_client) -> Optional[pd.DataFrame]:
-        """Get historical OHLCV data"""
+        """Get historical OHLCV data - REAL DATA ONLY"""
         try:
-            # Get 30 days of 1-hour data
-            end_time = datetime.now()
-            start_time = end_time - timedelta(days=self.lookback_days)
+            if not exchange_client:
+                logger.error(f"❌ CRITICAL: No exchange client provided for {symbol} - CANNOT PROCEED WITHOUT REAL DATA")
+                raise ValueError("Exchange client is required - mock data is not allowed")
             
-            if exchange_client:
-                # Use real exchange client
-                klines = await exchange_client.get_klines(
-                    symbol=symbol,
-                    interval='1h',
-                    start_time=int(start_time.timestamp() * 1000),
-                    end_time=int(end_time.timestamp() * 1000),
-                    limit=1000
-                )
-                
-                if not klines:
-                    return None
-                
-                df = pd.DataFrame(klines, columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-                    'taker_buy_quote', 'ignore'
-                ])
-                
-                # Convert to proper types
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = pd.to_numeric(df[col])
-                
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+            logger.info(f"🔗 Using REAL Binance data for {symbol}")
             
-            else:
-                # Generate mock data for testing
-                return self._generate_mock_data(symbol)
+            # Use real exchange client with proper method
+            klines = await exchange_client.get_klines(
+                symbol=symbol,
+                interval='1h',
+                limit=720  # 30 days * 24 hours
+            )
+            
+            if not klines:
+                logger.error(f"❌ CRITICAL: No real data received for {symbol} from Binance API")
+                raise ValueError(f"Failed to get real market data for {symbol}")
+            
+            # Convert Binance klines format to DataFrame
+            df_data = []
+            for kline in klines:
+                df_data.append({
+                    'timestamp': pd.to_datetime(int(kline[0]), unit='ms'),
+                    'open': float(kline[1]),
+                    'high': float(kline[2]),
+                    'low': float(kline[3]),
+                    'close': float(kline[4]),
+                    'volume': float(kline[5])
+                })
+            
+            df = pd.DataFrame(df_data)
+            logger.info(f"✅ REAL DATA: {symbol} - {len(df)} candles, price range ${df['low'].min():.2f} - ${df['high'].max():.2f}")
+            return df
                 
         except Exception as e:
-            logger.error(f"Error getting historical data for {symbol}: {e}")
-            return None
+            logger.error(f"❌ CRITICAL ERROR getting real data for {symbol}: {e}")
+            logger.error("🚫 MOCK DATA IS NOT ALLOWED - SYSTEM WILL NOT PROCEED")
+            raise
     
     def _generate_mock_data(self, symbol: str) -> pd.DataFrame:
-        """Generate realistic mock price data for testing"""
-        np.random.seed(42)  # Consistent data
+        """Generate realistic mock price data with BALANCED support/resistance levels"""
+        # Use symbol-specific seed for variety but consistency
+        seed = hash(symbol) % 1000
+        np.random.seed(seed)
         
         # Base price
         base_price = 50000 if 'BTC' in symbol else 3000
@@ -140,40 +142,89 @@ class PriceLevelAnalyzer:
             freq='H'
         )
         
-        # Generate realistic price movement with support/resistance
+        # Generate realistic price movement with MULTIPLE support/resistance levels
         prices = []
         current_price = base_price
         
-        # Define some key levels that will act as support/resistance
+        # Define MULTIPLE key levels that will act as support/resistance
+        # This ensures we get both types of levels near current price
         key_levels = [
-            base_price * 0.95,  # Strong support
-            base_price * 0.98,  # Weak support
-            base_price * 1.02,  # Weak resistance
-            base_price * 1.05   # Strong resistance
+            base_price * 0.92,  # Strong support (far)
+            base_price * 0.95,  # Strong support (medium)
+            base_price * 0.98,  # Weak support (close)
+            base_price * 0.995, # Very close support
+            base_price * 1.005, # Very close resistance
+            base_price * 1.02,  # Weak resistance (close)
+            base_price * 1.05,  # Strong resistance (medium)
+            base_price * 1.08   # Strong resistance (far)
         ]
         
+        # Create a trending pattern that will test both support and resistance
+        trend_phases = [
+            ('down', 180),    # First 7.5 days: downtrend (tests support)
+            ('sideways', 180), # Next 7.5 days: sideways (tests both)
+            ('up', 180),      # Next 7.5 days: uptrend (tests resistance)
+            ('sideways', 180)  # Last 7.5 days: sideways (tests both)
+        ]
+        
+        phase_index = 0
+        phase_counter = 0
+        current_trend, phase_length = trend_phases[phase_index]
+        
         for i in range(720):
-            # Random walk with mean reversion to key levels
-            change = np.random.normal(0, 0.01)  # 1% volatility
+            # Switch trend phases
+            if phase_counter >= phase_length and phase_index < len(trend_phases) - 1:
+                phase_index += 1
+                phase_counter = 0
+                current_trend, phase_length = trend_phases[phase_index]
+                logger.info(f"Mock data: Switching to {current_trend} trend for {symbol}")
             
-            # Add attraction to key levels
+            # Base random change
+            change = np.random.normal(0, 0.008)  # 0.8% base volatility
+            
+            # Add trend bias
+            if current_trend == 'down':
+                change -= 0.002  # Downward bias
+            elif current_trend == 'up':
+                change += 0.002  # Upward bias
+            # sideways has no bias
+            
+            # Add attraction/repulsion to key levels
             for level in key_levels:
                 distance = abs(current_price - level) / level
-                if distance < 0.02:  # Within 2% of level
-                    # Add bounce effect
+                if distance < 0.015:  # Within 1.5% of level
+                    level_strength = 0.008  # Strong level effect
+                    
                     if current_price > level:
-                        change -= 0.005  # Pull down
+                        # Above level - level acts as support
+                        if current_price < level * 1.01:  # Very close
+                            change += level_strength  # Bounce up from support
                     else:
-                        change += 0.005  # Pull up
+                        # Below level - level acts as resistance
+                        if current_price > level * 0.99:  # Very close
+                            change -= level_strength  # Bounce down from resistance
             
+            # Apply change
             current_price *= (1 + change)
             
-            # Generate OHLC from current price
-            high = current_price * (1 + abs(np.random.normal(0, 0.005)))
-            low = current_price * (1 - abs(np.random.normal(0, 0.005)))
-            open_price = current_price * (1 + np.random.normal(0, 0.002))
+            # Ensure price stays within reasonable bounds
+            current_price = max(current_price, base_price * 0.85)
+            current_price = min(current_price, base_price * 1.15)
+            
+            # Generate OHLC from current price with realistic wicks
+            wick_size = abs(np.random.normal(0, 0.003))  # 0.3% average wick
+            high = current_price * (1 + wick_size)
+            low = current_price * (1 - wick_size)
+            
+            # Ensure OHLC relationships are valid
+            open_price = current_price * (1 + np.random.normal(0, 0.001))
             close = current_price
-            volume = np.random.uniform(1000, 5000)
+            
+            # Make sure high is highest and low is lowest
+            high = max(high, open_price, close)
+            low = min(low, open_price, close)
+            
+            volume = np.random.uniform(800, 6000)
             
             prices.append({
                 'timestamp': timestamps[i],
@@ -183,8 +234,12 @@ class PriceLevelAnalyzer:
                 'close': close,
                 'volume': volume
             })
+            
+            phase_counter += 1
         
-        return pd.DataFrame(prices)
+        df = pd.DataFrame(prices)
+        logger.info(f"Generated mock data for {symbol}: Price range ${df['low'].min():.2f} - ${df['high'].max():.2f}")
+        return df
     
     def _find_pivot_points(self, df: pd.DataFrame) -> Tuple[List[float], List[float]]:
         """Find pivot highs and lows in price data"""

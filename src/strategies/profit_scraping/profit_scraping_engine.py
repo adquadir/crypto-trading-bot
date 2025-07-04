@@ -291,33 +291,41 @@ class ProfitScrapingEngine:
             logger.error(f"Error checking entry conditions for {symbol}: {e}")
     
     async def _validate_entry_conditions(self, opportunity: ScrapingOpportunity, current_price: float) -> bool:
-        """Validate additional entry conditions with TREND AWARENESS"""
+        """Validate additional entry conditions with RELAXED TREND AWARENESS for profit scraping"""
         try:
             level = opportunity.level
             symbol = opportunity.symbol
             
-            # CRITICAL FIX: Add trend-aware filtering
+            # PROFIT SCRAPING FIX: Use relaxed trend filtering to allow more trades
             market_trend = await self._detect_market_trend(symbol)
             
             if level.level_type == 'support':
-                # TREND CHECK: Don't go long at support in strong downtrends
+                # RELAXED TREND CHECK: Only block in EXTREME downtrends, allow counter-trend scalping
                 if market_trend == 'strong_downtrend':
-                    logger.info(f"❌ TREND FILTER: Skipping LONG {symbol} - strong downtrend detected")
-                    return False
+                    # Check if support is VERY strong before blocking
+                    if level.strength_score < 80:  # Only block weak support in strong downtrends
+                        logger.info(f"❌ TREND FILTER: Skipping weak LONG {symbol} - strong downtrend + weak support")
+                        return False
+                    else:
+                        logger.info(f"✅ ALLOWING COUNTER-TREND: Strong support {symbol} @ {level.price:.2f} (strength: {level.strength_score})")
                 
-                # Validate support is holding (bounce confirmation)
+                # Validate support is holding (bounce confirmation) - RELAXED
                 if not await self._validate_support_bounce(symbol, level.price, current_price):
-                    logger.info(f"❌ SUPPORT VALIDATION: {symbol} support not confirmed")
-                    return False
+                    # Don't block completely, just log warning
+                    logger.warning(f"⚠️ SUPPORT WARNING: {symbol} support not fully confirmed, but allowing trade")
                 
                 # Price approach validation
                 return current_price <= level.price * 1.005  # Within 0.5% above
             
             elif level.level_type == 'resistance':
-                # TREND CHECK: Don't go short at resistance in strong uptrends
+                # RELAXED TREND CHECK: Only block in EXTREME uptrends, allow counter-trend scalping
                 if market_trend == 'strong_uptrend':
-                    logger.info(f"❌ TREND FILTER: Skipping SHORT {symbol} - strong uptrend detected")
-                    return False
+                    # Check if resistance is VERY strong before blocking
+                    if level.strength_score < 80:  # Only block weak resistance in strong uptrends
+                        logger.info(f"❌ TREND FILTER: Skipping weak SHORT {symbol} - strong uptrend + weak resistance")
+                        return False
+                    else:
+                        logger.info(f"✅ ALLOWING COUNTER-TREND: Strong resistance {symbol} @ {level.price:.2f} (strength: {level.strength_score})")
                 
                 # Price approach validation
                 return current_price >= level.price * 0.995  # Within 0.5% below
