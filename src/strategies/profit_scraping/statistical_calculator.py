@@ -210,33 +210,30 @@ class StatisticalCalculator:
     
     def _calculate_profit_target(self, level: PriceLevel, bounce_analysis: Dict, 
                                current_price: float) -> float:
-        """Calculate optimal profit target based on historical data"""
+        """Calculate profit target - FIXED $10 PROFIT TARGET (0.5% with 10x leverage)"""
         try:
-            # Use 75th percentile of historical bounces for high probability target
-            target_percentage = bounce_analysis['percentile_75']
-            
-            # Ensure minimum profit target of 0.5%
-            target_percentage = max(target_percentage, 0.005)
-            
-            # Ensure maximum profit target of 2% for quick scalping
-            target_percentage = min(target_percentage, 0.02)
+            # FIXED PROFIT TARGET: $10 per position
+            # With $200 capital at risk and 10x leverage: $10 profit = 0.5% price movement
+            fixed_tp_pct = 0.005  # 0.5% fixed target for $10 profit
             
             if level.level_type == 'support':
                 # For support, target is above the level
-                profit_target = level.price * (1 + target_percentage)
+                profit_target = level.price * (1 + fixed_tp_pct)
             else:  # resistance
                 # For resistance, target is below the level
-                profit_target = level.price * (1 - target_percentage)
+                profit_target = level.price * (1 - fixed_tp_pct)
             
+            logger.info(f"💰 FIXED $10 TP: {level.level_type} @ {level.price:.4f} → TP @ {profit_target:.4f} ({fixed_tp_pct:.3%}) [Target: $10 profit]")
             return profit_target
             
         except Exception as e:
-            logger.error(f"Error calculating profit target: {e}")
-            # Fallback to 1% target
+            logger.error(f"Error calculating fixed profit target: {e}")
+            # Fallback to 0.5% target for $10 profit
+            fixed_tp_pct = 0.005
             if level.level_type == 'support':
-                return level.price * 1.01
+                return level.price * (1 + fixed_tp_pct)
             else:
-                return level.price * 0.99
+                return level.price * (1 - fixed_tp_pct)
     
     def _calculate_stop_loss(self, level: PriceLevel, current_price: float, 
                            bounce_analysis: Dict) -> float:

@@ -50,6 +50,9 @@ class PaperPosition:
     entry_price: float
     quantity: float
     entry_time: datetime
+    capital_allocated: float = 0.0  # NEW: Actual capital at risk (not leveraged amount)
+    leverage: float = 10.0  # NEW: Leverage multiplier
+    notional_value: float = 0.0  # NEW: Total position value (capital * leverage)
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
     current_price: float = 0.0
@@ -159,10 +162,11 @@ class EnhancedPaperTradingEngine:
         self.ml_training_data = []
         self.feature_history = defaultdict(deque)
         
-        # Risk management - NO LIMITS FOR AGGRESSIVE PAPER TRADING
-        self.max_position_size = self.config.get('max_position_size_pct', 0.02)  # 2% per position
-        self.max_total_exposure = self.config.get('max_total_exposure_pct', 1.0)  # 100% total exposure
-        self.max_daily_loss = self.config.get('max_daily_loss_pct', 1.0)  # 100% daily loss limit
+        # CORRECTED RISK MANAGEMENT - Percentage-based scaling with position limits
+        self.risk_per_trade_pct = self.config.get('risk_per_trade_pct', 0.02)  # 2% of balance per trade
+        self.max_positions = self.config.get('max_positions', 50)  # Fixed 50 position limit
+        self.leverage = self.config.get('leverage', 10.0)  # 10x leverage
+        self.max_total_risk_pct = self.config.get('max_total_risk_pct', 1.0)  # 100% max total risk
         
         logger.info("🟢 Enhanced Paper Trading Engine initialized")
     
@@ -269,6 +273,15 @@ class EnhancedPaperTradingEngine:
             position_size = self._calculate_position_size(symbol, current_price, confidence)
             logger.info(f"🎯 Paper Trading: Calculated position size {position_size} for {symbol}")
             
+            # CRITICAL FIX: Exit if position size is 0 (limits reached)
+            if position_size <= 0:
+                logger.warning(f"❌ Cannot create position: Invalid position size {position_size} (limits reached or insufficient capital)")
+                return None
+            
+            # Calculate capital allocation for this position
+            capital_allocated = self.account.balance * self.risk_per_trade_pct
+            notional_value = capital_allocated * self.leverage
+            
             # Create position
             position_id = str(uuid.uuid4())
             position = PaperPosition(
@@ -279,6 +292,9 @@ class EnhancedPaperTradingEngine:
                 entry_price=current_price,
                 quantity=position_size,
                 entry_time=datetime.utcnow(),
+                capital_allocated=capital_allocated,  # NEW: Track actual capital at risk
+                leverage=self.leverage,  # NEW: Track leverage used
+                notional_value=notional_value,  # NEW: Track total position value
                 confidence_score=confidence,
                 ml_score=ml_score,
                 entry_reason=entry_reason,
@@ -887,20 +903,37 @@ class EnhancedPaperTradingEngine:
             return 100.0
     
     def _calculate_position_size(self, symbol: str, price: float, confidence: float) -> float:
-        """Calculate position size with REAL Binance-style 10x leverage"""
+        """Calculate position size with CORRECTED percentage-based scaling and position limits"""
         try:
-            # REAL LEVERAGE CALCULATION
-            margin_per_trade = 200.0  # Only $200 margin required per trade
-            leverage = 10.0
-            notional_value = margin_per_trade * leverage  # $2,000 notional position
+            # CORRECTED LEVERAGE CALCULATION - Percentage-based scaling
+            current_balance = self.account.balance
+            capital_per_position = current_balance * self.risk_per_trade_pct  # 2% of current balance
+            leverage = self.leverage  # 10x leverage
             
-            # Calculate crypto quantity based on notional value
-            position_size = notional_value / price
+            # Check position limits BEFORE calculating size
+            current_positions = len(self.positions)
+            if current_positions >= self.max_positions:
+                logger.warning(f"❌ Position limit reached: {current_positions}/{self.max_positions} positions")
+                return 0.0
             
-            logger.info(f"💰 REAL Leverage: Margin ${margin_per_trade} × {leverage}x = ${notional_value} notional → {position_size:.6f} {symbol}")
-            logger.info(f"💰 Risk: Only ${margin_per_trade} at risk (not ${notional_value})")
+            # Check if we have enough capital for this position
+            total_allocated = sum(getattr(pos, 'capital_allocated', capital_per_position) for pos in self.positions.values())
+            available_capital = current_balance - total_allocated
             
-            return position_size
+            if available_capital < capital_per_position:
+                logger.warning(f"❌ Insufficient capital: Need ${capital_per_position:.2f}, Available ${available_capital:.2f}")
+                return 0.0
+            
+            # Calculate position size with leverage
+            notional_value = capital_per_position * leverage  # Total position value
+            quantity = notional_value / price  # Crypto quantity
+            
+            logger.info(f"💰 CORRECTED Leverage: Capital ${capital_per_position:.2f} ({self.risk_per_trade_pct:.1%} of ${current_balance:.2f}) × {leverage}x = ${notional_value:.2f} notional")
+            logger.info(f"💰 Position: {quantity:.6f} {symbol} @ ${price:.4f}")
+            logger.info(f"💰 Risk: ${capital_per_position:.2f} (actual capital at risk)")
+            logger.info(f"💰 Positions: {current_positions + 1}/{self.max_positions}")
+            
+            return quantity
             
         except Exception as e:
             logger.error(f"Error calculating position size: {e}")
@@ -985,75 +1018,29 @@ class EnhancedPaperTradingEngine:
                 return entry_price * (1 + sl_pct)
     
     async def _calculate_take_profit(self, entry_price: float, side: str, symbol: str) -> float:
-        """Calculate DYNAMIC take profit based on market conditions and momentum"""
+        """Calculate take profit - FIXED $10 PROFIT TARGET (0.5% with 10x leverage)"""
         try:
-            # Get market trend and volatility
-            market_trend = await self._detect_market_trend(symbol)
-            volatility = await self._calculate_volatility(symbol)
-            momentum = await self._calculate_momentum(symbol)
-            
-            # Base take profit percentage
-            base_tp_pct = 0.008  # 0.8% base
-            
-            # DYNAMIC ADJUSTMENTS for MAXIMUM PROFIT EXTRACTION
-            if market_trend == 'strong_uptrend' and side == 'LONG':
-                # Strong uptrend LONG - much higher TP to ride the trend
-                tp_pct = base_tp_pct * 3.0  # 2.4% TP
-                logger.info(f"🚀 TREND RIDING: Higher TP for LONG in strong uptrend")
-                
-            elif market_trend == 'strong_downtrend' and side == 'SHORT':
-                # Strong downtrend SHORT - much higher TP to ride the trend
-                tp_pct = base_tp_pct * 3.0  # 2.4% TP
-                logger.info(f"🚀 TREND RIDING: Higher TP for SHORT in strong downtrend")
-                
-            elif market_trend in ['uptrend', 'downtrend']:
-                # Moderate trend - higher TP
-                if (market_trend == 'uptrend' and side == 'LONG') or (market_trend == 'downtrend' and side == 'SHORT'):
-                    tp_pct = base_tp_pct * 2.0  # 1.6% TP
-                    logger.info(f"📈 TREND FOLLOWING: Higher TP with trend")
-                else:
-                    tp_pct = base_tp_pct * 1.2  # 0.96% TP (counter-trend)
-                    logger.info(f"⚠️ COUNTER-TREND: Moderate TP against trend")
-            else:
-                # Sideways market - standard TP
-                tp_pct = base_tp_pct
-            
-            # MOMENTUM BOOST
-            if momentum > 70:  # Strong momentum
-                tp_pct *= 1.5  # Boost TP for strong momentum
-                logger.info(f"⚡ MOMENTUM BOOST: Higher TP for strong momentum ({momentum:.0f})")
-            elif momentum < 30:  # Weak momentum
-                tp_pct *= 0.8  # Reduce TP for weak momentum
-                logger.info(f"🐌 WEAK MOMENTUM: Lower TP for weak momentum ({momentum:.0f})")
-            
-            # VOLATILITY ADJUSTMENT
-            if volatility > 2.0:  # High volatility - bigger moves possible
-                tp_pct *= 1.4
-                logger.info(f"🎢 HIGH VOLATILITY: Higher TP for big moves")
-            elif volatility < 0.5:  # Low volatility - smaller moves
-                tp_pct *= 0.9
-                logger.info(f"😴 LOW VOLATILITY: Lower TP for small moves")
-            
-            # Cap maximum TP at 5% for safety
-            tp_pct = min(tp_pct, 0.05)
+            # FIXED PROFIT TARGET: $10 per position
+            # With $200 capital at risk and 10x leverage: $10 profit = 0.5% price movement
+            fixed_tp_pct = 0.005  # 0.5% fixed target for $10 profit
             
             # Calculate final TP price
             if side == 'LONG':
-                tp_price = entry_price * (1 + tp_pct)
+                tp_price = entry_price * (1 + fixed_tp_pct)
             else:  # SHORT
-                tp_price = entry_price * (1 - tp_pct)
+                tp_price = entry_price * (1 - fixed_tp_pct)
             
-            logger.info(f"🎯 DYNAMIC TP: {side} @ {entry_price:.4f} → TP @ {tp_price:.4f} ({tp_pct:.3%}) [Trend: {market_trend}, Mom: {momentum:.0f}, Vol: {volatility:.1f}]")
+            logger.info(f"💰 FIXED $10 TP: {side} @ {entry_price:.4f} → TP @ {tp_price:.4f} ({fixed_tp_pct:.3%}) [Target: $10 profit]")
             return tp_price
                 
         except Exception as e:
-            logger.error(f"Error calculating dynamic take profit: {e}")
-            # Fallback to conservative TP
-            tp_pct = 0.012  # 1.2%
+            logger.error(f"Error calculating fixed take profit: {e}")
+            # Fallback to 0.5% TP for $10 profit
+            fixed_tp_pct = 0.005
             if side == 'LONG':
-                return entry_price * (1 + tp_pct)
+                return entry_price * (1 + fixed_tp_pct)
             else:
-                return entry_price * (1 - tp_pct)
+                return entry_price * (1 - fixed_tp_pct)
     
     def _calculate_unrealized_pnl(self) -> float:
         """Calculate total unrealized P&L"""
