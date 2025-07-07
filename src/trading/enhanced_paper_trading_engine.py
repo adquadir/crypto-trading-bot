@@ -868,39 +868,60 @@ class EnhancedPaperTradingEngine:
             return False
     
     async def _get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current price for symbol - REAL DATA with PAPER TRADING FALLBACK"""
+        """Get current price for symbol - REAL DATA ONLY, NO MOCK PRICES EVER"""
         try:
-            if self.exchange_client:
+            if not self.exchange_client:
+                logger.error(f"❌ CRITICAL: Exchange client not available for {symbol} - CANNOT GET REAL PRICE")
+                raise Exception(f"Exchange client not initialized - real prices unavailable for {symbol}")
+            
+            # Try primary method: get_ticker_24h
+            try:
                 ticker = await self.exchange_client.get_ticker_24h(symbol)
                 if ticker and ticker.get('lastPrice'):
-                    return float(ticker.get('lastPrice', 0))
+                    price = float(ticker.get('lastPrice', 0))
+                    if price > 0:
+                        logger.debug(f"✅ Real price from ticker: {symbol} = ${price:.4f}")
+                        return price
+                    else:
+                        logger.warning(f"⚠️ Invalid price from ticker: {symbol} = {price}")
+            except Exception as e:
+                logger.warning(f"⚠️ Ticker method failed for {symbol}: {e}")
             
-            # PAPER TRADING FALLBACK: Use realistic mock prices when exchange client fails
-            logger.warning(f"Exchange client unavailable for {symbol} - using paper trading mock prices")
+            # Try fallback method: get_current_price
+            try:
+                price = await self.exchange_client.get_current_price(symbol)
+                if price and price > 0:
+                    logger.debug(f"✅ Real price from current_price: {symbol} = ${price:.4f}")
+                    return price
+                else:
+                    logger.warning(f"⚠️ Invalid price from current_price: {symbol} = {price}")
+            except Exception as e:
+                logger.warning(f"⚠️ Current price method failed for {symbol}: {e}")
             
-            # Mock prices based on realistic crypto values (as of 2024)
-            mock_prices = {
-                'BTCUSDT': 43000.0 + (hash(symbol + str(datetime.utcnow().minute)) % 2000 - 1000),  # ~42k-44k range
-                'ETHUSDT': 2600.0 + (hash(symbol + str(datetime.utcnow().minute)) % 200 - 100),   # ~2.5k-2.7k range
-                'BNBUSDT': 310.0 + (hash(symbol + str(datetime.utcnow().minute)) % 20 - 10),      # ~300-320 range
-                'ADAUSDT': 0.48 + (hash(symbol + str(datetime.utcnow().minute)) % 10 - 5) * 0.01, # ~0.43-0.53 range
-                'SOLUSDT': 95.0 + (hash(symbol + str(datetime.utcnow().minute)) % 10 - 5),        # ~90-100 range
-            }
+            # Try WebSocket cached data as final real data source
+            try:
+                if hasattr(self.exchange_client, 'last_trade_price') and symbol in self.exchange_client.last_trade_price:
+                    price = self.exchange_client.last_trade_price[symbol]
+                    if price and price > 0:
+                        logger.debug(f"✅ Real price from WebSocket cache: {symbol} = ${price:.4f}")
+                        return price
+                    else:
+                        logger.warning(f"⚠️ Invalid price from WebSocket cache: {symbol} = {price}")
+            except Exception as e:
+                logger.warning(f"⚠️ WebSocket cache method failed for {symbol}: {e}")
             
-            if symbol in mock_prices:
-                mock_price = mock_prices[symbol]
-                logger.info(f"📊 Paper Trading Mock Price: {symbol} = ${mock_price:.4f}")
-                return mock_price
-            else:
-                # Default mock price for unknown symbols
-                default_price = 100.0 + (hash(symbol) % 50)
-                logger.info(f"📊 Paper Trading Default Mock Price: {symbol} = ${default_price:.4f}")
-                return default_price
+            # CRITICAL: NO MOCK DATA - If we can't get real prices, fail the trade
+            logger.error(f"❌ CRITICAL: ALL REAL PRICE SOURCES FAILED for {symbol}")
+            logger.error(f"❌ Exchange client status: {type(self.exchange_client).__name__ if self.exchange_client else 'None'}")
+            logger.error(f"❌ Exchange client initialized: {getattr(self.exchange_client, 'initialized', False)}")
+            
+            # Raise exception instead of returning mock data
+            raise Exception(f"REAL PRICE UNAVAILABLE: All price sources failed for {symbol} - cannot execute trade without real market data")
             
         except Exception as e:
-            logger.error(f"Error getting price for {symbol}: {e}")
-            # Last resort fallback
-            return 100.0
+            logger.error(f"❌ FATAL: Cannot get real price for {symbol}: {e}")
+            # NO FALLBACK TO MOCK DATA - Let the trade fail
+            raise Exception(f"Real price fetch failed for {symbol}: {e}")
     
     def _calculate_position_size(self, symbol: str, price: float, confidence: float) -> float:
         """Calculate position size with CORRECTED percentage-based scaling and position limits"""

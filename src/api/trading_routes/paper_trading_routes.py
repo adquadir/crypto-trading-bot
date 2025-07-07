@@ -793,7 +793,7 @@ async def simulate_trading_signals(
     count: int = 10,
     strategy_type: str = "scalping"
 ):
-    """Simulate trading signals for testing (generates fake signals with DIRECT position creation)"""
+    """Simulate trading signals for testing using REAL MARKET DATA ONLY"""
     try:
         engine = get_paper_engine()
         if not engine:
@@ -803,89 +803,70 @@ async def simulate_trading_signals(
             raise HTTPException(status_code=400, detail="Paper trading engine not running")
         
         import random
-        import uuid
         from datetime import datetime
         
         executed_trades = []
+        failed_trades = []
         
-        # Get mock price for the symbol - DIRECT MOCK PRICE GENERATION
-        mock_prices = {
-            'BTCUSDT': 43000.0 + (hash(symbol + str(datetime.utcnow().minute)) % 2000 - 1000),  # ~42k-44k range
-            'ETHUSDT': 2600.0 + (hash(symbol + str(datetime.utcnow().minute)) % 200 - 100),   # ~2.5k-2.7k range
-            'BNBUSDT': 310.0 + (hash(symbol + str(datetime.utcnow().minute)) % 20 - 10),      # ~300-320 range
-            'ADAUSDT': 0.48 + (hash(symbol + str(datetime.utcnow().minute)) % 10 - 5) * 0.01, # ~0.43-0.53 range
-            'SOLUSDT': 95.0 + (hash(symbol + str(datetime.utcnow().minute)) % 10 - 5),        # ~90-100 range
-        }
-        
-        if symbol in mock_prices:
-            mock_price = mock_prices[symbol]
-        else:
-            mock_price = 100.0 + (hash(symbol) % 50)  # Default for unknown symbols
-        
-        logger.info(f"📊 Direct Mock Price: {symbol} = ${mock_price:.4f}")
-        
-        # CRITICAL FIX: Use fallback position creation (skip PaperPosition import issues)
-        logger.info("🔧 Using direct position creation")
+        logger.info(f"🎯 Simulating {count} trading signals using REAL MARKET DATA for {symbol}")
         
         for i in range(count):
-            # Generate random signal
-            side = random.choice(['LONG', 'SHORT'])
-            confidence = random.uniform(0.7, 0.95)
-            entry_price = mock_price + random.uniform(-10, 10)  # Smaller price variation
-            
-            # Create simple position dict
-            position_id = str(uuid.uuid4())
-            position_dict = {
-                'id': position_id,
-                'symbol': symbol,
-                'strategy_type': strategy_type,
-                'side': side,
-                'entry_price': entry_price,
-                'quantity': 200.0 * 10 / mock_price,  # $2000 notional with 10x leverage
-                'entry_time': datetime.utcnow(),
-                'confidence_score': confidence,
-                'ml_score': confidence,
-                'entry_reason': f'simulated_signal_{i+1}',
-                'market_regime': random.choice(['trending', 'ranging']),
-                'volatility_regime': random.choice(['medium', 'high']),
-                'current_price': mock_price,
-                'stop_loss': entry_price * 0.995 if side == 'LONG' else entry_price * 1.005,
-                'take_profit': entry_price * 1.008 if side == 'LONG' else entry_price * 0.992,
-                'unrealized_pnl': 0.0,
-                'unrealized_pnl_pct': 0.0
-            }
-            
-            # Store position directly in engine
-            if not hasattr(engine, 'positions'):
-                engine.positions = {}
-            
-            engine.positions[position_id] = position_dict
-            
-            executed_trades.append({
-                'position_id': position_id,
-                'signal': {
+            try:
+                # Generate realistic signal using real market data
+                side = random.choice(['LONG', 'SHORT'])
+                confidence = random.uniform(0.7, 0.95)
+                
+                # Create signal that will use real price data
+                signal = {
                     'symbol': symbol,
+                    'strategy_type': strategy_type,
                     'side': side,
-                    'entry_price': entry_price,
                     'confidence': confidence,
-                    'strategy_type': strategy_type
+                    'ml_score': confidence,
+                    'reason': f'simulated_signal_{i+1}',
+                    'market_regime': random.choice(['trending', 'ranging']),
+                    'volatility_regime': random.choice(['medium', 'high'])
                 }
-            })
-            
-            logger.info(f"✅ Direct position created: {symbol} {side} @ {entry_price:.2f} (ID: {position_id})")
+                
+                logger.info(f"🎯 Executing simulated signal {i+1}/{count}: {symbol} {side} (confidence: {confidence:.2f})")
+                
+                # Execute trade using the normal paper trading flow (with real prices)
+                position_id = await engine.execute_trade(signal)
+                
+                if position_id:
+                    executed_trades.append({
+                        'position_id': position_id,
+                        'signal': signal
+                    })
+                    logger.info(f"✅ Simulated trade {i+1} executed successfully: {position_id}")
+                else:
+                    failed_trades.append({
+                        'signal': signal,
+                        'reason': 'execution_failed'
+                    })
+                    logger.warning(f"❌ Simulated trade {i+1} failed to execute")
+                    
+            except Exception as trade_error:
+                logger.error(f"❌ Error executing simulated trade {i+1}: {trade_error}")
+                failed_trades.append({
+                    'signal': signal if 'signal' in locals() else {'symbol': symbol, 'side': 'UNKNOWN'},
+                    'reason': str(trade_error)
+                })
         
-        # Update account if possible
-        if hasattr(engine, 'account'):
-            if hasattr(engine.account, 'equity'):
-                engine.account.equity -= len(executed_trades) * 200.0 * 0.001  # Simulated fees
+        # Get current account status
+        account_status = engine.get_account_status()
         
         return {
-            "message": f"🎯 Simulated {len(executed_trades)} trading signals with DIRECT position creation",
+            "message": f"🎯 Simulated {count} trading signals using REAL MARKET DATA",
             "executed_trades": executed_trades,
+            "failed_trades": failed_trades,
+            "success_rate": f"{len(executed_trades)}/{count} ({len(executed_trades)/count*100:.1f}%)",
             "total_positions": len(engine.positions),
-            "account_balance": getattr(engine.account, 'balance', 10000.0) if hasattr(engine, 'account') else 10000.0,
-            "account_equity": getattr(engine.account, 'equity', 10000.0) if hasattr(engine, 'account') else 10000.0,
-            "unrealized_pnl": 0.0,
+            "account_balance": account_status['account']['balance'],
+            "account_equity": account_status['account']['equity'],
+            "unrealized_pnl": account_status['account']['unrealized_pnl'],
+            "real_data_used": True,
+            "no_mock_data": True,
             "timestamp": datetime.utcnow().isoformat()
         }
         
