@@ -369,48 +369,71 @@ class ExchangeClient:
             return False
 
     async def _make_request(self, method: str, endpoint: str, params: Dict = None, signed: bool = False) -> Dict:
-        """Make an HTTP request to the exchange API."""
-        try:
-            url = f"{self.base_url}{endpoint}"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            
-            if signed:
-                if not self.api_key or not self.api_secret:
-                    raise ValueError("API key and secret required for signed requests")
-                headers['X-MBX-APIKEY'] = self.api_key
-                params['timestamp'] = int(time.time() * 1000)
-                params['signature'] = self._generate_signature(params)
-            
-            # Format proxy URL with authentication
-            proxy_url = None
-            if self.proxy_host and self.proxy_port:
-                proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
-                if self.proxy_user and self.proxy_pass:
-                    proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
-            
-            async with aiohttp.ClientSession() as session:
-                if method.upper() == 'GET':
-                    async with session.get(url, params=params, headers=headers, proxy=proxy_url, timeout=10) as resp:
-                        if resp.status != 200:
-                            error_text = await resp.text()
-                            logger.error(f"API request failed: {resp.status} {error_text}")
-                            raise Exception(f"API request failed: {resp.status} {error_text}")
-                        return await resp.json()
-                elif method.upper() == 'POST':
-                    async with session.post(url, json=params, headers=headers, proxy=proxy_url, timeout=10) as resp:
-                        if resp.status != 200:
-                            error_text = await resp.text()
-                            logger.error(f"API request failed: {resp.status} {error_text}")
-                            raise Exception(f"API request failed: {resp.status} {error_text}")
-                        return await resp.json()
-                else:
-                    raise ValueError(f"Unsupported HTTP method: {method}")
-                    
-        except Exception as e:
-            logger.error(f"Error making API request: {e}")
-            raise
+        """Make an HTTP request to the exchange API with robust retry logic."""
+        params = params or {}
+        max_retries = 5
+        base_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                url = f"{self.base_url}{endpoint}"
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+                
+                if signed:
+                    if not self.api_key or not self.api_secret:
+                        raise ValueError("API key and secret required for signed requests")
+                    headers['X-MBX-APIKEY'] = self.api_key
+                    params['timestamp'] = int(time.time() * 1000)
+                    params['signature'] = self._generate_signature(params)
+                
+                # Format proxy URL with authentication
+                proxy_url = None
+                if self.proxy_host and self.proxy_port:
+                    proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+                    if self.proxy_user and self.proxy_pass:
+                        proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+                
+                # Use aiohttp for better async performance
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.request(
+                        method=method,
+                        url=url,
+                        params=params,
+                        headers=headers,
+                        proxy=proxy_url
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return data
+                        elif response.status == 429:  # Rate limit
+                            retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** attempt)))
+                            logger.warning(f"Rate limited, retrying in {retry_after}s")
+                            await asyncio.sleep(retry_after)
+                            continue
+                        else:
+                            logger.warning(f"HTTP {response.status} for {endpoint}, attempt {attempt + 1}/{max_retries}")
+                            if attempt == max_retries - 1:
+                                raise Exception(f"HTTP {response.status} after {max_retries} attempts")
+                            await asyncio.sleep(base_delay * (2 ** attempt))
+                            continue
+                            
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout for {endpoint}, attempt {attempt + 1}/{max_retries}")
+                if attempt == max_retries - 1:
+                    raise Exception(f"Timeout after {max_retries} attempts")
+                await asyncio.sleep(base_delay * (2 ** attempt))
+                continue
+            except Exception as e:
+                logger.warning(f"Request error for {endpoint}: {e}, attempt {attempt + 1}/{max_retries}")
+                if attempt == max_retries - 1:
+                    raise Exception(f"Request failed after {max_retries} attempts: {e}")
+                await asyncio.sleep(base_delay * (2 ** attempt))
+                continue
+        
+        raise Exception(f"All {max_retries} attempts failed for {endpoint}")
 
     def _generate_signature(self, params: Dict) -> str:
         """Generate HMAC SHA256 signature for signed requests."""
@@ -434,13 +457,52 @@ class ExchangeClient:
             return []
 
     async def get_ticker_24h(self, symbol: str) -> Dict:
-        """Get 24-hour ticker data for a symbol."""
+        """Get 24-hour ticker data for a symbol with robust fallback."""
         try:
+            # Try direct REST API first
             params = {'symbol': symbol}
-            return await self._make_request('GET', '/fapi/v1/ticker/24hr', params)
+            ticker = await self._make_request('GET', '/fapi/v1/ticker/24hr', params)
+            if ticker and ticker.get('lastPrice'):
+                return ticker
         except Exception as e:
-            logger.error(f"Error getting 24h ticker for {symbol}: {e}")
-            raise
+            logger.warning(f"Direct REST API failed for {symbol}: {e}")
+        
+        try:
+            # Try CCXT client as fallback
+            if self.ccxt_client:
+                ticker_data = await asyncio.to_thread(
+                    self.ccxt_client.fetch_ticker,
+                    symbol=symbol
+                )
+                if ticker_data and ticker_data.get('last'):
+                    return {
+                        'symbol': symbol,
+                        'lastPrice': str(ticker_data['last']),
+                        'priceChange': str(ticker_data.get('change', 0)),
+                        'priceChangePercent': str(ticker_data.get('percentage', 0)),
+                        'volume': str(ticker_data.get('baseVolume', 0)),
+                        'quoteVolume': str(ticker_data.get('quoteVolume', 0))
+                    }
+        except Exception as e:
+            logger.warning(f"CCXT fallback failed for {symbol}: {e}")
+        
+        try:
+            # Try WebSocket cached data as final fallback
+            if symbol in self.last_trade_price:
+                price = self.last_trade_price[symbol]
+                return {
+                    'symbol': symbol,
+                    'lastPrice': str(price),
+                    'priceChange': '0',
+                    'priceChangePercent': '0',
+                    'volume': '0',
+                    'quoteVolume': '0'
+                }
+        except Exception as e:
+            logger.warning(f"WebSocket cache fallback failed for {symbol}: {e}")
+        
+        # If all methods fail, raise exception - no mock prices
+        raise Exception(f"All price fetching methods failed for {symbol}")
 
     async def get_orderbook(self, symbol: str, limit: int = 10) -> Dict:
         """Get orderbook data for a symbol."""

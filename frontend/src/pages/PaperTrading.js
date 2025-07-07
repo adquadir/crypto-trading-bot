@@ -22,7 +22,13 @@ import {
   FormControlLabel,
   useMediaQuery,
   useTheme,
-  CircularProgress
+  CircularProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Tooltip,
+  IconButton
 } from '@mui/material';
 import {
   PlayArrow as StartIcon,
@@ -35,7 +41,13 @@ import {
   Timeline as TimelineIcon,
   AccountBalance as BalanceIcon,
   Speed as SpeedIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  Settings as SettingsIcon,
+  AutoAwesome as AdaptiveIcon,
+  Rocket as BreakoutIcon,
+  BarChart as SupportResistanceIcon,
+  FlashOn as MomentumIcon,
+  Info as InfoIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -53,13 +65,49 @@ const PaperTrading = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState(null);
   const [closingPositions, setClosingPositions] = useState(new Set());
+  const [startingEngine, setStartingEngine] = useState(false);
+  const [stoppingEngine, setStoppingEngine] = useState(false);
+  const [availableStrategies, setAvailableStrategies] = useState({
+    adaptive: {
+      name: "🤖 Adaptive Strategy",
+      description: "Automatically selects best approach based on market conditions",
+      best_for: "All market conditions - auto-adapts",
+      risk_level: "Medium",
+      features: ["Market regime detection", "Dynamic SL/TP", "Correlation filtering", "Volume triggers"]
+    },
+    breakout: {
+      name: "🚀 Breakout Strategy", 
+      description: "Trades breakouts from key levels in trending markets",
+      best_for: "Strong trending markets with high momentum",
+      risk_level: "High",
+      features: ["Trend following", "Momentum confirmation", "Volume breakouts", "Extended targets"]
+    },
+    support_resistance: {
+      name: "📊 Support/Resistance Strategy",
+      description: "Trades bounces from support and resistance levels",
+      best_for: "Ranging markets with clear levels",
+      risk_level: "Medium",
+      features: ["Level validation", "Bounce confirmation", "Range trading", "Quick scalps"]
+    },
+    momentum: {
+      name: "⚡ Momentum Strategy",
+      description: "Trades high-volume momentum moves",
+      best_for: "High volume periods with strong momentum",
+      risk_level: "High", 
+      features: ["Volume spikes", "Momentum indicators", "Fast execution", "Quick exits"]
+    }
+  });
+  const [currentStrategy, setCurrentStrategy] = useState('adaptive');
+  const [changingStrategy, setChangingStrategy] = useState(false);
 
   const fetchData = async () => {
     try {
-      const [statusRes, positionsRes, performanceRes] = await Promise.all([
+      const [statusRes, positionsRes, performanceRes, strategiesRes, currentStrategyRes] = await Promise.all([
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/status`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/positions`),
-        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/performance`)
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/performance`),
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/strategies`),
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/strategy`)
       ]);
 
       if (statusRes.ok) {
@@ -89,6 +137,20 @@ const PaperTrading = () => {
         const performanceData = await performanceRes.json();
         setPerformance(performanceData.data || {});
       }
+
+      if (strategiesRes.ok) {
+        const strategiesData = await strategiesRes.json();
+        if (strategiesData.data?.available_strategies && Object.keys(strategiesData.data.available_strategies).length > 0) {
+          setAvailableStrategies(strategiesData.data.available_strategies);
+        }
+        // If API fails, keep the default strategies already set in state
+      }
+
+      if (currentStrategyRes.ok) {
+        const currentStrategyData = await currentStrategyRes.json();
+        setCurrentStrategy(currentStrategyData.data?.current_strategy || 'adaptive');
+      }
+      // If API fails, keep the default 'adaptive' strategy
     } catch (error) {
       console.error('Failed to fetch paper trading data:', error);
     } finally {
@@ -106,6 +168,9 @@ const PaperTrading = () => {
 
   const handleStart = async () => {
     try {
+      setStartingEngine(true); // Show loading immediately
+      setError(null); // Clear any existing errors
+      
       const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -114,20 +179,32 @@ const PaperTrading = () => {
       const data = await response.json();
       
       if (data.status === 'success') {
-        // Don't optimistically update - fetch real status instead
-        await fetchData(); // This will get the real backend state
+        // Immediate visual feedback
+        setIsRunning(true); // Optimistically update button state
+        
+        // Fetch real status to confirm
+        await fetchData();
         setError(null);
+        
+        // Show success message briefly
+        setError('✅ Paper trading started successfully!');
+        setTimeout(() => setError(null), 3000);
       } else {
         setError(data.message || 'Failed to start paper trading');
       }
     } catch (error) {
       console.error('Error starting paper trading:', error);
       setError('Failed to start paper trading - Network error');
+    } finally {
+      setStartingEngine(false); // Hide loading
     }
   };
 
   const handleStop = async () => {
     try {
+      setStoppingEngine(true); // Show loading immediately
+      setError(null); // Clear any existing errors
+      
       const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -136,15 +213,70 @@ const PaperTrading = () => {
       const data = await response.json();
       
       if (data.status === 'success') {
-        // Don't optimistically update - fetch real status instead
-        await fetchData(); // This will get the real backend state
+        // Immediate visual feedback
+        setIsRunning(false); // Optimistically update button state
+        
+        // Fetch real status to confirm
+        await fetchData();
         setError(null);
+        
+        // Show success message briefly
+        setError('✅ Paper trading stopped successfully!');
+        setTimeout(() => setError(null), 3000);
       } else {
         setError(data.message || 'Failed to stop paper trading');
       }
     } catch (error) {
       console.error('Error stopping paper trading:', error);
       setError('Failed to stop paper trading - Network error');
+    } finally {
+      setStoppingEngine(false); // Hide loading
+    }
+  };
+
+  const handleStrategyChange = async (newStrategy) => {
+    try {
+      setChangingStrategy(true);
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/strategy?strategy=${newStrategy}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setCurrentStrategy(newStrategy);
+        setError(null);
+        // Refresh data to show updated strategy
+        await fetchData();
+      } else {
+        setError(data.message || 'Failed to change strategy');
+      }
+    } catch (error) {
+      console.error('Error changing strategy:', error);
+      setError('Failed to change strategy - Network error');
+    } finally {
+      setChangingStrategy(false);
+    }
+  };
+
+  const getStrategyIcon = (strategy) => {
+    switch (strategy) {
+      case 'adaptive': return <AdaptiveIcon />;
+      case 'breakout': return <BreakoutIcon />;
+      case 'support_resistance': return <SupportResistanceIcon />;
+      case 'momentum': return <MomentumIcon />;
+      default: return <SettingsIcon />;
+    }
+  };
+
+  const getStrategyColor = (strategy) => {
+    switch (strategy) {
+      case 'adaptive': return 'primary';
+      case 'breakout': return 'success';
+      case 'support_resistance': return 'info';
+      case 'momentum': return 'warning';
+      default: return 'default';
     }
   };
 
@@ -205,15 +337,15 @@ const PaperTrading = () => {
         <Box>
           <Typography variant="h4" fontWeight="bold" display="flex" alignItems="center" gap={1}>
             <AIIcon color="primary" />
-            Live Paper Trading - ML Learning
+            Flow Trading Paper Trading
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Real market conditions • Zero risk • AI learning enabled
+            Real market conditions • Zero risk • Flow Trading strategies
           </Typography>
         </Box>
         <Box display="flex" gap={1} alignItems="center">
           <Chip
-            label={isRunning ? "LIVE LEARNING" : "STOPPED"}
+            label={isRunning ? "LIVE TRADING" : "STOPPED"}
             color={isRunning ? "success" : "default"}
             icon={isRunning ? <LearningIcon /> : <StopIcon />}
             sx={{ fontWeight: 'bold' }}
@@ -222,16 +354,117 @@ const PaperTrading = () => {
             variant="contained"
             color={isRunning ? "error" : "success"}
             onClick={isRunning ? handleStop : handleStart}
-            startIcon={isRunning ? <StopIcon /> : <StartIcon />}
-            disabled={loading}
+            startIcon={
+              startingEngine || stoppingEngine ? 
+                <CircularProgress size={20} color="inherit" /> :
+                isRunning ? <StopIcon /> : <StartIcon />
+            }
+            disabled={loading || startingEngine || stoppingEngine}
+            sx={{ 
+              minWidth: '140px',
+              fontWeight: 'bold',
+              '&:disabled': {
+                opacity: 0.7
+              }
+            }}
           >
-            {isRunning ? "Stop" : "Start"} Learning
+            {startingEngine ? 'Starting...' : 
+             stoppingEngine ? 'Stopping...' :
+             isRunning ? "Stop Trading" : "Start Trading"}
           </Button>
         </Box>
       </Box>
 
+      {/* Flow Trading Strategy Selection */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+            <SettingsIcon color="primary" />
+            Flow Trading Strategy Selection
+          </Typography>
+          
+          <Grid container spacing={3} alignItems="center">
+            <Grid item xs={12} md={4}>
+              <FormControl fullWidth>
+                <InputLabel>Trading Strategy</InputLabel>
+                <Select
+                  value={currentStrategy}
+                  label="Trading Strategy"
+                  onChange={(e) => handleStrategyChange(e.target.value)}
+                  disabled={changingStrategy || isRunning}
+                  startAdornment={getStrategyIcon(currentStrategy)}
+                >
+                  {Object.entries(availableStrategies).map(([key, strategy]) => (
+                    <MenuItem key={key} value={key}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        {getStrategyIcon(key)}
+                        {strategy.name}
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} md={8}>
+              {availableStrategies[currentStrategy] && (
+                <Box>
+                  <Typography variant="body1" fontWeight="bold" gutterBottom>
+                    {availableStrategies[currentStrategy].name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    {availableStrategies[currentStrategy].description}
+                  </Typography>
+                  <Box display="flex" gap={1} flexWrap="wrap" mt={1}>
+                    <Chip 
+                      label={`Best for: ${availableStrategies[currentStrategy].best_for}`}
+                      size="small" 
+                      color="info" 
+                      variant="outlined"
+                    />
+                    <Chip 
+                      label={`Risk: ${availableStrategies[currentStrategy].risk_level}`}
+                      size="small" 
+                      color={availableStrategies[currentStrategy].risk_level === 'High' ? 'error' : 'warning'} 
+                      variant="outlined"
+                    />
+                  </Box>
+                  <Box mt={1}>
+                    <Typography variant="caption" color="text.secondary">
+                      Features: {availableStrategies[currentStrategy].features?.join(', ')}
+                    </Typography>
+                  </Box>
+                </Box>
+              )}
+            </Grid>
+          </Grid>
+
+          {changingStrategy && (
+            <Box display="flex" alignItems="center" gap={1} mt={2}>
+              <CircularProgress size={16} />
+              <Typography variant="body2" color="text.secondary">
+                Changing strategy...
+              </Typography>
+            </Box>
+          )}
+
+          {isRunning && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              <Typography variant="body2">
+                <strong>Note:</strong> Strategy changes are disabled while trading is active. 
+                Stop trading first to change strategies.
+              </Typography>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert 
+          severity={error.includes('✅') ? 'success' : 'error'} 
+          sx={{ mb: 3 }}
+          onClose={() => setError(null)}
+        >
           {error}
         </Alert>
       )}
@@ -311,17 +544,19 @@ const PaperTrading = () => {
         </Grid>
       )}
 
-      {/* Profit Scraping Strategy Configuration */}
+      {/* Flow Trading Configuration */}
       {status && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
-            <Typography variant="h6" fontWeight="bold" gutterBottom>
-              🎯 Profit Scraping Strategy (Virtual Testing)
+            <Typography variant="h6" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+              {getStrategyIcon(currentStrategy)}
+              Flow Trading Configuration (Virtual Testing)
             </Typography>
             <Alert severity="info" sx={{ mb: 2 }}>
               <Typography variant="body2">
-                <strong>Virtual Money Testing:</strong> This uses the sophisticated profit scraping strategy with magnet level detection, 
-                but with $10,000 virtual money. No real trades are executed.
+                <strong>Virtual Money Testing:</strong> This uses the Flow Trading strategy with 4-layer approach: 
+                Market Regime Detection, Dynamic SL/TP, Correlation Filtering, and Volume/Momentum Triggers. 
+                Uses $10,000 virtual money - no real trades executed.
               </Typography>
             </Alert>
             <Grid container spacing={3}>
@@ -348,20 +583,20 @@ const PaperTrading = () => {
               <Grid item xs={6} sm={3}>
                 <Box textAlign="center">
                   <Typography variant="h6" color="info.main" fontWeight="bold">
-                    Magnet Levels
+                    Flow Trading
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Price Level Detection
+                    4-Layer Approach
                   </Typography>
                 </Box>
               </Grid>
               <Grid item xs={6} sm={3}>
                 <Box textAlign="center">
-                  <Typography variant="h6" color="warning.main" fontWeight="bold">
-                    Statistical
+                  <Typography variant="h6" color={getStrategyColor(currentStrategy)} fontWeight="bold">
+                    {availableStrategies[currentStrategy]?.name?.replace('🤖 ', '').replace('🚀 ', '').replace('📊 ', '').replace('⚡ ', '') || 'Strategy'}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Probability Analysis
+                    Current Strategy
                   </Typography>
                 </Box>
               </Grid>
@@ -390,7 +625,7 @@ const PaperTrading = () => {
           <Card>
             <CardContent>
               <Typography variant="h6" fontWeight="bold" gutterBottom>
-                🎯 Strategy Performance Learning
+                🎯 Flow Trading Strategy Performance
               </Typography>
               {status?.strategy_performance && Object.entries(status.strategy_performance).map(([strategy, data]) => (
                 <Box key={strategy} sx={{ mb: 2 }}>
@@ -729,15 +964,16 @@ const PaperTrading = () => {
         )}
       </Grid>
 
-      {/* Learning Status Footer */}
+      {/* Flow Trading Status Footer */}
       <Box mt={3} p={2} bgcolor="background.paper" borderRadius={2} border="1px solid" borderColor="divider">
         <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
           <Box>
-            <Typography variant="body2" fontWeight="bold">
-              🚀 Live Market Learning Status
+            <Typography variant="body2" fontWeight="bold" display="flex" alignItems="center" gap={1}>
+              {getStrategyIcon(currentStrategy)}
+              Flow Trading Status - {availableStrategies[currentStrategy]?.name || 'Strategy'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Learning from real market conditions • Building AI trading memory • Zero financial risk
+              Trading with real market conditions • Flow Trading only • Zero financial risk
             </Typography>
           </Box>
           <Box textAlign="right">
@@ -745,7 +981,7 @@ const PaperTrading = () => {
               Uptime: {status?.uptime_hours?.toFixed(1) || 0}h
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              ML data points: {(status?.completed_trades * 50) || 0}
+              Strategy: {currentStrategy} • Trades: {status?.completed_trades || 0}
             </Typography>
           </Box>
         </Stack>

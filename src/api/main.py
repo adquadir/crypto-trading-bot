@@ -99,25 +99,23 @@ async def initialize_components():
             logger.error(f"Enhanced signal tracker initialization failed: {e}")
             enhanced_signal_tracker = None
 
-        # Initialize opportunity manager WITH enhanced signal tracker
+        # Initialize opportunity manager
         logger.info("Initializing opportunity manager...")
         try:
             from src.opportunity.opportunity_manager import OpportunityManager
-            if exchange_client and strategy_manager and risk_manager:
-                # Initialize WITH enhanced_signal_tracker from the start
-                opportunity_manager = OpportunityManager(
-                    exchange_client, 
-                    strategy_manager, 
-                    risk_manager, 
-                    enhanced_signal_tracker=enhanced_signal_tracker
-                )
-                logger.info("Opportunity manager initialized successfully with enhanced signal tracker")
-            else:
-                logger.warning("Skipping opportunity manager - missing dependencies")
-                opportunity_manager = None
+            opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker)
+            logger.info("🟢 Opportunity manager initialized")
         except Exception as e:
             logger.error(f"Opportunity manager initialization failed: {e}")
             opportunity_manager = None
+        
+        # Initialize opportunity manager background scanners
+        if opportunity_manager:
+            try:
+                await opportunity_manager.initialize()
+                logger.info("🔄 Opportunity manager background scanners started")
+            except Exception as e:
+                logger.error(f"Opportunity manager background scanner initialization failed: {e}")
 
         # Initialize realtime scalping manager
         logger.info("Initializing realtime scalping manager...")
@@ -148,24 +146,46 @@ async def initialize_components():
             logger.error(f"🎯 Profit scraping engine initialization failed: {e}")
             profit_scraping_engine = None
         
-        # Initialize enhanced paper trading engine WITH profit scraping
-        logger.info("Initializing enhanced paper trading engine...")
+        # Initialize enhanced paper trading engine with FLOW TRADING ONLY
+        logger.info("Initializing enhanced paper trading engine with Flow Trading only...")
         try:
             # Load paper trading config with defaults
             paper_config = config.get('paper_trading', {}) if config else {}
             paper_config.setdefault('initial_balance', 10000.0)
             paper_config.setdefault('enabled', True)
             
+            # NEW: Flow Trading only initialization
             paper_trading_engine = await initialize_paper_trading_engine(
                 {'paper_trading': paper_config}, 
-                exchange_client,  # Can be None
-                opportunity_manager,  # Can be None
-                profit_scraping_engine  # NEW: Connect profit scraping engine
+                exchange_client,  # Can be None for mock mode
+                flow_trading_strategy='adaptive'  # Default strategy
             )
             
             if paper_trading_engine:
+                # CRITICAL FIX: Connect opportunity manager to paper trading engine
+                if opportunity_manager:
+                    paper_trading_engine.connect_opportunity_manager(opportunity_manager)
+                    logger.info("🔗 Connected opportunity manager to paper trading engine")
+                
+                # CRITICAL FIX: Connect profit scraping engine to paper trading engine
+                if profit_scraping_engine:
+                    paper_trading_engine.connect_profit_scraping_engine(profit_scraping_engine)
+                    # Also connect paper trading engine to profit scraping engine
+                    profit_scraping_engine.paper_trading_engine = paper_trading_engine
+                    logger.info("🔗 Connected profit scraping engine to paper trading engine")
+                
+                # CRITICAL FIX: Set the paper engine in routes AND store globally
                 set_paper_engine(paper_trading_engine)
-                logger.info("🟢 Enhanced paper trading engine initialized")
+                globals()['paper_trading_engine'] = paper_trading_engine  # Store globally for access
+                
+                # CRITICAL FIX: Start the engine immediately after all connections are made
+                if not paper_trading_engine.is_running:
+                    await paper_trading_engine.start()
+                    logger.info("🚀 Paper trading engine started with signal processing loop")
+                else:
+                    logger.info("🟢 Paper trading engine already running")
+                
+                logger.info("🟢 Enhanced paper trading engine initialized with Flow Trading + signal sources")
             else:
                 logger.warning("🟡 Paper trading engine initialization failed")
                 

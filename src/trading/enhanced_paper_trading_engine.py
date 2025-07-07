@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 from collections import defaultdict, deque
 import uuid
+import random
 
 from src.database.database import Database
 from src.utils.time_utils import format_duration
@@ -103,11 +104,14 @@ class PaperAccount:
 class EnhancedPaperTradingEngine:
     """Enhanced paper trading engine with ML integration"""
     
-    def __init__(self, config: Dict[str, Any], exchange_client=None, opportunity_manager=None, profit_scraping_engine=None):
+    def __init__(self, config: Dict[str, Any], exchange_client=None, flow_trading_strategy='adaptive'):
         self.config = config.get('paper_trading', {})
         self.exchange_client = exchange_client
-        self.opportunity_manager = opportunity_manager
-        self.profit_scraping_engine = profit_scraping_engine  # NEW: Direct connection to profit scraping
+        self.flow_trading_strategy = flow_trading_strategy  # NEW: Strategy selection
+        
+        # Initialize as None - will be set by the routes initialization
+        self.opportunity_manager = None
+        self.profit_scraping_engine = None
         
         # Initialize database - MUST work, no fallbacks
         self.db = Database()
@@ -155,10 +159,10 @@ class EnhancedPaperTradingEngine:
         self.ml_training_data = []
         self.feature_history = defaultdict(deque)
         
-        # Risk management - RELAXED FOR AGGRESSIVE PAPER TRADING
-        self.max_position_size = self.config.get('max_position_size_pct', 0.02)  # Keep 2% per position
-        self.max_total_exposure = self.config.get('max_total_exposure_pct', 1.0)  # 100% total exposure allowed
-        self.max_daily_loss = self.config.get('max_daily_loss_pct', 0.50)  # 50% daily loss limit
+        # Risk management - NO LIMITS FOR AGGRESSIVE PAPER TRADING
+        self.max_position_size = self.config.get('max_position_size_pct', 0.02)  # 2% per position
+        self.max_total_exposure = self.config.get('max_total_exposure_pct', 1.0)  # 100% total exposure
+        self.max_daily_loss = self.config.get('max_daily_loss_pct', 1.0)  # 100% daily loss limit
         
         logger.info("🟢 Enhanced Paper Trading Engine initialized")
     
@@ -562,7 +566,7 @@ class EnhancedPaperTradingEngine:
                     logger.info(f"🎯 Paper Trading: Processing {len(opportunities)} fresh opportunities")
                     
                     for opportunity in opportunities:
-                        logger.info(f"🎯 Paper Trading: Processing opportunity: {opportunity.get('symbol')} {opportunity.get('side')} (confidence: {opportunity.get('confidence')})")
+                        logger.info(f"🎯 Paper Trading: Processing opportunity: {opportunity.get('symbol')} {opportunity.get('side', opportunity.get('direction'))} (confidence: {opportunity.get('confidence')})")
                         
                         # Convert opportunity to trading signal
                         signal = self._convert_opportunity_to_signal(opportunity)
@@ -570,7 +574,11 @@ class EnhancedPaperTradingEngine:
                         if signal:
                             logger.info(f"🎯 Paper Trading: Converted to signal: {signal}")
                             
-                            if self._should_trade_signal(signal):
+                            # Add debug: log all filter checks
+                            filter_passed = self._should_trade_signal(signal)
+                            if not filter_passed:
+                                logger.info(f"❌ Signal rejected by filters: {signal['symbol']} {signal['side']} | Details: {signal}")
+                            else:
                                 logger.info(f"🚀 Paper Trading: Executing trade for {signal['symbol']} {signal['side']}")
                                 position_id = await self.execute_trade(signal)
                                 
@@ -578,8 +586,6 @@ class EnhancedPaperTradingEngine:
                                     logger.info(f"✅ Paper Trade executed: {signal['symbol']} {signal['side']} (Position: {position_id})")
                                 else:
                                     logger.warning(f"❌ Failed to execute paper trade: {signal['symbol']} {signal['side']}")
-                            else:
-                                logger.info(f"🎯 Paper Trading: Signal rejected by filters: {signal['symbol']} {signal['side']}")
                         else:
                             logger.warning(f"🎯 Paper Trading: Failed to convert opportunity to signal: {opportunity}")
                 else:
@@ -594,56 +600,143 @@ class EnhancedPaperTradingEngine:
                 await asyncio.sleep(60)
     
     async def _get_fresh_opportunities(self) -> List[Dict[str, Any]]:
-        """Get fresh trading opportunities from FLOW TRADING SYSTEM"""
+        """Get fresh trading opportunities with PROFIT SCRAPING priority + Opportunity Manager + Flow Trading fallback"""
         try:
-            # PRIORITY 1: Use Flow Trading System (adaptive, market-aware)
-            flow_opportunities = await self._get_flow_trading_opportunities()
-            if flow_opportunities:
-                logger.info(f"🌊 Flow Trading: Found {len(flow_opportunities)} adaptive opportunities")
-                return flow_opportunities
-            
-            # FALLBACK: Use profit scraping engine if Flow Trading not available
-            elif self.profit_scraping_engine and self.profit_scraping_engine.active:
-                logger.info("🎯 Fallback: Using static profit scraping engine")
+            # PRIORITY 1: Use Profit Scraping Engine for high-quality scalping signals
+            if self.profit_scraping_engine and hasattr(self.profit_scraping_engine, 'active') and self.profit_scraping_engine.active:
+                logger.info("🎯 Getting opportunities from PROFIT SCRAPING ENGINE")
+                profit_opportunities = await self._get_profit_scraping_opportunities()
                 
-                # Get profit scraping opportunities (these are the magnet level opportunities)
-                scraping_opportunities = self.profit_scraping_engine.get_opportunities()
-                
-                fresh_opportunities = []
-                for symbol, opportunities in scraping_opportunities.items():
-                    for opp in opportunities:
-                        # Check if we haven't already traded this symbol recently
-                        if not self._recently_traded_symbol(symbol):
-                            # Convert profit scraping opportunity to our format
-                            converted_opp = self._convert_scraping_opportunity(opp, symbol)
-                            if converted_opp:
-                                fresh_opportunities.append(converted_opp)
-                
-                logger.info(f"🎯 Static Profit Scraping: Found {len(fresh_opportunities)} magnet level opportunities")
-                return fresh_opportunities
-            
-            # FALLBACK 2: Use opportunity manager if nothing else available
-            elif self.opportunity_manager:
-                logger.info("🎯 Fallback: Using opportunity manager (generic signals)")
-                
+                if profit_opportunities:
+                    logger.info(f"🎯 Profit Scraping: Found {len(profit_opportunities)} high-quality level-based opportunities")
+                    return profit_opportunities
+                else:
+                    logger.info("🎯 Profit Scraping: Engine active but no opportunities available")
+            else:
+                logger.info("🎯 Paper Trading: Profit scraping engine not active, using fallback")
+
+            # PRIORITY 2: Use connected opportunity manager
+            if self.opportunity_manager:
+                logger.info("🎯 Getting opportunities from connected Opportunity Manager")
                 opportunities = self.opportunity_manager.get_opportunities()
                 
-                fresh_opportunities = []
-                for opp in opportunities:
-                    if opp.get('confidence', 0) >= 0.5:
-                        symbol = opp.get('symbol')
-                        if not self._recently_traded_symbol(symbol):
-                            fresh_opportunities.append(opp)
+                # DEBUG: Log what we received
+                logger.info(f"🎯 DEBUG: Received {len(opportunities)} opportunities from opportunity manager")
+                if opportunities:
+                    logger.info(f"🎯 DEBUG: First opportunity: {opportunities[0]}")
                 
-                return fresh_opportunities
-            
+                if opportunities:
+                    # Filter for tradable opportunities only with higher confidence for non-profit-scraping
+                    tradable_opportunities = [
+                        opp for opp in opportunities 
+                        if opp.get('tradable', False) and opp.get('confidence', 0) >= 0.65  # Higher threshold without profit scraping
+                    ]
+                    
+                    logger.info(f"🎯 DEBUG: After filtering: {len(tradable_opportunities)} tradable opportunities")
+                    if tradable_opportunities:
+                        logger.info(f"🎯 DEBUG: First tradable opportunity: {tradable_opportunities[0]}")
+                    
+                    if tradable_opportunities:
+                        logger.info(f"🎯 Opportunity Manager: Found {len(tradable_opportunities)} tradable opportunities (from {len(opportunities)} total)")
+                        return tradable_opportunities
+                    else:
+                        logger.info(f"🎯 Opportunity Manager: Found {len(opportunities)} opportunities but none meet higher confidence threshold")
+                else:
+                    logger.info("🎯 Opportunity Manager: No opportunities available")
             else:
-                logger.warning("🎯 No Flow Trading, profit scraping engine OR opportunity manager available")
+                logger.warning("🎯 Paper Trading: Opportunity manager not connected, using fallback")
+            
+            # PRIORITY 3: Use Flow Trading system as final fallback
+            flow_opportunities = await self._get_flow_trading_opportunities()
+            
+            if flow_opportunities:
+                logger.info(f"🌊 Flow Trading Fallback: Found {len(flow_opportunities)} opportunities using {self.flow_trading_strategy} strategy")
+                return flow_opportunities
+            else:
+                logger.info(f"🌊 Flow Trading Fallback: No opportunities found with {self.flow_trading_strategy} strategy")
                 return []
             
         except Exception as e:
-            logger.error(f"Error getting fresh opportunities: {e}")
+            logger.error(f"Error getting opportunities: {e}")
             return []
+    
+    async def _get_profit_scraping_opportunities(self) -> List[Dict[str, Any]]:
+        """Get high-quality opportunities from profit scraping engine"""
+        try:
+            if not self.profit_scraping_engine:
+                return []
+            
+            # Get current opportunities from profit scraping engine
+            opportunities = self.profit_scraping_engine.get_opportunities()
+            
+            if not opportunities:
+                return []
+            
+            converted_opportunities = []
+            
+            for symbol, symbol_opportunities in opportunities.items():
+                for opp in symbol_opportunities:
+                    # Convert profit scraping opportunity to signal format
+                    signal = self._convert_profit_scraping_opportunity_to_signal(opp)
+                    if signal:
+                        converted_opportunities.append(signal)
+            
+            # Sort by opportunity score (highest first)
+            converted_opportunities.sort(key=lambda x: x.get('opportunity_score', 0), reverse=True)
+            
+            logger.info(f"🎯 Profit Scraping: Converted {len(converted_opportunities)} opportunities to signals")
+            return converted_opportunities
+            
+        except Exception as e:
+            logger.error(f"Error getting profit scraping opportunities: {e}")
+            return []
+    
+    def _convert_profit_scraping_opportunity_to_signal(self, opp: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Convert profit scraping opportunity to trading signal format"""
+        try:
+            # Extract data from profit scraping opportunity
+            symbol = opp['symbol']
+            level = opp['level']
+            targets = opp['targets']
+            current_price = opp['current_price']
+            distance_to_level = opp['distance_to_level']
+            opportunity_score = opp['opportunity_score']
+            
+            # Determine trade direction based on level type
+            if level['level_type'] == 'support':
+                side = 'LONG'
+            elif level['level_type'] == 'resistance':
+                side = 'SHORT'
+            else:
+                return None
+            
+            # Convert to signal format
+            signal = {
+                'symbol': symbol,
+                'side': side,
+                'confidence': targets['confidence_score'] / 100.0,  # Convert to 0-1 scale
+                'strategy_type': 'profit_scraping',
+                'entry_price': current_price,
+                'stop_loss': targets['stop_loss'],
+                'take_profit': targets['profit_target'],
+                'leverage': 10,  # Match paper trading leverage
+                'opportunity_score': opportunity_score,
+                'distance_to_level': distance_to_level,
+                'level_type': level['level_type'],
+                'level_strength': level['strength_score'],
+                'expected_duration_minutes': targets['expected_duration_minutes'],
+                'profit_probability': targets['profit_probability'],
+                'risk_reward_ratio': targets['risk_reward_ratio'],
+                'market_regime': 'level_based',
+                'volatility_regime': 'medium',
+                'entry_reason': f"Profit scraping: {level['level_type']} @ {level['price']:.4f} (score: {opportunity_score})"
+            }
+            
+            return signal
+            
+        except Exception as e:
+            logger.error(f"Error converting profit scraping opportunity to signal: {e}")
+            return None
     
     def _convert_scraping_opportunity(self, opp: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
         """Convert profit scraping opportunity to paper trading format"""
@@ -687,16 +780,21 @@ class EnhancedPaperTradingEngine:
     def _convert_opportunity_to_signal(self, opportunity: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Convert opportunity to trading signal"""
         try:
+            # CRITICAL FIX: Map 'direction' field to 'side' field
+            direction = opportunity.get('direction') or opportunity.get('side', 'LONG')
+            
             signal = {
                 'symbol': opportunity.get('symbol'),
                 'strategy_type': 'scalping',  # Default to scalping for paper trading
-                'side': opportunity.get('side', 'LONG'),
+                'side': direction,  # Use direction field from opportunity
                 'confidence': opportunity.get('confidence', 0.0),
                 'ml_score': opportunity.get('ml_score', opportunity.get('confidence', 0.0)),
                 'reason': f"auto_signal_{opportunity.get('strategy_type', 'unknown')}",
                 'market_regime': opportunity.get('market_regime', 'unknown'),
                 'volatility_regime': opportunity.get('volatility_regime', 'medium')
             }
+            
+            logger.info(f"🔄 Signal conversion: {opportunity.get('symbol')} {direction} (confidence: {opportunity.get('confidence', 0.0):.3f})")
             
             return signal
             
@@ -705,19 +803,37 @@ class EnhancedPaperTradingEngine:
             return None
     
     def _should_trade_signal(self, signal: Dict[str, Any]) -> bool:
-        """Determine if we should trade this signal - AGGRESSIVE PAPER TRADING"""
+        """Determine if we should trade this signal - PAPER TRADING MODE: AGGRESSIVE APPROVAL"""
         try:
             # Basic filters
             if not signal.get('symbol') or not signal.get('side'):
+                logger.info(f"❌ Signal rejected: Missing symbol or side")
                 return False
             
-            # Lower confidence threshold for more trades
-            if signal.get('confidence', 0) < 0.5:  # Reduced from 0.7 to 0.5
+            symbol = signal['symbol']
+            strategy_type = signal.get('strategy_type', 'unknown')
+            base_confidence = signal.get('confidence', 0)
+            
+            # PAPER TRADING MODE: Much more aggressive approval
+            # Lower confidence thresholds for testing
+            if strategy_type == 'profit_scraping':
+                min_confidence = 0.50  # Reduced from 0.60
+            elif strategy_type == 'flow_trading':
+                min_confidence = 0.45  # Reduced from 0.55
+            elif strategy_type == 'opportunity_manager':
+                min_confidence = 0.50  # Reduced from 0.65
+            else:
+                min_confidence = 0.40  # Reduced from 0.50
+            
+            # Basic confidence check
+            if base_confidence < min_confidence:
+                logger.info(f"❌ {symbol} rejected: Low confidence {base_confidence:.3f} < {min_confidence:.3f} ({strategy_type})")
                 return False
             
-            # REMOVED: One position per symbol limit - allow multiple positions
-            # REMOVED: Position count limits - take all validated signals
+            # PAPER TRADING: Skip cooldown check (already returns False)
+            # PAPER TRADING: Skip recent performance checks for aggressive testing
             
+            logger.info(f"✅ {symbol} approved: Confidence {base_confidence:.3f} >= {min_confidence:.3f} ({strategy_type}) - PAPER TRADING MODE")
             return True
             
         except Exception as e:
@@ -725,15 +841,10 @@ class EnhancedPaperTradingEngine:
             return False
     
     def _recently_traded_symbol(self, symbol: str) -> bool:
-        """Check if we recently traded this symbol - RELAXED COOLDOWN"""
+        """Check if we recently traded this symbol - NO COOLDOWN FOR PAPER TRADING"""
         try:
-            # Check if we traded this symbol in the last 1 minute (reduced from 30 minutes)
-            cutoff_time = datetime.utcnow() - timedelta(minutes=1)
-            
-            for trade in reversed(self.completed_trades):
-                if trade.symbol == symbol and trade.entry_time >= cutoff_time:
-                    return True
-            
+            # PAPER TRADING FIX: No cooldown restrictions for paper trading
+            # We want to test the system aggressively, not limit opportunities
             return False
             
         except Exception as e:
@@ -741,19 +852,39 @@ class EnhancedPaperTradingEngine:
             return False
     
     async def _get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current price for symbol"""
+        """Get current price for symbol - REAL DATA with PAPER TRADING FALLBACK"""
         try:
             if self.exchange_client:
                 ticker = await self.exchange_client.get_ticker_24h(symbol)
-                return float(ticker.get('lastPrice', 0))
+                if ticker and ticker.get('lastPrice'):
+                    return float(ticker.get('lastPrice', 0))
+            
+            # PAPER TRADING FALLBACK: Use realistic mock prices when exchange client fails
+            logger.warning(f"Exchange client unavailable for {symbol} - using paper trading mock prices")
+            
+            # Mock prices based on realistic crypto values (as of 2024)
+            mock_prices = {
+                'BTCUSDT': 43000.0 + (hash(symbol + str(datetime.utcnow().minute)) % 2000 - 1000),  # ~42k-44k range
+                'ETHUSDT': 2600.0 + (hash(symbol + str(datetime.utcnow().minute)) % 200 - 100),   # ~2.5k-2.7k range
+                'BNBUSDT': 310.0 + (hash(symbol + str(datetime.utcnow().minute)) % 20 - 10),      # ~300-320 range
+                'ADAUSDT': 0.48 + (hash(symbol + str(datetime.utcnow().minute)) % 10 - 5) * 0.01, # ~0.43-0.53 range
+                'SOLUSDT': 95.0 + (hash(symbol + str(datetime.utcnow().minute)) % 10 - 5),        # ~90-100 range
+            }
+            
+            if symbol in mock_prices:
+                mock_price = mock_prices[symbol]
+                logger.info(f"📊 Paper Trading Mock Price: {symbol} = ${mock_price:.4f}")
+                return mock_price
             else:
-                # Mock price for testing
-                import random
-                base_price = 50000 if 'BTC' in symbol else 3000
-                return base_price * (1 + random.uniform(-0.02, 0.02))
+                # Default mock price for unknown symbols
+                default_price = 100.0 + (hash(symbol) % 50)
+                logger.info(f"📊 Paper Trading Default Mock Price: {symbol} = ${default_price:.4f}")
+                return default_price
+            
         except Exception as e:
             logger.error(f"Error getting price for {symbol}: {e}")
-            return None
+            # Last resort fallback
+            return 100.0
     
     def _calculate_position_size(self, symbol: str, price: float, confidence: float) -> float:
         """Calculate position size with REAL Binance-style 10x leverage"""
@@ -929,51 +1060,17 @@ class EnhancedPaperTradingEngine:
         return sum(pos.unrealized_pnl for pos in self.positions.values())
     
     async def _check_risk_limits(self, symbol: str, price: float) -> bool:
-        """Check if trade passes risk limits - WITH DETAILED LOGGING"""
+        """Check if trade passes risk limits - NO LIMITS FOR AGGRESSIVE TRADING"""
         try:
-            logger.info(f"🔍 Risk Check for {symbol}: Starting detailed analysis...")
+            logger.info(f"🔍 Risk Check for {symbol}: NO LIMITS - All trades allowed")
             
-            # Check daily loss limit
-            daily_loss_limit = -self.account.balance * self.max_daily_loss
-            logger.info(f"🔍 Daily P&L: ${self.account.daily_pnl:.2f}, Limit: ${daily_loss_limit:.2f}")
-            
-            if self.account.daily_pnl < daily_loss_limit:
-                logger.warning(f"❌ REJECTED {symbol}: Daily loss limit exceeded (${self.account.daily_pnl:.2f} < ${daily_loss_limit:.2f})")
-                return False
-            
-            # Check total MARGIN exposure (REAL leverage calculation)
-            current_margin_used = 0.0
-            for pos in self.positions.values():
-                # Each position uses $200 margin regardless of notional value
-                current_margin_used += 200.0  # Fixed $200 margin per position
-            
-            max_exposure = self.account.balance * self.max_total_exposure
-            margin_per_trade = 200.0  # Only $200 margin required per trade
-            
-            logger.info(f"🔍 Current Margin Used: ${current_margin_used:.2f}")
-            logger.info(f"🔍 Max Exposure: ${max_exposure:.2f} ({self.max_total_exposure * 100:.0f}% of ${self.account.balance:.2f})")
-            logger.info(f"🔍 New Position Margin: ${margin_per_trade:.2f}")
-            logger.info(f"🔍 Total Margin After Trade: ${current_margin_used + margin_per_trade:.2f}")
-            logger.info(f"🔍 Active Positions: {len(self.positions)}")
-            logger.info(f"🔍 Max Possible Positions: {max_exposure / margin_per_trade:.0f}")
-            
-            # Check margin usage (this is the real constraint)
-            if current_margin_used >= max_exposure:
-                logger.warning(f"❌ REJECTED {symbol}: Margin limit exceeded (${current_margin_used:.2f} >= ${max_exposure:.2f})")
-                return False
-            
-            # Check if new position would exceed margin limit
-            if (current_margin_used + margin_per_trade) > max_exposure:
-                logger.warning(f"❌ REJECTED {symbol}: New position would exceed margin limit (${current_margin_used + margin_per_trade:.2f} > ${max_exposure:.2f})")
-                logger.info(f"🔍 Note: With ${max_exposure:.2f} available, you can have {max_exposure/200:.0f} simultaneous positions")
-                return False
-            
-            logger.info(f"✅ PASSED {symbol}: All risk checks passed")
+            # NO LIMITS: All trades are allowed
+            logger.info(f"✅ PASSED {symbol}: No risk limits - aggressive trading enabled")
             return True
             
         except Exception as e:
             logger.error(f"❌ Error checking risk limits for {symbol}: {e}")
-            return False
+            return True  # Allow trade even on error
     
     def _update_strategy_performance(self, trade: PaperTrade):
         """Update strategy performance metrics"""
@@ -2795,3 +2892,13 @@ class EnhancedPaperTradingEngine:
         )
         
         logger.info("🔄 Paper trading account reset")
+    
+    def connect_opportunity_manager(self, opportunity_manager):
+        """Connect opportunity manager to paper trading engine"""
+        self.opportunity_manager = opportunity_manager
+        logger.info("🔗 Opportunity Manager connected to Paper Trading Engine")
+    
+    def connect_profit_scraping_engine(self, profit_scraping_engine):
+        """Connect profit scraping engine to paper trading engine"""
+        self.profit_scraping_engine = profit_scraping_engine
+        logger.info("🔗 Profit Scraping Engine connected to Paper Trading Engine")
