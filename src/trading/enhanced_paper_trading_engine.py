@@ -452,7 +452,7 @@ class EnhancedPaperTradingEngine:
                     if not current_price:
                         continue
                     
-                    # Update unrealized P&L
+                    # Update unrealized P&L with DETAILED LOGGING
                     if position.side == 'LONG':
                         position.unrealized_pnl = (current_price - position.entry_price) * position.quantity
                         position.unrealized_pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
@@ -462,23 +462,33 @@ class EnhancedPaperTradingEngine:
                     
                     position.current_price = current_price
                     
-                    # ============================================================================
-                    # ABSOLUTE $7 FLOOR PROTECTION SYSTEM - HIGHEST PRIORITY
-                    # ============================================================================
-                    
                     # Calculate current profit in dollars
                     current_pnl_dollars = position.unrealized_pnl
+                    
+                    # CRITICAL DEBUG LOGGING for positions approaching $10
+                    if current_pnl_dollars >= 8.0:  # Log when approaching $10 target
+                        logger.info(f"🎯 PROFIT TRACKING: {position.symbol} @ ${current_pnl_dollars:.2f} profit (Target: $10)")
+                        logger.info(f"   Entry: ${position.entry_price:.4f} | Current: ${current_price:.4f} | Quantity: {position.quantity:.6f}")
+                        logger.info(f"   Side: {position.side} | Calculation: ({current_price:.4f} - {position.entry_price:.4f}) * {position.quantity:.6f} = ${current_pnl_dollars:.2f}")
                     
                     # Update highest profit ever reached
                     position.highest_profit_ever = max(position.highest_profit_ever, current_pnl_dollars)
                     
-                    # RULE 1: PRIMARY TARGET - $10 immediate exit (HIGHEST PRIORITY)
+                    # ============================================================================
+                    # RULE 1: PRIMARY TARGET - $10 IMMEDIATE EXIT (ABSOLUTE HIGHEST PRIORITY)
+                    # ============================================================================
                     if current_pnl_dollars >= position.primary_target_profit:
+                        logger.info(f"🎯 PRIMARY TARGET HIT: {position.symbol} reached ${current_pnl_dollars:.2f} >= ${position.primary_target_profit:.2f}")
+                        logger.info(f"🎯 IMMEDIATE EXIT: Marking position {position_id} for closure")
+                        
+                        # ATOMIC OPERATION: Mark as closed immediately to prevent race conditions
+                        position.closed = True
                         positions_to_close.append((position_id, "primary_target_10_dollars"))
-                        logger.info(f"🎯 PRIMARY TARGET: {position.symbol} hit $10 target @ ${current_pnl_dollars:.2f}")
-                        continue  # Skip all other checks - $10 target takes absolute precedence
+                        continue  # Skip ALL other checks - $10 target takes absolute precedence
                     
+                    # ============================================================================
                     # RULE 2: ABSOLUTE FLOOR ACTIVATION - Once $7+ is reached
+                    # ============================================================================
                     if position.highest_profit_ever >= position.absolute_floor_profit:
                         # Floor is now ACTIVE - position is protected
                         if not position.profit_floor_activated:
@@ -487,22 +497,26 @@ class EnhancedPaperTradingEngine:
                         
                         # RULE 3: ABSOLUTE FLOOR PROTECTION - Never drop below $7
                         if current_pnl_dollars < position.absolute_floor_profit:
+                            logger.info(f"💰 FLOOR VIOLATION: {position.symbol} dropped to ${current_pnl_dollars:.2f} < $7 floor")
+                            position.closed = True
                             positions_to_close.append((position_id, "absolute_floor_7_dollars"))
-                            logger.info(f"💰 FLOOR EXIT: {position.symbol} secured at $7 floor (peaked at ${position.highest_profit_ever:.2f})")
                             continue  # Skip all other checks - floor protection takes precedence
                     
+                    # ============================================================================
                     # RULE 4: Below $7 - Normal rules apply (stop-loss, etc.)
-                    # Only execute normal checks if position hasn't reached $7 yet OR floor isn't violated
+                    # ============================================================================
                     
                     # CRITICAL: Check for level breakdown/breakout BEFORE normal SL/TP
                     breakdown_exit = await self._check_level_breakdown_exit(position, current_price)
                     if breakdown_exit:
+                        position.closed = True
                         positions_to_close.append((position_id, breakdown_exit))
                         continue  # Skip other checks if level breakdown detected
                     
                     # Check for trend reversal exit
                     trend_reversal_exit = await self._check_trend_reversal_exit(position, current_price)
                     if trend_reversal_exit:
+                        position.closed = True
                         positions_to_close.append((position_id, trend_reversal_exit))
                         continue  # Skip other checks if trend reversal detected
                     
@@ -510,33 +524,41 @@ class EnhancedPaperTradingEngine:
                     if not position.profit_floor_activated and position.stop_loss:
                         if (position.side == 'LONG' and current_price <= position.stop_loss) or \
                            (position.side == 'SHORT' and current_price >= position.stop_loss):
+                            position.closed = True
                             positions_to_close.append((position_id, "stop_loss"))
+                            continue
                     
                     # Check take profit (only if floor not activated)
                     if not position.profit_floor_activated and position.take_profit:
                         if (position.side == 'LONG' and current_price >= position.take_profit) or \
                            (position.side == 'SHORT' and current_price <= position.take_profit):
+                            position.closed = True
                             positions_to_close.append((position_id, "take_profit"))
+                            continue
                     
                     # Optional: Add safety net for extremely long positions (7 days)
                     # Only close if position is losing money to prevent runaway losses
                     hold_time = datetime.utcnow() - position.entry_time
                     if hold_time > timedelta(days=7) and position.unrealized_pnl < 0:
+                        position.closed = True
                         positions_to_close.append((position_id, "safety_time_limit"))
                         logger.warning(f"⚠️ Closing losing position {position_id} after 7 days for safety")
                 
-                # Close positions
+                # Close positions with enhanced logging
                 for position_id, reason in positions_to_close:
+                    logger.info(f"🔄 CLOSING POSITION: {position_id} for reason: {reason}")
                     await self.close_position(position_id, reason)
                 
                 # Update account equity
                 self.account.unrealized_pnl = self._calculate_unrealized_pnl()
                 self.account.equity = self.account.balance + self.account.unrealized_pnl
                 
-                await asyncio.sleep(5)  # Check every 5 seconds for faster breakdown detection
+                await asyncio.sleep(3)  # Check every 3 seconds for faster $10 target detection
                 
             except Exception as e:
                 logger.error(f"Error in position monitoring loop: {e}")
+                import traceback
+                logger.error(f"Full traceback: {traceback.format_exc()}")
                 await asyncio.sleep(30)
     
     async def _performance_tracking_loop(self):
