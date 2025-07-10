@@ -28,7 +28,9 @@ import {
   Select,
   MenuItem,
   Tooltip,
-  IconButton
+  IconButton,
+  Tabs,
+  Tab
 } from '@mui/material';
 import {
   PlayArrow as StartIcon,
@@ -47,7 +49,9 @@ import {
   Rocket as BreakoutIcon,
   BarChart as SupportResistanceIcon,
   FlashOn as MomentumIcon,
-  Info as InfoIcon
+  Info as InfoIcon,
+  History as HistoryIcon,
+  CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import config from '../config';
@@ -59,6 +63,7 @@ const PaperTrading = () => {
   
   const [status, setStatus] = useState(null);
   const [positions, setPositions] = useState([]);
+  const [completedTrades, setCompletedTrades] = useState([]);
   const [performance, setPerformance] = useState(null);
   const [learningInsights, setLearningInsights] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -67,6 +72,7 @@ const PaperTrading = () => {
   const [closingPositions, setClosingPositions] = useState(new Set());
   const [startingEngine, setStartingEngine] = useState(false);
   const [stoppingEngine, setStoppingEngine] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
   const [availableStrategies, setAvailableStrategies] = useState({
     adaptive: {
       name: "🤖 Adaptive Strategy",
@@ -102,9 +108,10 @@ const PaperTrading = () => {
 
   const fetchData = async () => {
     try {
-      const [statusRes, positionsRes, performanceRes, strategiesRes, currentStrategyRes] = await Promise.all([
+      const [statusRes, positionsRes, completedTradesRes, performanceRes, strategiesRes, currentStrategyRes] = await Promise.all([
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/status`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/positions`),
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/trades`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/performance`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/strategies`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/strategy`)
@@ -131,6 +138,11 @@ const PaperTrading = () => {
       if (positionsRes.ok) {
         const positionsData = await positionsRes.json();
         setPositions(positionsData.data || []);
+      }
+
+      if (completedTradesRes.ok) {
+        const completedTradesData = await completedTradesRes.json();
+        setCompletedTrades(completedTradesData.trades || []);
       }
 
       if (performanceRes.ok) {
@@ -654,113 +666,229 @@ const PaperTrading = () => {
           </Card>
         </Grid>
 
-        {/* Active Positions */}
+        {/* Positions and Trades Tabs */}
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
-              <Typography variant="h6" fontWeight="bold" gutterBottom>
-                📊 Live Virtual Positions
-              </Typography>
-              {positions?.length > 0 ? (
-                <TableContainer component={Paper} sx={{ maxHeight: 400, overflowX: 'auto' }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Symbol</TableCell>
-                        <TableCell>Side</TableCell>
-                        <TableCell align="right">Entry Price</TableCell>
-                        <TableCell align="right">Current Price</TableCell>
-                        <TableCell align="right">Price Change</TableCell>
-                        <TableCell align="right">PnL</TableCell>
-                        <TableCell align="right">Age</TableCell>
-                        <TableCell align="center">Action</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {positions.map((position, index) => {
-                        const priceChange = position.current_price && position.entry_price 
-                          ? ((position.current_price - position.entry_price) / position.entry_price) * 100
-                          : 0;
-                        const priceChangeColor = priceChange > 0 ? 'success.main' : priceChange < 0 ? 'error.main' : 'text.secondary';
-                        
-                        return (
-                          <TableRow key={index}>
-                            <TableCell>
-                              <Typography variant="body2" fontWeight="bold">
-                                {position.symbol}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={position.side}
-                                color={position.side === 'LONG' ? 'success' : 'error'}
-                                size="small"
-                              />
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2" fontWeight="bold">
-                                ${position.entry_price?.toFixed(4) || '0.0000'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography 
-                                variant="body2" 
-                                fontWeight="bold"
-                                color={priceChangeColor}
-                              >
-                                ${position.current_price?.toFixed(4) || '0.0000'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography
-                                variant="body2"
-                                color={priceChangeColor}
-                                fontWeight="bold"
-                              >
-                                {priceChange > 0 ? '+' : ''}{priceChange.toFixed(2)}%
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography
-                                variant="body2"
-                                color={getPnLColor(position.unrealized_pnl)}
-                                fontWeight="bold"
-                              >
-                                ${position.unrealized_pnl?.toFixed(2)}
-                                <br />
-                                <Typography variant="caption" component="span">
-                                  ({position.unrealized_pnl_pct?.toFixed(1)}%)
-                                </Typography>
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="caption">
-                                {formatDuration(position.age_minutes)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="center">
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="error"
-                                startIcon={closingPositions.has(position.id) ? <CircularProgress size={16} /> : <CloseIcon />}
-                                onClick={() => handleClosePosition(position.id)}
-                                disabled={closingPositions.has(position.id)}
-                                sx={{ minWidth: 'auto', px: 1 }}
-                              >
-                                {closingPositions.has(position.id) ? 'Closing...' : 'Close'}
-                              </Button>
-                            </TableCell>
+              <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+                <Tabs 
+                  value={activeTab} 
+                  onChange={(e, newValue) => setActiveTab(newValue)}
+                  variant="fullWidth"
+                >
+                  <Tab 
+                    icon={<TimelineIcon />} 
+                    label="Active Positions" 
+                    iconPosition="start"
+                  />
+                  <Tab 
+                    icon={<HistoryIcon />} 
+                    label="Completed Trades" 
+                    iconPosition="start"
+                  />
+                </Tabs>
+              </Box>
+
+              {/* Active Positions Tab */}
+              {activeTab === 0 && (
+                <Box>
+                  <Typography variant="h6" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+                    <TimelineIcon color="primary" />
+                    Live Virtual Positions ({positions?.length || 0})
+                  </Typography>
+                  {positions?.length > 0 ? (
+                    <TableContainer component={Paper} sx={{ maxHeight: 400, overflowX: 'auto' }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Symbol</TableCell>
+                            <TableCell>Side</TableCell>
+                            <TableCell align="right">Entry Price</TableCell>
+                            <TableCell align="right">Current Price</TableCell>
+                            <TableCell align="right">Price Change</TableCell>
+                            <TableCell align="right">PnL</TableCell>
+                            <TableCell align="right">Age</TableCell>
+                            <TableCell align="center">Action</TableCell>
                           </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              ) : (
-                <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
-                  No active positions
-                </Typography>
+                        </TableHead>
+                        <TableBody>
+                          {positions.map((position, index) => {
+                            const priceChange = position.current_price && position.entry_price 
+                              ? ((position.current_price - position.entry_price) / position.entry_price) * 100
+                              : 0;
+                            const priceChangeColor = priceChange > 0 ? 'success.main' : priceChange < 0 ? 'error.main' : 'text.secondary';
+                            
+                            return (
+                              <TableRow key={index}>
+                                <TableCell>
+                                  <Typography variant="body2" fontWeight="bold">
+                                    {position.symbol}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={position.side}
+                                    color={position.side === 'LONG' ? 'success' : 'error'}
+                                    size="small"
+                                  />
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography variant="body2" fontWeight="bold">
+                                    ${position.entry_price?.toFixed(4) || '0.0000'}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography 
+                                    variant="body2" 
+                                    fontWeight="bold"
+                                    color={priceChangeColor}
+                                  >
+                                    ${position.current_price?.toFixed(4) || '0.0000'}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography
+                                    variant="body2"
+                                    color={priceChangeColor}
+                                    fontWeight="bold"
+                                  >
+                                    {priceChange > 0 ? '+' : ''}{priceChange.toFixed(2)}%
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography
+                                    variant="body2"
+                                    color={getPnLColor(position.unrealized_pnl)}
+                                    fontWeight="bold"
+                                  >
+                                    ${position.unrealized_pnl?.toFixed(2)}
+                                    <br />
+                                    <Typography variant="caption" component="span">
+                                      ({position.unrealized_pnl_pct?.toFixed(1)}%)
+                                    </Typography>
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography variant="caption">
+                                    {formatDuration(position.age_minutes)}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="center">
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="error"
+                                    startIcon={closingPositions.has(position.id) ? <CircularProgress size={16} /> : <CloseIcon />}
+                                    onClick={() => handleClosePosition(position.id)}
+                                    disabled={closingPositions.has(position.id)}
+                                    sx={{ minWidth: 'auto', px: 1 }}
+                                  >
+                                    {closingPositions.has(position.id) ? 'Closing...' : 'Close'}
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                      No active positions
+                    </Typography>
+                  )}
+                </Box>
+              )}
+
+              {/* Completed Trades Tab */}
+              {activeTab === 1 && (
+                <Box>
+                  <Typography variant="h6" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+                    <HistoryIcon color="primary" />
+                    Completed Trades ({completedTrades?.length || 0})
+                  </Typography>
+                  {completedTrades?.length > 0 ? (
+                    <TableContainer component={Paper} sx={{ maxHeight: 400, overflowX: 'auto' }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Symbol</TableCell>
+                            <TableCell>Side</TableCell>
+                            <TableCell align="right">Entry Price</TableCell>
+                            <TableCell align="right">Exit Price</TableCell>
+                            <TableCell align="right">PnL</TableCell>
+                            <TableCell align="right">Duration</TableCell>
+                            <TableCell align="center">Result</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {completedTrades.map((trade, index) => {
+                            const isWin = trade.pnl > 0;
+                            const pnlColor = isWin ? 'success.main' : 'error.main';
+                            
+                            return (
+                              <TableRow key={index}>
+                                <TableCell>
+                                  <Typography variant="body2" fontWeight="bold">
+                                    {trade.symbol}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={trade.side}
+                                    color={trade.side === 'LONG' ? 'success' : 'error'}
+                                    size="small"
+                                  />
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography variant="body2" fontWeight="bold">
+                                    ${trade.entry_price?.toFixed(4) || '0.0000'}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography variant="body2" fontWeight="bold">
+                                    ${trade.exit_price?.toFixed(4) || '0.0000'}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography
+                                    variant="body2"
+                                    color={pnlColor}
+                                    fontWeight="bold"
+                                  >
+                                    ${trade.pnl?.toFixed(2) || '0.00'}
+                                    <br />
+                                    <Typography variant="caption" component="span">
+                                      ({trade.pnl_pct?.toFixed(1)}%)
+                                    </Typography>
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography variant="caption">
+                                    {trade.duration_minutes ? formatDuration(trade.duration_minutes) : 'N/A'}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="center">
+                                  <Chip
+                                    icon={isWin ? <CheckCircleIcon /> : <CloseIcon />}
+                                    label={isWin ? 'WIN' : 'LOSS'}
+                                    color={isWin ? 'success' : 'error'}
+                                    size="small"
+                                    variant="outlined"
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                      No completed trades yet
+                    </Typography>
+                  )}
+                </Box>
               )}
             </CardContent>
           </Card>
