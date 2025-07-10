@@ -69,6 +69,7 @@ class PaperPosition:
     highest_profit_ever: float = 0.0
     absolute_floor_profit: float = 7.0  # $7 ABSOLUTE MINIMUM FLOOR
     primary_target_profit: float = 10.0  # $10 PRIMARY TARGET
+    closed: bool = False  # NEW: Prevent double exits and race conditions
 
 @dataclass
 class PaperTrade:
@@ -313,9 +314,10 @@ class EnhancedPaperTradingEngine:
             
             # Set stop loss and take profit
             position.stop_loss = await self._calculate_stop_loss(current_price, side, symbol)
+            # FIXED: Re-enable normal take profit to work cooperatively with floor system
             position.take_profit = await self._calculate_take_profit(current_price, side, symbol)
             
-            logger.info(f"🎯 Paper Trading: Set SL/TP for {symbol} - SL: {position.stop_loss}, TP: {position.take_profit}")
+            logger.info(f"🎯 Paper Trading: Set SL/TP for {symbol} - SL: {position.stop_loss}, TP: {position.take_profit} (Cooperative with Floor System)")
             
             # Store position
             self.positions[position_id] = position
@@ -349,6 +351,9 @@ class EnhancedPaperTradingEngine:
                 return None
             
             position = self.positions[position_id]
+            
+            # Mark position as closed to prevent race conditions
+            position.closed = True
             
             # Get current price
             current_price = await self._get_current_price(position.symbol)
@@ -439,6 +444,10 @@ class EnhancedPaperTradingEngine:
                 positions_to_close = []
                 
                 for position_id, position in self.positions.items():
+                    # Skip already closed positions to prevent race conditions
+                    if position.closed:
+                        continue
+                        
                     current_price = await self._get_current_price(position.symbol)
                     if not current_price:
                         continue
@@ -470,14 +479,14 @@ class EnhancedPaperTradingEngine:
                         continue  # Skip all other checks - $10 target takes absolute precedence
                     
                     # RULE 2: ABSOLUTE FLOOR ACTIVATION - Once $7+ is reached
-                    elif position.highest_profit_ever >= position.absolute_floor_profit:
+                    if position.highest_profit_ever >= position.absolute_floor_profit:
                         # Floor is now ACTIVE - position is protected
                         if not position.profit_floor_activated:
                             position.profit_floor_activated = True
                             logger.info(f"🛡️ FLOOR ACTIVATED: {position.symbol} reached ${position.highest_profit_ever:.2f}, $7 floor now ACTIVE")
                         
                         # RULE 3: ABSOLUTE FLOOR PROTECTION - Never drop below $7
-                        if current_pnl_dollars <= position.absolute_floor_profit:
+                        if current_pnl_dollars < position.absolute_floor_profit:
                             positions_to_close.append((position_id, "absolute_floor_7_dollars"))
                             logger.info(f"💰 FLOOR EXIT: {position.symbol} secured at $7 floor (peaked at ${position.highest_profit_ever:.2f})")
                             continue  # Skip all other checks - floor protection takes precedence
@@ -491,22 +500,23 @@ class EnhancedPaperTradingEngine:
                         positions_to_close.append((position_id, breakdown_exit))
                         continue  # Skip other checks if level breakdown detected
                     
-                    # Check stop loss
-                    if position.stop_loss:
-                        if (position.side == 'LONG' and current_price <= position.stop_loss) or \
-                           (position.side == 'SHORT' and current_price >= position.stop_loss):
-                            positions_to_close.append((position_id, "stop_loss"))
-                    
-                    # Check take profit
-                    if position.take_profit:
-                        if (position.side == 'LONG' and current_price >= position.take_profit) or \
-                           (position.side == 'SHORT' and current_price <= position.take_profit):
-                            positions_to_close.append((position_id, "take_profit"))
-                    
                     # Check for trend reversal exit
                     trend_reversal_exit = await self._check_trend_reversal_exit(position, current_price)
                     if trend_reversal_exit:
                         positions_to_close.append((position_id, trend_reversal_exit))
+                        continue  # Skip other checks if trend reversal detected
+                    
+                    # Check stop loss (only if floor not activated)
+                    if not position.profit_floor_activated and position.stop_loss:
+                        if (position.side == 'LONG' and current_price <= position.stop_loss) or \
+                           (position.side == 'SHORT' and current_price >= position.stop_loss):
+                            positions_to_close.append((position_id, "stop_loss"))
+                    
+                    # Check take profit (only if floor not activated)
+                    if not position.profit_floor_activated and position.take_profit:
+                        if (position.side == 'LONG' and current_price >= position.take_profit) or \
+                           (position.side == 'SHORT' and current_price <= position.take_profit):
+                            positions_to_close.append((position_id, "take_profit"))
                     
                     # Optional: Add safety net for extremely long positions (7 days)
                     # Only close if position is losing money to prevent runaway losses
