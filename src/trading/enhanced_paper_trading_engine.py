@@ -63,6 +63,12 @@ class PaperPosition:
     entry_reason: str = ""
     market_regime: str = ""
     volatility_regime: str = ""
+    
+    # ABSOLUTE FLOOR PROTECTION SYSTEM
+    profit_floor_activated: bool = False
+    highest_profit_ever: float = 0.0
+    absolute_floor_profit: float = 7.0  # $7 ABSOLUTE MINIMUM FLOOR
+    primary_target_profit: float = 10.0  # $10 PRIMARY TARGET
 
 @dataclass
 class PaperTrade:
@@ -427,7 +433,7 @@ class EnhancedPaperTradingEngine:
             return None
     
     async def _position_monitoring_loop(self):
-        """Monitor positions for stop loss/take profit AND trend reversal exits"""
+        """Monitor positions for stop loss/take profit AND ABSOLUTE $7 FLOOR PROTECTION"""
         while self.is_running:
             try:
                 positions_to_close = []
@@ -446,6 +452,38 @@ class EnhancedPaperTradingEngine:
                         position.unrealized_pnl_pct = ((position.entry_price - current_price) / position.entry_price) * 100
                     
                     position.current_price = current_price
+                    
+                    # ============================================================================
+                    # ABSOLUTE $7 FLOOR PROTECTION SYSTEM - HIGHEST PRIORITY
+                    # ============================================================================
+                    
+                    # Calculate current profit in dollars
+                    current_pnl_dollars = position.unrealized_pnl
+                    
+                    # Update highest profit ever reached
+                    position.highest_profit_ever = max(position.highest_profit_ever, current_pnl_dollars)
+                    
+                    # RULE 1: PRIMARY TARGET - $10 immediate exit (HIGHEST PRIORITY)
+                    if current_pnl_dollars >= position.primary_target_profit:
+                        positions_to_close.append((position_id, "primary_target_10_dollars"))
+                        logger.info(f"🎯 PRIMARY TARGET: {position.symbol} hit $10 target @ ${current_pnl_dollars:.2f}")
+                        continue  # Skip all other checks - $10 target takes absolute precedence
+                    
+                    # RULE 2: ABSOLUTE FLOOR ACTIVATION - Once $7+ is reached
+                    elif position.highest_profit_ever >= position.absolute_floor_profit:
+                        # Floor is now ACTIVE - position is protected
+                        if not position.profit_floor_activated:
+                            position.profit_floor_activated = True
+                            logger.info(f"🛡️ FLOOR ACTIVATED: {position.symbol} reached ${position.highest_profit_ever:.2f}, $7 floor now ACTIVE")
+                        
+                        # RULE 3: ABSOLUTE FLOOR PROTECTION - Never drop below $7
+                        if current_pnl_dollars <= position.absolute_floor_profit:
+                            positions_to_close.append((position_id, "absolute_floor_7_dollars"))
+                            logger.info(f"💰 FLOOR EXIT: {position.symbol} secured at $7 floor (peaked at ${position.highest_profit_ever:.2f})")
+                            continue  # Skip all other checks - floor protection takes precedence
+                    
+                    # RULE 4: Below $7 - Normal rules apply (stop-loss, etc.)
+                    # Only execute normal checks if position hasn't reached $7 yet OR floor isn't violated
                     
                     # CRITICAL: Check for level breakdown/breakout BEFORE normal SL/TP
                     breakdown_exit = await self._check_level_breakdown_exit(position, current_price)

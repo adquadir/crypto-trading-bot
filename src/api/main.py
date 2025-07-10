@@ -4,6 +4,7 @@ import asyncio
 import logging
 import signal
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -42,205 +43,240 @@ realtime_scalping_manager = None
 enhanced_signal_tracker = None
 integrated_profit_manager = None
 paper_trading_engine = None
-profit_scraping_engine = None  # NEW: Profit scraping engine
+profit_scraping_engine = None
+
+async def initialize_exchange_client():
+    """Initialize exchange client - either works or fails."""
+    logger.info("🔗 Initializing exchange client...")
+    
+    from src.market_data.exchange_client import ExchangeClient
+    
+    exchange_client = ExchangeClient()
+    
+    # Test the connection
+    try:
+        if hasattr(exchange_client, 'get_ticker'):
+            await exchange_client.get_ticker('BTCUSDT')
+        elif hasattr(exchange_client, 'fetch_ticker'):
+            await exchange_client.fetch_ticker('BTC/USDT')
+    except Exception as e:
+        logger.error(f"Exchange client connection test failed: {e}")
+        raise
+    
+    logger.info("✅ Exchange client initialized successfully")
+    return exchange_client
+
+async def initialize_strategy_manager(exchange_client):
+    """Initialize strategy manager - either works or fails."""
+    logger.info("🎯 Initializing strategy manager...")
+    
+    from src.strategy.strategy_manager import StrategyManager
+    
+    if not exchange_client:
+        raise ValueError("Exchange client is required for strategy manager")
+        
+    strategy_manager = StrategyManager(exchange_client)
+    logger.info("✅ Strategy manager initialized successfully")
+    return strategy_manager
+
+async def initialize_risk_manager(config):
+    """Initialize risk manager - either works or fails."""
+    logger.info("🛡️ Initializing risk manager...")
+    
+    from src.risk.risk_manager import RiskManager
+    
+    risk_manager = RiskManager(config)
+    logger.info("✅ Risk manager initialized successfully")
+    return risk_manager
+
+async def initialize_signal_tracker():
+    """Initialize enhanced signal tracker - either works or fails."""
+    logger.info("📡 Initializing enhanced signal tracker...")
+    
+    from src.signals.enhanced_signal_tracker import EnhancedSignalTracker
+    
+    tracker = EnhancedSignalTracker()
+    logger.info("✅ Enhanced signal tracker initialized successfully")
+    return tracker
+
+async def initialize_opportunity_manager(exchange_client, strategy_manager, risk_manager, signal_tracker):
+    """Initialize opportunity manager - either works or fails."""
+    logger.info("🎯 Initializing opportunity manager...")
+    
+    from src.opportunity.opportunity_manager import OpportunityManager
+    
+    # Validate all required components
+    if not all([exchange_client, strategy_manager, risk_manager, signal_tracker]):
+        raise ValueError("All components are required for opportunity manager")
+        
+    opportunity_manager = OpportunityManager(
+        exchange_client, 
+        strategy_manager, 
+        risk_manager, 
+        signal_tracker
+    )
+    
+    logger.info("✅ Opportunity manager initialized successfully")
+    return opportunity_manager
+
+async def initialize_profit_scraping_engine(exchange_client):
+    """Initialize profit scraping engine - either works or fails."""
+    logger.info("🎯 Initializing profit scraping engine...")
+    
+    from src.strategies.profit_scraping.profit_scraping_engine import ProfitScrapingEngine
+    
+    if not exchange_client:
+        raise ValueError("Exchange client is required for profit scraping engine")
+        
+    profit_engine = ProfitScrapingEngine(
+        exchange_client=exchange_client,
+        paper_trading_engine=None  # Will be connected later
+    )
+    
+    logger.info("✅ Profit scraping engine initialized successfully")
+    return profit_engine
+
+async def initialize_paper_trading_engine(config, exchange_client, opportunity_manager, profit_scraping_engine):
+    """Initialize enhanced paper trading engine - either works or fails."""
+    logger.info("🚀 Initializing enhanced paper trading engine...")
+    
+    from src.trading.enhanced_paper_trading_engine import EnhancedPaperTradingEngine
+    
+    # Validate all required components
+    if not all([config, exchange_client, opportunity_manager, profit_scraping_engine]):
+        raise ValueError("All components are required for paper trading engine")
+        
+    paper_engine = EnhancedPaperTradingEngine(
+        config=config,
+        exchange_client=exchange_client
+    )
+    
+    # Connect all components
+    logger.info("🔗 Connecting opportunity manager to paper trading engine...")
+    paper_engine.connect_opportunity_manager(opportunity_manager)
+    
+    logger.info("🔗 Connecting profit scraping engine to paper trading engine...")
+    paper_engine.connect_profit_scraping_engine(profit_scraping_engine)
+    
+    # Start the paper trading engine
+    await paper_engine.start()
+    
+    logger.info("✅ Enhanced paper trading engine initialized with all connections")
+    return paper_engine
 
 async def initialize_components():
-    """Initialize all trading components in the background."""
+    """Initialize all trading components - either works or fails."""
     global exchange_client, strategy_manager, risk_manager, opportunity_manager, config, realtime_scalping_manager, enhanced_signal_tracker, integrated_profit_manager, paper_trading_engine, profit_scraping_engine
     
-    try:
-        logger.info("Initializing components...")
-        
-        # Load configuration
-        config = load_config()
-        
-        # Initialize exchange client
-        logger.info("Initializing exchange client...")
-        try:
-            from src.market_data.exchange_client import ExchangeClient
-            exchange_client = ExchangeClient()
-            logger.info("Exchange client initialized successfully")
-        except Exception as e:
-            logger.error(f"Exchange client initialization failed: {e}")
-            exchange_client = None
-        
-        # Initialize strategy manager
-        logger.info("Initializing strategy manager...")
-        try:
-            from src.strategy.strategy_manager import StrategyManager
-            if exchange_client:
-                strategy_manager = StrategyManager(exchange_client)
-                logger.info("Strategy manager initialized successfully")
-            else:
-                logger.warning("Skipping strategy manager - exchange client failed")
-                strategy_manager = None
-        except Exception as e:
-            logger.error(f"Strategy manager initialization failed: {e}")
-            strategy_manager = None
-        
-        # Initialize risk manager
-        logger.info("Initializing risk manager...")
-        try:
-            from src.risk.risk_manager import RiskManager
-            risk_manager = RiskManager(config)
-            logger.info("Risk manager initialized successfully")
-        except Exception as e:
-            logger.error(f"Risk manager initialization failed: {e}")
-            risk_manager = None
-        
-        # Initialize enhanced signal tracker FIRST
-        logger.info("Initializing enhanced signal tracker...")
-        try:
-            from src.signals.enhanced_signal_tracker import EnhancedSignalTracker
-            enhanced_signal_tracker = EnhancedSignalTracker()
-            await enhanced_signal_tracker.initialize()
-            logger.info("Enhanced signal tracker initialized successfully")
-        except Exception as e:
-            logger.error(f"Enhanced signal tracker initialization failed: {e}")
-            enhanced_signal_tracker = None
+    logger.info("🚀 Starting component initialization...")
+    
+    # Load configuration
+    config = load_config()
+    
+    # Initialize exchange client
+    exchange_client = await initialize_exchange_client()
+    
+    # Initialize strategy manager
+    strategy_manager = await initialize_strategy_manager(exchange_client)
+    
+    # Initialize risk manager
+    risk_manager = await initialize_risk_manager(config)
+    
+    # Initialize enhanced signal tracker
+    enhanced_signal_tracker = await initialize_signal_tracker()
 
-        # Initialize opportunity manager
-        logger.info("Initializing opportunity manager...")
-        try:
-            from src.opportunity.opportunity_manager import OpportunityManager
-            opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker)
-            logger.info("🟢 Opportunity manager initialized")
-        except Exception as e:
-            logger.error(f"Opportunity manager initialization failed: {e}")
-            opportunity_manager = None
-        
-        # Initialize opportunity manager background scanners
-        if opportunity_manager:
-            try:
-                await opportunity_manager.initialize()
-                logger.info("🔄 Opportunity manager background scanners started")
-            except Exception as e:
-                logger.error(f"Opportunity manager background scanner initialization failed: {e}")
+    # Initialize opportunity manager
+    opportunity_manager = await initialize_opportunity_manager(
+        exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker
+    )
 
-        # Initialize realtime scalping manager
-        logger.info("Initializing realtime scalping manager...")
-        try:
-            from src.signals.realtime_scalping_manager import RealtimeScalpingManager
-            from src.api.connection_manager import ConnectionManager
-            if opportunity_manager and exchange_client:
-                connection_manager = ConnectionManager()
-                realtime_scalping_manager = RealtimeScalpingManager(opportunity_manager, exchange_client, connection_manager)
-                logger.info("Realtime scalping manager initialized successfully")
-            else:
-                logger.warning("Skipping realtime scalping - missing dependencies")
-                realtime_scalping_manager = None
-        except Exception as e:
-            logger.error(f"Realtime scalping manager initialization failed: {e}")
-            realtime_scalping_manager = None
+    # Initialize realtime scalping manager
+    logger.info("Initializing realtime scalping manager...")
+    from src.signals.realtime_scalping_manager import RealtimeScalpingManager
+    from src.api.connection_manager import ConnectionManager
+    
+    if not all([opportunity_manager, exchange_client]):
+        raise ValueError("Missing dependencies for realtime scalping manager")
         
-        # Initialize profit scraping engine
-        logger.info("🎯 Initializing PROFIT SCRAPING ENGINE...")
-        try:
-            from src.strategies.profit_scraping.profit_scraping_engine import ProfitScrapingEngine
-            profit_scraping_engine = ProfitScrapingEngine(
-                exchange_client=exchange_client,
-                paper_trading_engine=None  # Will be set after paper trading engine is created
-            )
-            logger.info("🎯 Profit scraping engine initialized successfully")
-        except Exception as e:
-            logger.error(f"🎯 Profit scraping engine initialization failed: {e}")
-            profit_scraping_engine = None
+    connection_manager = ConnectionManager()
+    realtime_scalping_manager = RealtimeScalpingManager(opportunity_manager, exchange_client, connection_manager)
+    logger.info("✅ Realtime scalping manager initialized successfully")
+    
+    # Initialize profit scraping engine
+    profit_scraping_engine = await initialize_profit_scraping_engine(exchange_client)
+    
+    # Initialize enhanced paper trading engine
+    paper_trading_engine = await initialize_paper_trading_engine(
+        config, exchange_client, opportunity_manager, profit_scraping_engine
+    )
+    
+    # Initialize monitoring system
+    logger.info("Initializing monitoring system...")
+    db = Database()
+    monitor = initialize_monitor(db)
+    
+    # Start monitoring with all components
+    components = {
+        'exchange_client': exchange_client,
+        'strategy_manager': strategy_manager,
+        'risk_manager': risk_manager,
+        'opportunity_manager': opportunity_manager,
+        'realtime_scalping_manager': realtime_scalping_manager,
+        'enhanced_signal_tracker': enhanced_signal_tracker,
+        'integrated_profit_manager': integrated_profit_manager,
+        'paper_trading_engine': paper_trading_engine
+    }
+    
+    await monitor.start_monitoring(components)
+    logger.info("✅ Monitoring system initialized")
+    
+    # Initialize integrated profit manager
+    logger.info("Initializing integrated profit manager...")
+    from src.strategies.flow_trading.integrated_profit_manager import IntegratedProfitManager
+    
+    if not all([exchange_client, risk_manager]):
+        raise ValueError("Missing dependencies for integrated profit manager")
         
-        # Initialize enhanced paper trading engine with FLOW TRADING ONLY
-        logger.info("Initializing enhanced paper trading engine with Flow Trading only...")
-        try:
-            # Load paper trading config with defaults
-            paper_config = config.get('paper_trading', {}) if config else {}
-            paper_config.setdefault('initial_balance', 10000.0)
-            paper_config.setdefault('enabled', True)
-            
-            # NEW: Flow Trading only initialization
-            paper_trading_engine = await initialize_paper_trading_engine(
-                {'paper_trading': paper_config}, 
-                exchange_client,  # Can be None for mock mode
-                flow_trading_strategy='adaptive'  # Default strategy
-            )
-            
-            if paper_trading_engine:
-                # CRITICAL FIX: Connect opportunity manager to paper trading engine
-                if opportunity_manager:
-                    paper_trading_engine.connect_opportunity_manager(opportunity_manager)
-                    logger.info("🔗 Connected opportunity manager to paper trading engine")
-                
-                # CRITICAL FIX: Connect profit scraping engine to paper trading engine
-                if profit_scraping_engine:
-                    paper_trading_engine.connect_profit_scraping_engine(profit_scraping_engine)
-                    # Also connect paper trading engine to profit scraping engine
-                    profit_scraping_engine.paper_trading_engine = paper_trading_engine
-                    logger.info("🔗 Connected profit scraping engine to paper trading engine")
-                
-                # CRITICAL FIX: Set the paper engine in routes AND store globally
-                set_paper_engine(paper_trading_engine)
-                globals()['paper_trading_engine'] = paper_trading_engine  # Store globally for access
-                
-                # CRITICAL FIX: Start the engine immediately after all connections are made
-                if not paper_trading_engine.is_running:
-                    await paper_trading_engine.start()
-                    logger.info("🚀 Paper trading engine started with signal processing loop")
-                else:
-                    logger.info("🟢 Paper trading engine already running")
-                
-                logger.info("🟢 Enhanced paper trading engine initialized with Flow Trading + signal sources")
-            else:
-                logger.warning("🟡 Paper trading engine initialization failed")
-                
-        except Exception as e:
-            logger.error(f"Paper trading engine initialization failed: {e}")
-            import traceback
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            paper_trading_engine = None
-        
-        # Initialize monitoring system
-        logger.info("Initializing monitoring system...")
-        try:
-            db = Database()
-            monitor = initialize_monitor(db)
-            
-            # Start monitoring with all components
-            components = {
-                'exchange_client': exchange_client,
-                'strategy_manager': strategy_manager,
-                'risk_manager': risk_manager,
-                'opportunity_manager': opportunity_manager,
-                'realtime_scalping_manager': realtime_scalping_manager,
-                'enhanced_signal_tracker': enhanced_signal_tracker,
-                'integrated_profit_manager': integrated_profit_manager,
-                'paper_trading_engine': paper_trading_engine
-            }
-            
-            await monitor.start_monitoring(components)
-            logger.info("🟢 Monitoring system initialized")
-            
-        except Exception as e:
-            logger.error(f"Monitoring system initialization failed: {e}")
-        
-        # Flow trading components are initialized via their router
-        logger.info("🟢 Flow trading components ready")
-        
-        # Initialize integrated profit manager
-        logger.info("Initializing integrated profit manager...")
-        try:
-            from src.strategies.flow_trading.integrated_profit_manager import IntegratedProfitManager
-            if exchange_client and risk_manager:
-                integrated_profit_manager = IntegratedProfitManager(exchange_client, risk_manager)
-                logger.info("🟢 Integrated profit manager initialized")
-            else:
-                logger.warning("Skipping profit manager - missing dependencies")
-                integrated_profit_manager = None
-        except Exception as e:
-            logger.error(f"Integrated profit manager initialization failed: {e}")
-            integrated_profit_manager = None
-        
-        logger.info("All components initialized successfully!")
-        
-    except Exception as e:
-        logger.error(f"Component initialization failed: {e}")
-        raise e
+    integrated_profit_manager = IntegratedProfitManager(exchange_client, risk_manager)
+    logger.info("✅ Integrated profit manager initialized")
+    
+    # Final validation
+    await validate_all_components()
+    
+    logger.info("🎉 ALL COMPONENTS INITIALIZED SUCCESSFULLY!")
+
+async def validate_all_components():
+    """Final validation that all components are properly connected and working."""
+    global exchange_client, strategy_manager, risk_manager, opportunity_manager, enhanced_signal_tracker, paper_trading_engine, profit_scraping_engine
+    
+    logger.info("🔍 Running final component validation...")
+    
+    # Validate all components exist
+    required_components = {
+        'exchange_client': exchange_client,
+        'strategy_manager': strategy_manager,
+        'risk_manager': risk_manager,
+        'opportunity_manager': opportunity_manager,
+        'enhanced_signal_tracker': enhanced_signal_tracker,
+        'profit_scraping_engine': profit_scraping_engine,
+        'paper_trading_engine': paper_trading_engine
+    }
+    
+    for name, component in required_components.items():
+        if not component:
+            raise ValueError(f"{name} validation failed - component is None")
+        logger.info(f"✅ {name} validated")
+    
+    # Validate connections
+    if not (hasattr(paper_trading_engine, 'opportunity_manager') and paper_trading_engine.opportunity_manager):
+        raise ValueError("Paper trading <-> Opportunity manager connection failed")
+    logger.info("✅ Paper trading <-> Opportunity manager connection validated")
+    
+    if not (hasattr(paper_trading_engine, 'profit_scraping_engine') and paper_trading_engine.profit_scraping_engine):
+        raise ValueError("Paper trading <-> Profit scraping connection failed")
+    logger.info("✅ Paper trading <-> Profit scraping connection validated")
+    
+    logger.info("🎯 ALL COMPONENT VALIDATIONS PASSED!")
 
 def create_app():
     """Create and configure FastAPI application"""
@@ -276,7 +312,7 @@ def create_app():
         """Handle startup events"""
         logger.info("🚀 Starting Crypto Trading API...")
         
-        # Initialize components in background
+        # Initialize components - will fail if any component fails
         await initialize_components()
         
         # Set component references for other modules
@@ -303,6 +339,9 @@ def create_app():
             scalping_manager=realtime_scalping_manager
         )
         
+        # Set paper trading engine for routes
+        set_paper_engine(paper_trading_engine)
+        
         logger.info("✅ API server started successfully!")
 
     @app.on_event("shutdown") 
@@ -311,11 +350,12 @@ def create_app():
         logger.info("🛑 Shutting down API server...")
         
         # Cleanup components
-        try:
-            if realtime_scalping_manager:
-                realtime_scalping_manager.cleanup()
-        except Exception as e:
-            logger.warning(f"Cleanup error: {e}")
+        if realtime_scalping_manager:
+            realtime_scalping_manager.cleanup()
+        if paper_trading_engine and hasattr(paper_trading_engine, 'stop'):
+            await paper_trading_engine.stop()
+        if profit_scraping_engine and hasattr(profit_scraping_engine, 'stop_profit_scraping'):
+            await profit_scraping_engine.stop_profit_scraping()
 
     @app.get("/")
     async def root():
@@ -332,7 +372,9 @@ def create_app():
                 "opportunity_manager": opportunity_manager is not None,
                 "realtime_scalping": realtime_scalping_manager is not None,
                 "integrated_profit_manager": integrated_profit_manager is not None,
-                "paper_trading_engine": paper_trading_engine is not None
+                "paper_trading_engine": paper_trading_engine is not None,
+                "profit_scraping_engine": profit_scraping_engine is not None,
+                "enhanced_signal_tracker": enhanced_signal_tracker is not None
             }
         }
 

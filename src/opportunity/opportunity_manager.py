@@ -1394,27 +1394,113 @@ class OpportunityManager:
     def _analyze_market_and_generate_signal_balanced(self, symbol: str, market_data: Dict[str, Any], current_time: float) -> Optional[Dict[str, Any]]:
         """Generate balanced LONG/SHORT signals with real trend detection"""
         try:
-            logger.info(f"🎯 SIMPLE signal generation for {symbol}")
+            logger.info(f"🎯 REAL signal generation for {symbol}")
             
-            # FORCE SIGNAL GENERATION - Skip all market data checks
-            current_price = 50000.0  # Default price for BTC
-            volatility = 0.02  # Default volatility
+            # Get real market data
+            klines = market_data.get('klines', [])
+            if not klines or len(klines) < 20:
+                logger.warning(f"Insufficient market data for {symbol}: {len(klines) if klines else 0} candles")
+                return None
             
-            # SIMPLE SIGNAL GENERATION - Always generate a signal
-            direction = 'LONG' if (hash(symbol) % 2 == 0) else 'SHORT'
-            confidence = 0.7
+            # Extract real price data
+            closes = [float(k['close']) for k in klines[-20:]]
+            highs = [float(k['high']) for k in klines[-20:]]
+            lows = [float(k['low']) for k in klines[-20:]]
+            volumes = [float(k['volume']) for k in klines[-20:]]
             
-            # Calculate simple TP/SL
+            current_price = closes[-1]
+            
+            # Calculate real technical indicators
+            sma_5 = sum(closes[-5:]) / 5
+            sma_10 = sum(closes[-10:]) / 10
+            sma_20 = sum(closes) / len(closes)
+            
+            # Price momentum
+            price_change_5 = (current_price - closes[-6]) / closes[-6] if len(closes) > 5 else 0
+            
+            # Volume analysis
+            recent_volume = sum(volumes[-3:]) / 3
+            avg_volume = sum(volumes) / len(volumes)
+            volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1
+            
+            # Volatility calculation
+            returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+            volatility = (sum(r*r for r in returns) / len(returns)) ** 0.5 if returns else 0.02
+            
+            # Signal generation logic
+            direction = None
+            confidence = 0.6
+            reasoning = []
+            
+            # LONG signal conditions
+            if (sma_5 > sma_10 > sma_20 and 
+                price_change_5 > 0.001 and 
+                volume_ratio > 1.0):
+                direction = 'LONG'
+                confidence = 0.65 + min(0.25, price_change_5 * 20) + min(0.1, (volume_ratio - 1.0) * 0.2)
+                reasoning = [
+                    'Uptrend: SMA alignment bullish',
+                    f'Momentum: {price_change_5*100:.2f}%',
+                    f'Volume: {volume_ratio:.2f}x average'
+                ]
+                
+            # SHORT signal conditions  
+            elif (sma_5 < sma_10 < sma_20 and 
+                  price_change_5 < -0.001 and 
+                  volume_ratio > 1.0):
+                direction = 'SHORT'
+                confidence = 0.65 + min(0.25, abs(price_change_5) * 20) + min(0.1, (volume_ratio - 1.0) * 0.2)
+                reasoning = [
+                    'Downtrend: SMA alignment bearish',
+                    f'Momentum: {price_change_5*100:.2f}%',
+                    f'Volume: {volume_ratio:.2f}x average'
+                ]
+                
+            # Mean reversion signals
+            elif abs(price_change_5) > 0.005:
+                if price_change_5 < -0.005:  # Oversold
+                    direction = 'LONG'
+                    confidence = 0.6 + min(0.2, abs(price_change_5) * 10)
+                    reasoning = ['Mean reversion: Oversold bounce']
+                else:  # Overbought
+                    direction = 'SHORT'
+                    confidence = 0.6 + min(0.2, abs(price_change_5) * 10)
+                    reasoning = ['Mean reversion: Overbought correction']
+            
+            # Fallback signal generation
+            if not direction:
+                # Generate based on recent price action
+                if current_price > sma_20:
+                    direction = 'LONG'
+                    confidence = 0.55
+                    reasoning = ['Price above SMA20 - bullish bias']
+                else:
+                    direction = 'SHORT'
+                    confidence = 0.55
+                    reasoning = ['Price below SMA20 - bearish bias']
+            
+            # Calculate dynamic TP/SL based on volatility
+            atr_estimate = volatility * current_price
+            min_move = max(atr_estimate * 2, current_price * 0.01)  # At least 1% move
+            
             if direction == 'LONG':
                 entry_price = current_price
-                take_profit = entry_price * 1.03  # 3% profit
-                stop_loss = entry_price * 0.97   # 3% stop
-            else:
+                take_profit = current_price + (atr_estimate * 3.0)  # 3x ATR target
+                stop_loss = current_price - (atr_estimate * 1.5)   # 1.5x ATR stop
+            else:  # SHORT
                 entry_price = current_price
-                take_profit = entry_price * 0.97  # 3% profit
-                stop_loss = entry_price * 1.03   # 3% stop
+                take_profit = current_price - (atr_estimate * 3.0)  # 3x ATR target
+                stop_loss = current_price + (atr_estimate * 1.5)   # 1.5x ATR stop
             
-            # Create simple opportunity
+            # Calculate risk/reward
+            risk = abs(entry_price - stop_loss)
+            reward = abs(take_profit - entry_price)
+            risk_reward = reward / risk if risk > 0 else 2.0
+            
+            # Calculate investment details
+            investment_calcs = self._calculate_100_dollar_investment(entry_price, take_profit, stop_loss, confidence, volatility)
+            
+            # Create real opportunity
             opportunity = {
                 'symbol': symbol,
                 'direction': direction,
@@ -1425,26 +1511,46 @@ class OpportunityManager:
                 'confidence': confidence,
                 'confidence_score': confidence,
                 'leverage': 1.0,
-                'recommended_leverage': 2.0,
-                'risk_reward': 1.0,
-                'strategy': 'simple_test',
-                'strategy_type': 'simple_test',
-                'market_regime': 'TRENDING',
-                'regime': 'TRENDING',
-                'volume_24h': 1000000,
+                'recommended_leverage': investment_calcs['recommended_leverage'],
+                'risk_reward': risk_reward,
+                
+                # Investment calculations
+                'investment_amount_100': investment_calcs['investment_amount_100'],
+                'position_size_100': investment_calcs['position_size_100'],
+                'expected_profit_100': investment_calcs['expected_profit_100'],
+                'expected_return_100': investment_calcs['expected_return_100'],
+                'position_size': investment_calcs['position_size'],
+                'notional_value': investment_calcs['notional_value'],
+                'expected_profit': investment_calcs['expected_profit'],
+                'expected_return': investment_calcs['expected_return'],
+                
+                'strategy': 'real_analysis',
+                'strategy_type': 'real_analysis',
+                'market_regime': self._determine_market_regime_simple(closes, volumes),
+                'regime': self._determine_market_regime_simple(closes, volumes).upper(),
+                'volume_24h': market_data.get('volume_24h', sum(volumes)),
                 'volatility': volatility * 100,
                 'score': confidence,
                 'timestamp': int(time.time() * 1000),
-                'reasoning': ['Simple test signal'],
-                'tradable': True,  # CRITICAL: Make it tradable for paper trading
-                'paper_trading_mode': True
+                'reasoning': reasoning + [
+                    f'Confidence: {confidence:.2f}',
+                    f'Risk/Reward: {risk_reward:.2f}:1',
+                    f'ATR-based targets'
+                ],
+                'tradable': True,
+                'paper_trading_mode': True,
+                'is_real_data': market_data.get('is_real_data', False),
+                'data_source': market_data.get('data_source', 'unknown')
             }
             
-            logger.info(f"🎯 COMPLETED simple signal for {symbol}: {direction} (conf: {confidence:.2f})")
+            # Apply validation
+            opportunity = self._validate_signal_for_real_trading(opportunity)
+            
+            logger.info(f"🎯 COMPLETED real signal for {symbol}: {direction} (conf: {confidence:.2f}, R/R: {risk_reward:.2f})")
             return opportunity
             
         except Exception as e:
-            logger.error(f"Error in simple signal generation for {symbol}: {e}")
+            logger.error(f"Error in real signal generation for {symbol}: {e}")
             return None
 
     def _calculate_100_dollar_investment(self, entry_price: float, take_profit: float, stop_loss: float, confidence: float, volatility: float) -> Dict[str, Any]:

@@ -41,7 +41,7 @@ paper_trading_engine = None
 
 async def initialize_all_components():
     """Initialize all trading components"""
-    global opportunity_manager, realtime_scalping_manager, enhanced_signal_tracker, flow_manager, grid_engine
+    global opportunity_manager, realtime_scalping_manager, enhanced_signal_tracker, flow_manager, grid_engine, paper_trading_engine
     
     try:
         logger.info("🚀 Initializing trading components...")
@@ -135,6 +135,23 @@ async def initialize_all_components():
         )
         
         logger.info("✅ All components initialized successfully!")
+        
+        # Auto-start paper trading after all components are ready
+        logger.info("🚀 Auto-starting paper trading...")
+        try:
+            # Wait a moment for everything to be fully ready
+            await asyncio.sleep(2)
+            
+            # Start paper trading directly without HTTP request
+            if paper_trading_engine and not paper_trading_engine.is_running:
+                await paper_trading_engine.start()
+                logger.info("✅ Paper trading auto-started successfully!")
+            elif paper_trading_engine and paper_trading_engine.is_running:
+                logger.info("✅ Paper trading already running!")
+            else:
+                logger.warning("⚠️ Paper trading engine not available for auto-start")
+        except Exception as e:
+            logger.warning(f"⚠️ Paper trading auto-start error: {e}")
         
     except Exception as e:
         logger.error(f"❌ Component initialization failed: {e}")
