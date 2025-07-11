@@ -98,7 +98,7 @@ def get_paper_engine():
 
 @router.post("/start")
 async def start_paper_trading(background_tasks: BackgroundTasks):
-    """🚀 ONE-CLICK START - Start paper trading engine"""
+    """🚀 ONE-CLICK START - Start paper trading engine with GUARANTEED monitoring loop"""
     try:
         global paper_engine
         
@@ -161,6 +161,9 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
                 logger.error(f"Failed to connect opportunity manager: {e}")
         
         if engine.is_running:
+            # CRITICAL: Verify monitoring loop is actually running
+            monitoring_status = await verify_monitoring_loop_running(engine)
+            
             account_status = engine.get_account_status()
             return {
                 "status": "success",
@@ -173,17 +176,40 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
                     "win_rate_pct": account_status['account']['win_rate'] * 100,
                     "completed_trades": account_status['account']['total_trades'],
                     "uptime_hours": engine.get_uptime_hours(),
-                    "strategy_performance": account_status['strategy_performance']
+                    "strategy_performance": account_status['strategy_performance'],
+                    "monitoring_loop_status": monitoring_status
                 }
             }
         
-        # Start the engine
+        # CRITICAL: Start the engine with GUARANTEED monitoring loop
+        logger.info("🚀 Starting paper trading engine with monitoring loop verification...")
         await engine.start()
+        
+        # CRITICAL: Verify monitoring loops are actually running
+        monitoring_status = await verify_monitoring_loop_running(engine)
+        
+        if not monitoring_status['position_monitoring_active']:
+            logger.error("❌ CRITICAL: Position monitoring loop failed to start!")
+            # Force restart the monitoring loop
+            logger.info("🔧 Attempting to force restart monitoring loop...")
+            await force_restart_monitoring_loops(engine)
+            
+            # Verify again
+            monitoring_status = await verify_monitoring_loop_running(engine)
+            
+            if not monitoring_status['position_monitoring_active']:
+                logger.error("❌ FATAL: Could not start position monitoring loop - $10 take profit will not work!")
+                raise HTTPException(
+                    status_code=500, 
+                    detail="Position monitoring loop failed to start - $10 take profit system will not work"
+                )
+        
+        logger.info("✅ Paper trading started with verified monitoring loop")
         
         account_status = engine.get_account_status()
         return {
             "status": "success",
-            "message": "🚀 Paper Trading Started Successfully!",
+            "message": "🚀 Paper Trading Started Successfully with $10 Take Profit Protection!",
             "data": {
                 "enabled": True,
                 "virtual_balance": account_status['account']['balance'],
@@ -192,7 +218,9 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
                 "win_rate_pct": account_status['account']['win_rate'] * 100,
                 "completed_trades": account_status['account']['total_trades'],
                 "uptime_hours": engine.get_uptime_hours(),
-                "strategy_performance": account_status['strategy_performance']
+                "strategy_performance": account_status['strategy_performance'],
+                "monitoring_loop_status": monitoring_status,
+                "ten_dollar_protection": True
             }
         }
         
@@ -956,6 +984,106 @@ async def paper_trading_health_check():
         "ml_data_samples": 0,
         "timestamp": datetime.utcnow().isoformat()
     }
+async def verify_monitoring_loop_running(engine) -> Dict[str, Any]:
+    """Verify that the position monitoring loop is actually running"""
+    try:
+        import asyncio
+        
+        # Check if engine has monitoring loop tasks
+        position_monitoring_active = False
+        signal_processing_active = False
+        
+        # Check if the engine is running and has active tasks
+        if engine.is_running:
+            # Look for active asyncio tasks that match monitoring loop patterns
+            current_task = asyncio.current_task()
+            all_tasks = asyncio.all_tasks()
+            
+            for task in all_tasks:
+                if task != current_task and not task.done():
+                    task_name = getattr(task, '_name', str(task))
+                    task_coro = getattr(task, '_coro', None)
+                    
+                    if task_coro:
+                        coro_name = getattr(task_coro, '__name__', str(task_coro))
+                        
+                        # Look for position monitoring loop
+                        if 'position_monitoring' in coro_name.lower() or '_position_monitoring_loop' in coro_name:
+                            position_monitoring_active = True
+                            logger.info(f"✅ Found active position monitoring task: {coro_name}")
+                        
+                        # Look for signal processing
+                        if 'signal' in coro_name.lower() and 'process' in coro_name.lower():
+                            signal_processing_active = True
+                            logger.info(f"✅ Found active signal processing task: {coro_name}")
+        
+        # Additional check: Look for monitoring loop attributes on engine
+        has_monitoring_method = hasattr(engine, '_position_monitoring_loop')
+        has_monitoring_task = hasattr(engine, 'monitoring_task') and engine.monitoring_task is not None
+        
+        logger.info(f"🔍 Monitoring loop verification:")
+        logger.info(f"   - Engine running: {engine.is_running}")
+        logger.info(f"   - Has monitoring method: {has_monitoring_method}")
+        logger.info(f"   - Has monitoring task: {has_monitoring_task}")
+        logger.info(f"   - Position monitoring active: {position_monitoring_active}")
+        logger.info(f"   - Signal processing active: {signal_processing_active}")
+        
+        return {
+            'position_monitoring_active': position_monitoring_active or has_monitoring_task,
+            'signal_processing_active': signal_processing_active,
+            'engine_running': engine.is_running,
+            'has_monitoring_method': has_monitoring_method,
+            'has_monitoring_task': has_monitoring_task,
+            'total_tasks': len(all_tasks),
+            'verification_time': datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error verifying monitoring loop: {e}")
+        return {
+            'position_monitoring_active': False,
+            'signal_processing_active': False,
+            'engine_running': False,
+            'error': str(e),
+            'verification_time': datetime.utcnow().isoformat()
+        }
+
+async def force_restart_monitoring_loops(engine):
+    """Force restart the monitoring loops if they're not running"""
+    try:
+        import asyncio
+        logger.info("🔧 Force restarting monitoring loops...")
+        
+        # Stop existing monitoring if running
+        if hasattr(engine, 'monitoring_task') and engine.monitoring_task:
+            try:
+                engine.monitoring_task.cancel()
+                await asyncio.sleep(0.1)  # Give it time to cancel
+            except Exception as e:
+                logger.warning(f"Error canceling existing monitoring task: {e}")
+        
+        # Force start the monitoring loop
+        if hasattr(engine, '_position_monitoring_loop'):
+            logger.info("🔧 Starting position monitoring loop...")
+            engine.monitoring_task = asyncio.create_task(engine._position_monitoring_loop())
+            logger.info("✅ Position monitoring loop task created")
+        
+        # Force start signal processing if available
+        if hasattr(engine, '_signal_processing_loop'):
+            logger.info("🔧 Starting signal processing loop...")
+            if not hasattr(engine, 'signal_task') or engine.signal_task is None:
+                engine.signal_task = asyncio.create_task(engine._signal_processing_loop())
+                logger.info("✅ Signal processing loop task created")
+        
+        # Give loops time to start
+        await asyncio.sleep(1.0)
+        
+        logger.info("✅ Monitoring loops force restart completed")
+        
+    except Exception as e:
+        logger.error(f"Error force restarting monitoring loops: {e}")
+        raise
+
 # Initialize paper trading engine
 async def initialize_paper_trading_engine(config, exchange_client=None, flow_trading_strategy='adaptive'):
     """Initialize paper trading engine with PROFIT SCRAPING INTEGRATION"""
