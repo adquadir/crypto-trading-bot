@@ -40,10 +40,13 @@ class CacheEntry:
 class ProxyMetrics:
     response_times: deque = field(default_factory=lambda: deque(maxlen=100))
     error_count: int = 0
+    error_418_count: int = 0
     last_error: Optional[datetime] = None
     last_success: Optional[datetime] = None
+    last_418_error: Optional[datetime] = None
     total_requests: int = 0
     successful_requests: int = 0
+    blocked_until: Optional[datetime] = None
 
 
 class CacheManager:
@@ -114,7 +117,20 @@ def retry_with_backoff(max_retries: int = 3, base_delay: float = 1.0):
                     return await func(*args, **kwargs)
                 except BinanceAPIException as e:
                     last_exception = e
-                    if e.status_code in [429, 418]:  # Rate limit or IP ban
+                    if e.status_code == 418:  # IP ban - rotate proxy immediately
+                        logger.warning(f"418 IP ban detected, rotating proxy immediately")
+                        # Check if the first argument has _rotate_proxy method (ExchangeClient instance)
+                        if args and hasattr(args[0], '_rotate_proxy'):
+                            try:
+                                await args[0]._rotate_proxy()
+                                # Update proxy metrics for 418 error
+                                if hasattr(args[0], '_update_proxy_metrics_418'):
+                                    args[0]._update_proxy_metrics_418()
+                            except Exception as rotate_error:
+                                logger.error(f"Error rotating proxy on 418: {rotate_error}")
+                        # Still apply some delay but shorter than normal backoff
+                        await asyncio.sleep(base_delay)
+                    elif e.status_code == 429:  # Rate limit - use normal backoff
                         delay = base_delay * (2 ** attempt)
                         logger.warning(f"Rate limit hit, retrying in {delay}s")
                         await asyncio.sleep(delay)
@@ -223,9 +239,14 @@ class ExchangeClient:
         
         # Initialize proxy rotation
         self.proxy_metrics = {}
-        self.rotation_threshold = 0.8
+        self.rotation_threshold = self.config.get('proxy', {}).get('rotation_threshold', 0.8)
         self.health_check_interval = 60
         self._shutdown_event = asyncio.Event()
+        
+        # 418 Error handling configuration
+        self.rotation_on_418 = self.config.get('proxy', {}).get('rotation_on_418', True)
+        self.proxy_cooldown_minutes = self.config.get('proxy', {}).get('proxy_cooldown_after_418_minutes', 30)
+        self.max_418_errors = self.config.get('proxy', {}).get('max_418_errors_per_proxy', 3)
 
         # Load proxy configuration
         self.proxy_list = self.config.get(
@@ -369,7 +390,7 @@ class ExchangeClient:
             return False
 
     async def _make_request(self, method: str, endpoint: str, params: Dict = None, signed: bool = False) -> Dict:
-        """Make an HTTP request to the exchange API with robust retry logic."""
+        """Make an HTTP request to the exchange API with robust retry logic and 418 proxy rotation."""
         params = params or {}
         max_retries = 5
         base_delay = 0.5
@@ -408,6 +429,21 @@ class ExchangeClient:
                         if response.status == 200:
                             data = await response.json()
                             return data
+                        elif response.status == 418:  # IP ban - rotate proxy immediately
+                            logger.warning(f"HTTP 418 for {endpoint}, attempt {attempt + 1}/{max_retries}")
+                            if self.rotation_on_418:
+                                logger.warning(f"🔄 418 IP ban detected, rotating proxy immediately")
+                                try:
+                                    # Update proxy metrics for 418 error
+                                    self._update_proxy_metrics_418()
+                                    # Rotate to a different proxy
+                                    await self._rotate_proxy()
+                                    logger.info(f"✅ Proxy rotated due to 418 error, retrying with new proxy")
+                                except Exception as rotate_error:
+                                    logger.error(f"❌ Error rotating proxy on 418: {rotate_error}")
+                            # Short delay before retry with new proxy
+                            await asyncio.sleep(base_delay)
+                            continue
                         elif response.status == 429:  # Rate limit
                             retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** attempt)))
                             logger.warning(f"Rate limited, retrying in {retry_after}s")
@@ -721,36 +757,144 @@ class ExchangeClient:
             raise ValueError(f"Invalid interval unit: {unit}")
 
     def _should_rotate_proxy(self) -> bool:
+        """Check if proxy should be rotated based on error rates and 418 errors."""
+        if self.proxy_port not in self.proxy_metrics:
+            return False
+            
         metrics = self.proxy_metrics[self.proxy_port]
         if metrics.total_requests < 10:
             return False
+            
+        # Check if proxy is temporarily blocked due to 418 errors
+        if metrics.blocked_until and datetime.now() < metrics.blocked_until:
+            return True
+            
         error_rate = metrics.error_count / metrics.total_requests
         avg_response = statistics.mean(
             metrics.response_times) if metrics.response_times else float('inf')
+        
+        # Immediate rotation if too many 418 errors
+        if metrics.error_418_count >= 3:
+            return True
+            
         return error_rate > self.rotation_threshold or avg_response > 1.0
 
+    def _update_proxy_metrics_418(self):
+        """Update proxy metrics specifically for 418 errors."""
+        try:
+            if self.proxy_port not in self.proxy_metrics:
+                self.proxy_metrics[self.proxy_port] = ProxyMetrics()
+                
+            metrics = self.proxy_metrics[self.proxy_port]
+            metrics.error_418_count += 1
+            metrics.last_418_error = datetime.now()
+            
+            # Block proxy temporarily if too many 418 errors
+            if metrics.error_418_count >= self.max_418_errors:
+                # Block for configured minutes after max 418 errors
+                metrics.blocked_until = datetime.now() + timedelta(minutes=self.proxy_cooldown_minutes)
+                logger.warning(f"Proxy {self.proxy_port} blocked for {self.proxy_cooldown_minutes} minutes due to {metrics.error_418_count} 418 errors")
+                
+        except Exception as e:
+            logger.error(f"Error updating proxy metrics for 418: {e}")
+
     async def _find_best_proxy(self):
-        """Find the best proxy port based on latency (placeholder: just rotate through the list)."""
-        # Always return a port string from the proxy list
-        if hasattr(self, 'proxy_list') and self.proxy_list:
-            # Simple round-robin for now
-            self.current_port_index = (
-                self.current_port_index + 1) % len(self.proxy_list)
+        """Find the best proxy port based on health metrics and avoiding blocked proxies."""
+        if not hasattr(self, 'proxy_list') or not self.proxy_list:
+            return str(os.getenv('PROXY_PORT', '10001'))
+        
+        available_proxies = []
+        current_time = datetime.now()
+        
+        # Filter out blocked proxies and collect available ones with their scores
+        for port in self.proxy_list:
+            port_str = str(port)
+            if port_str in self.proxy_metrics:
+                metrics = self.proxy_metrics[port_str]
+                
+                # Skip if proxy is temporarily blocked
+                if metrics.blocked_until and current_time < metrics.blocked_until:
+                    logger.debug(f"Skipping blocked proxy {port_str} until {metrics.blocked_until}")
+                    continue
+                
+                # Calculate proxy score (lower is better)
+                score = self._calculate_proxy_score(metrics)
+                available_proxies.append((port_str, score))
+            else:
+                # New proxy, give it a chance
+                available_proxies.append((port_str, 0))
+        
+        if not available_proxies:
+            # All proxies are blocked, use round-robin as fallback
+            logger.warning("All proxies are blocked, using round-robin fallback")
+            self.current_port_index = (self.current_port_index + 1) % len(self.proxy_list)
             return str(self.proxy_list[self.current_port_index])
-        return str(os.getenv('PROXY_PORT', '10001'))
+        
+        # Sort by score and pick the best one
+        available_proxies.sort(key=lambda x: x[1])
+        best_proxy = available_proxies[0][0]
+        
+        logger.debug(f"Selected proxy {best_proxy} with score {available_proxies[0][1]}")
+        return best_proxy
+
+    def _calculate_proxy_score(self, metrics: ProxyMetrics) -> float:
+        """Calculate a score for proxy selection (lower is better)."""
+        try:
+            # Base score starts at 0
+            score = 0.0
+            
+            # Penalize 418 errors heavily
+            score += metrics.error_418_count * 10
+            
+            # Penalize general errors
+            if metrics.total_requests > 0:
+                error_rate = metrics.error_count / metrics.total_requests
+                score += error_rate * 5
+            
+            # Penalize slow response times
+            if metrics.response_times:
+                avg_response_time = statistics.mean(metrics.response_times)
+                score += avg_response_time
+            
+            # Bonus for recent successful requests
+            if metrics.last_success:
+                minutes_since_success = (datetime.now() - metrics.last_success).total_seconds() / 60
+                if minutes_since_success < 10:  # Recent success within 10 minutes
+                    score -= 1.0
+            
+            return score
+            
+        except Exception as e:
+            logger.error(f"Error calculating proxy score: {e}")
+            return float('inf')  # Return worst score on error
 
     async def _rotate_proxy(self):
-        best_port = await self._find_best_proxy()
-        if best_port != self.proxy_port:
-            logger.info(f"Rotating proxy from {self.proxy_port} to {best_port}")
-            self.proxy_port = best_port
-            if not isinstance(self.proxy_port, str) or not self.proxy_port.isdigit():
-                logger.error(f"Proxy port is not a valid string: {self.proxy_port}")
-                raise ValueError(f"Proxy port is not a valid string: {self.proxy_port}")
-            self.proxy_config["port"] = str(best_port)
-            self._setup_proxy()
-            self._init_client()
-            await self._reinitialize_websockets()
+        """Rotate to the best available proxy."""
+        try:
+            best_port = await self._find_best_proxy()
+            if best_port != self.proxy_port:
+                old_port = self.proxy_port
+                logger.info(f"🔄 Rotating proxy from {old_port} to {best_port}")
+                
+                # Update proxy port
+                self.proxy_port = str(best_port)
+                
+                # Update proxy URL
+                if self.proxy_host and self.proxy_port:
+                    self.proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
+                    if self.proxy_user and self.proxy_pass:
+                        self.proxy_url = f"http://{self.proxy_user}:{self.proxy_pass}@{self.proxy_host}:{self.proxy_port}"
+                
+                # Reinitialize clients with new proxy
+                await self._init_client()
+                
+                logger.info(f"✅ Proxy rotation complete: {old_port} → {best_port}")
+            else:
+                logger.debug(f"Proxy rotation not needed, already using best proxy: {self.proxy_port}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error during proxy rotation: {e}")
+            raise
 
     async def _reinitialize_websockets(self):
         """Close and reopen all websocket connections."""

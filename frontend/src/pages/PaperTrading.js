@@ -105,16 +105,28 @@ const PaperTrading = () => {
   });
   const [currentStrategy, setCurrentStrategy] = useState('adaptive');
   const [changingStrategy, setChangingStrategy] = useState(false);
+  
+  // NEW: Pure 3-Rule Mode state
+  const [ruleMode, setRuleMode] = useState({
+    pure_3_rule_mode: true,
+    mode_name: "Pure 3-Rule Mode",
+    primary_target_dollars: 10.0,
+    absolute_floor_dollars: 7.0,
+    stop_loss_percent: 0.5
+  });
+  const [changingRuleMode, setChangingRuleMode] = useState(false);
+  const [showRuleConfig, setShowRuleConfig] = useState(false);
 
   const fetchData = async () => {
     try {
-      const [statusRes, positionsRes, completedTradesRes, performanceRes, strategiesRes, currentStrategyRes] = await Promise.all([
+      const [statusRes, positionsRes, completedTradesRes, performanceRes, strategiesRes, currentStrategyRes, ruleModeRes] = await Promise.all([
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/status`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/positions`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/trades`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/performance`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/strategies`),
-        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/strategy`)
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/strategy`),
+        fetch(`${config.API_BASE_URL}/api/v1/paper-trading/rule-mode`)
       ]);
 
       if (statusRes.ok) {
@@ -163,6 +175,14 @@ const PaperTrading = () => {
         setCurrentStrategy(currentStrategyData.data?.current_strategy || 'adaptive');
       }
       // If API fails, keep the default 'adaptive' strategy
+
+      if (ruleModeRes.ok) {
+        const ruleModeData = await ruleModeRes.json();
+        if (ruleModeData.data) {
+          setRuleMode(ruleModeData.data);
+        }
+      }
+      // If API fails, keep the default rule mode state
     } catch (error) {
       console.error('Failed to fetch paper trading data:', error);
     } finally {
@@ -269,6 +289,68 @@ const PaperTrading = () => {
       setError('Failed to change strategy - Network error');
     } finally {
       setChangingStrategy(false);
+    }
+  };
+
+  // NEW: Rule mode handler functions
+  const handleRuleModeToggle = async (newMode) => {
+    try {
+      setChangingRuleMode(true);
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/rule-mode?pure_3_rule_mode=${newMode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setRuleMode(prev => ({ ...prev, pure_3_rule_mode: newMode, mode_name: data.data.new_mode }));
+        setError(null);
+        // Refresh data to show updated mode
+        await fetchData();
+        
+        // Show success message
+        setError(`✅ ${data.message}`);
+        setTimeout(() => setError(null), 3000);
+      } else {
+        setError(data.message || 'Failed to change rule mode');
+      }
+    } catch (error) {
+      console.error('Error changing rule mode:', error);
+      setError('Failed to change rule mode - Network error');
+    } finally {
+      setChangingRuleMode(false);
+    }
+  };
+
+  const handleRuleConfigUpdate = async (newConfig) => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/rule-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newConfig)
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setRuleMode(prev => ({ 
+          ...prev, 
+          primary_target_dollars: data.data.primary_target_dollars,
+          absolute_floor_dollars: data.data.absolute_floor_dollars,
+          stop_loss_percent: data.data.stop_loss_percent
+        }));
+        setError(null);
+        
+        // Show success message
+        setError(`✅ ${data.message}`);
+        setTimeout(() => setError(null), 3000);
+      } else {
+        setError(data.detail || 'Failed to update rule configuration');
+      }
+    } catch (error) {
+      console.error('Error updating rule configuration:', error);
+      setError('Failed to update rule configuration - Network error');
     }
   };
 
@@ -467,6 +549,160 @@ const PaperTrading = () => {
                 Stop trading first to change strategies.
               </Typography>
             </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Pure 3-Rule Mode Configuration */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" fontWeight="bold" gutterBottom display="flex" alignItems="center" gap={1}>
+            🎯 Pure 3-Rule Mode Configuration
+          </Typography>
+          
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <Typography variant="body2">
+              <strong>Pure 3-Rule Mode:</strong> Clean hierarchy with only 3 exit conditions: 
+              $10 Take Profit → $7 Floor Protection → 0.5% Stop Loss. 
+              Complex Mode includes all technical exits.
+            </Typography>
+          </Alert>
+
+          <Grid container spacing={3} alignItems="center">
+            <Grid item xs={12} md={6}>
+              <Box>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={ruleMode.pure_3_rule_mode}
+                      onChange={(e) => handleRuleModeToggle(e.target.checked)}
+                      disabled={changingRuleMode}
+                      color="primary"
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body1" fontWeight="bold">
+                        {ruleMode.mode_name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {ruleMode.pure_3_rule_mode 
+                          ? "Clean hierarchy: $10 TP → $7 Floor → 0.5% SL"
+                          : "All exit conditions active"
+                        }
+                      </Typography>
+                    </Box>
+                  }
+                />
+                
+                {changingRuleMode && (
+                  <Box display="flex" alignItems="center" gap={1} mt={1}>
+                    <CircularProgress size={16} />
+                    <Typography variant="body2" color="text.secondary">
+                      Changing mode...
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <Box>
+                <Typography variant="body2" fontWeight="bold" gutterBottom>
+                  Current Rule Configuration:
+                </Typography>
+                <Box display="flex" gap={2} flexWrap="wrap">
+                  <Chip 
+                    label={`Target: $${ruleMode.primary_target_dollars}`}
+                    color="success" 
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip 
+                    label={`Floor: $${ruleMode.absolute_floor_dollars}`}
+                    color="warning" 
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip 
+                    label={`Stop Loss: ${ruleMode.stop_loss_percent}%`}
+                    color="error" 
+                    size="small"
+                    variant="outlined"
+                  />
+                </Box>
+                
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setShowRuleConfig(!showRuleConfig)}
+                  sx={{ mt: 1 }}
+                  startIcon={<SettingsIcon />}
+                >
+                  {showRuleConfig ? 'Hide Config' : 'Configure Rules'}
+                </Button>
+              </Box>
+            </Grid>
+          </Grid>
+
+          {/* Rule Configuration Panel */}
+          {showRuleConfig && (
+            <Box mt={3} p={2} bgcolor="background.default" borderRadius={1}>
+              <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                ⚙️ Rule Configuration (applies to new positions)
+              </Typography>
+              
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={4}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Primary Target (dollars)
+                    </Typography>
+                    <Typography variant="h6" color="success.main" fontWeight="bold">
+                      ${ruleMode.primary_target_dollars}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Immediate exit when reached
+                    </Typography>
+                  </Box>
+                </Grid>
+                
+                <Grid item xs={12} sm={4}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Absolute Floor (dollars)
+                    </Typography>
+                    <Typography variant="h6" color="warning.main" fontWeight="bold">
+                      ${ruleMode.absolute_floor_dollars}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Cannot drop below once reached
+                    </Typography>
+                  </Box>
+                </Grid>
+                
+                <Grid item xs={12} sm={4}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Stop Loss (percent)
+                    </Typography>
+                    <Typography variant="h6" color="error.main" fontWeight="bold">
+                      {ruleMode.stop_loss_percent}%
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Maximum loss protection
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+              
+              <Alert severity="warning" sx={{ mt: 2 }}>
+                <Typography variant="body2">
+                  <strong>Note:</strong> Rule configuration changes only apply to new positions. 
+                  Existing positions will continue using their original rules.
+                </Typography>
+              </Alert>
+            </Box>
           )}
         </CardContent>
       </Card>

@@ -185,4 +185,9 @@ proxy:
   password: ${PROXY_PASS}
   proxy_ports: ${PROXY_LIST}
   failover_ports: ${FAILOVER_PORTS}
-  symbols: ${TRADING_SYMBOLS} 
+  symbols: ${TRADING_SYMBOLS}
+  # 418 Error Handling Configuration
+  rotation_on_418: true                    # Enable immediate proxy rotation on 418 errors
+  proxy_cooldown_after_418_minutes: 30    # Minutes to block proxy after 418 errors
+  max_418_errors_per_proxy: 3             # Max 418 errors before blocking proxy
+  rotation_threshold: 0.8                 # Error rate threshold for rotation

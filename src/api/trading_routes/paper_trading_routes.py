@@ -438,7 +438,15 @@ async def get_paper_trading_status():
                 "leverage": account_status['account']['leverage'],
                 "capital_per_position": account_status['account']['capital_per_position'],
                 "uptime_hours": engine.get_uptime_hours(),
-                "strategy_performance": account_status['strategy_performance']
+                "strategy_performance": account_status['strategy_performance'],
+                # NEW: Include rule mode information
+                "rule_mode": {
+                    "pure_3_rule_mode": getattr(engine, 'pure_3_rule_mode', True),
+                    "mode_name": "Pure 3-Rule Mode" if getattr(engine, 'pure_3_rule_mode', True) else "Complex Mode",
+                    "primary_target_dollars": engine.config.get('primary_target_dollars', 10.0),
+                    "absolute_floor_dollars": engine.config.get('absolute_floor_dollars', 7.0),
+                    "stop_loss_percent": engine.config.get('stop_loss_percent', 0.5)
+                }
             }
         }
         
@@ -1483,3 +1491,228 @@ async def get_paper_trading_mode_status():
                 "validation_mode": "ERROR"
             }
         }
+
+# ============================================================================
+# PURE 3-RULE MODE API ENDPOINTS
+# ============================================================================
+
+@router.get("/rule-mode")
+async def get_rule_mode_status():
+    """🎯 GET PURE 3-RULE MODE STATUS"""
+    try:
+        engine = get_paper_engine()
+        if not engine:
+            return {
+                "status": "success",
+                "data": {
+                    "pure_3_rule_mode": True,  # Default
+                    "mode_name": "Pure 3-Rule Mode",
+                    "description": "Clean hierarchy: $10 TP → $7 Floor → 0.5% SL",
+                    "engine_available": False
+                }
+            }
+        
+        # Get current mode from engine
+        pure_mode = getattr(engine, 'pure_3_rule_mode', True)
+        
+        return {
+            "status": "success",
+            "data": {
+                "pure_3_rule_mode": pure_mode,
+                "mode_name": "Pure 3-Rule Mode" if pure_mode else "Complex Mode",
+                "description": "Clean hierarchy: $10 TP → $7 Floor → 0.5% SL" if pure_mode else "All exit conditions active",
+                "engine_available": True,
+                "engine_running": engine.is_running,
+                "active_positions": len(engine.positions),
+                "rules_active": {
+                    "primary_target": "$10 Take Profit",
+                    "absolute_floor": "$7 Floor Protection", 
+                    "stop_loss": "0.5% Stop Loss"
+                } if pure_mode else {
+                    "all_exits": "Technical, Time-based, Level breakdown, Trend reversal, SL/TP"
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting rule mode status: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to get rule mode status: {str(e)}",
+            "data": {
+                "pure_3_rule_mode": True,
+                "mode_name": "Unknown",
+                "description": "Error retrieving mode status"
+            }
+        }
+
+@router.post("/rule-mode")
+async def set_rule_mode(pure_3_rule_mode: bool):
+    """🎯 SET PURE 3-RULE MODE (Toggle between Pure and Complex)"""
+    try:
+        engine = get_paper_engine()
+        if not engine:
+            raise HTTPException(status_code=400, detail="Paper trading engine not available")
+        
+        # Store old mode for logging
+        old_mode = getattr(engine, 'pure_3_rule_mode', True)
+        
+        # Update the mode
+        engine.pure_3_rule_mode = pure_3_rule_mode
+        
+        # Log the change
+        mode_name = "Pure 3-Rule Mode" if pure_3_rule_mode else "Complex Mode"
+        old_mode_name = "Pure 3-Rule Mode" if old_mode else "Complex Mode"
+        
+        logger.info(f"🎯 RULE MODE CHANGED: {old_mode_name} → {mode_name}")
+        
+        if pure_3_rule_mode:
+            logger.info("🎯 PURE 3-RULE MODE ENABLED: Only $10 TP, $7 Floor, 0.5% SL will trigger exits")
+        else:
+            logger.info("🔧 COMPLEX MODE ENABLED: All exit conditions active (technical, time-based, etc.)")
+        
+        return {
+            "status": "success",
+            "message": f"🎯 Rule mode changed to {mode_name}",
+            "data": {
+                "old_mode": old_mode_name,
+                "new_mode": mode_name,
+                "pure_3_rule_mode": pure_3_rule_mode,
+                "engine_running": engine.is_running,
+                "active_positions": len(engine.positions),
+                "change_applied": "immediately",
+                "rules_description": "Clean hierarchy: $10 TP → $7 Floor → 0.5% SL" if pure_3_rule_mode else "All exit conditions active",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting rule mode: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to set rule mode: {str(e)}")
+
+@router.get("/rule-config")
+async def get_rule_configuration():
+    """⚙️ GET RULE CONFIGURATION PARAMETERS"""
+    try:
+        engine = get_paper_engine()
+        if not engine:
+            # Return default configuration
+            return {
+                "status": "success",
+                "data": {
+                    "primary_target_dollars": 10.0,
+                    "absolute_floor_dollars": 7.0,
+                    "stop_loss_percent": 0.5,
+                    "engine_available": False,
+                    "configuration_source": "default_values"
+                }
+            }
+        
+        # Extract current configuration from engine
+        # Look for position examples to get current rules
+        sample_position = None
+        if engine.positions:
+            sample_position = list(engine.positions.values())[0]
+        
+        # Get configuration from position or defaults
+        if sample_position:
+            primary_target = getattr(sample_position, 'primary_target_profit', 10.0)
+            absolute_floor = getattr(sample_position, 'absolute_floor_profit', 7.0)
+        else:
+            primary_target = 10.0
+            absolute_floor = 7.0
+        
+        # Stop loss is calculated as 0.5% for $10 loss with current leverage
+        stop_loss_percent = 0.5
+        
+        return {
+            "status": "success",
+            "data": {
+                "primary_target_dollars": primary_target,
+                "absolute_floor_dollars": absolute_floor,
+                "stop_loss_percent": stop_loss_percent,
+                "engine_available": True,
+                "engine_running": engine.is_running,
+                "active_positions": len(engine.positions),
+                "configuration_source": "engine_current" if sample_position else "engine_defaults",
+                "leverage_info": {
+                    "current_leverage": getattr(engine, 'leverage', 10.0),
+                    "capital_per_position": 200.0,
+                    "stop_loss_calculation": f"0.5% price movement = ~$10 loss with {getattr(engine, 'leverage', 10.0)}x leverage"
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting rule configuration: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to get rule configuration: {str(e)}",
+            "data": {
+                "primary_target_dollars": 10.0,
+                "absolute_floor_dollars": 7.0,
+                "stop_loss_percent": 0.5,
+                "configuration_source": "error_fallback"
+            }
+        }
+
+class RuleConfigUpdate(BaseModel):
+    primary_target_dollars: float = 10.0
+    absolute_floor_dollars: float = 7.0
+    stop_loss_percent: float = 0.5
+
+@router.post("/rule-config")
+async def update_rule_configuration(config: RuleConfigUpdate):
+    """⚙️ UPDATE RULE CONFIGURATION PARAMETERS"""
+    try:
+        engine = get_paper_engine()
+        if not engine:
+            raise HTTPException(status_code=400, detail="Paper trading engine not available")
+        
+        # Validate configuration
+        if config.primary_target_dollars <= config.absolute_floor_dollars:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Primary target (${config.primary_target_dollars}) must be higher than absolute floor (${config.absolute_floor_dollars})"
+            )
+        
+        if config.absolute_floor_dollars <= 0:
+            raise HTTPException(status_code=400, detail="Absolute floor must be positive")
+        
+        if config.stop_loss_percent <= 0 or config.stop_loss_percent > 5.0:
+            raise HTTPException(status_code=400, detail="Stop loss percent must be between 0.1% and 5.0%")
+        
+        # Update configuration for future positions
+        # Note: This doesn't affect existing positions, only new ones
+        engine.config['primary_target_dollars'] = config.primary_target_dollars
+        engine.config['absolute_floor_dollars'] = config.absolute_floor_dollars
+        engine.config['stop_loss_percent'] = config.stop_loss_percent
+        
+        logger.info(f"⚙️ RULE CONFIG UPDATED: Target ${config.primary_target_dollars}, Floor ${config.absolute_floor_dollars}, SL {config.stop_loss_percent}%")
+        
+        return {
+            "status": "success",
+            "message": "⚙️ Rule configuration updated successfully",
+            "data": {
+                "primary_target_dollars": config.primary_target_dollars,
+                "absolute_floor_dollars": config.absolute_floor_dollars,
+                "stop_loss_percent": config.stop_loss_percent,
+                "applies_to": "new_positions_only",
+                "existing_positions": len(engine.positions),
+                "engine_running": engine.is_running,
+                "updated_at": datetime.utcnow().isoformat(),
+                "validation": {
+                    "target_above_floor": config.primary_target_dollars > config.absolute_floor_dollars,
+                    "reasonable_stop_loss": 0.1 <= config.stop_loss_percent <= 5.0,
+                    "configuration_valid": True
+                }
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating rule configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update rule configuration: {str(e)}")

@@ -175,6 +175,14 @@ class EnhancedPaperTradingEngine:
         self.leverage = self.config.get('leverage', 10.0)  # 10x leverage
         self.max_total_risk_pct = self.config.get('max_total_risk_pct', 1.0)  # 100% max total risk
         
+        # PURE 3-RULE MODE - Clean hierarchy enforcement
+        self.pure_3_rule_mode = self.config.get('pure_3_rule_mode', True)  # Enable by default
+        
+        if self.pure_3_rule_mode:
+            logger.info("🎯 PURE 3-RULE MODE ENABLED: Only $10 TP, $7 Floor, 0.5% SL will trigger exits")
+        else:
+            logger.info("🔧 COMPLEX MODE: All exit conditions active (technical, time-based, etc.)")
+        
         logger.info("🟢 Enhanced Paper Trading Engine initialized")
     
     async def start(self):
@@ -289,7 +297,7 @@ class EnhancedPaperTradingEngine:
             capital_allocated = self.account.balance * self.risk_per_trade_pct
             notional_value = capital_allocated * self.leverage
             
-            # Create position
+            # Create position with configurable rule parameters
             position_id = str(uuid.uuid4())
             position = PaperPosition(
                 id=position_id,
@@ -309,6 +317,10 @@ class EnhancedPaperTradingEngine:
                 volatility_regime=signal.get('volatility_regime', ''),
                 current_price=current_price
             )
+            
+            # Apply configurable rule parameters
+            position.primary_target_profit = self.config.get('primary_target_dollars', 10.0)
+            position.absolute_floor_profit = self.config.get('absolute_floor_dollars', 7.0)
             
             logger.info(f"🎯 Paper Trading: Created position object for {symbol}")
             
@@ -550,6 +562,7 @@ class EnhancedPaperTradingEngine:
                     # RULE 1: PRIMARY TARGET - $10 IMMEDIATE EXIT (ABSOLUTE HIGHEST PRIORITY)
                     # ============================================================================
                     if current_pnl_dollars >= position.primary_target_profit:
+                        logger.info(f"✅ RULE 1 EXIT: {position.symbol} hit $10 take profit (${current_pnl_dollars:.2f})")
                         logger.info(f"🎯 PRIMARY TARGET HIT: {position.symbol} reached ${current_pnl_dollars:.2f} >= ${position.primary_target_profit:.2f}")
                         logger.info(f"🎯 IMMEDIATE EXIT: Marking position {position_id} for closure")
                         
@@ -568,61 +581,97 @@ class EnhancedPaperTradingEngine:
                         
                         # RULE 3: ABSOLUTE FLOOR PROTECTION - Never drop below $7
                         if current_pnl_dollars < position.absolute_floor_profit:
+                            logger.info(f"📉 RULE 2 EXIT: {position.symbol} floor violation (${current_pnl_dollars:.2f} < $7 after peak ${position.highest_profit_ever:.2f})")
                             logger.info(f"💰 FLOOR VIOLATION: {position.symbol} dropped to ${current_pnl_dollars:.2f} < $7 floor")
                             positions_to_close.append((position_id, "absolute_floor_7_dollars"))
                             continue  # Skip all other checks - floor protection takes precedence
                     
                     # ============================================================================
-                    # RULE 4: Below $7 - Normal rules apply (stop-loss, etc.)
+                    # RULE 3: Below $7 - Apply remaining rules based on mode
                     # ============================================================================
                     
-                    # CRITICAL: Check for level breakdown/breakout BEFORE normal SL/TP
-                    breakdown_exit = await self._check_level_breakdown_exit(position, current_price)
-                    if breakdown_exit:
-                        positions_to_close.append((position_id, breakdown_exit))
-                        continue  # Skip other checks if level breakdown detected
-                    
-                    # Check for trend reversal exit
-                    trend_reversal_exit = await self._check_trend_reversal_exit(position, current_price)
-                    if trend_reversal_exit:
-                        positions_to_close.append((position_id, trend_reversal_exit))
-                        continue  # Skip other checks if trend reversal detected
-                    
-                    # Check stop loss (only if floor not activated) - ENHANCED LOGGING
-                    if not position.profit_floor_activated and position.stop_loss:
-                        stop_loss_triggered = False
+                    if self.pure_3_rule_mode:
+                        # PURE 3-RULE MODE: Only check 0.5% stop loss
+                        logger.debug(f"🎯 PURE MODE: {position.symbol} checking 0.5% stop loss only")
                         
-                        if position.side == 'LONG' and current_price <= position.stop_loss:
-                            stop_loss_triggered = True
-                            price_drop_pct = ((position.entry_price - current_price) / position.entry_price) * 100
-                            expected_loss = (position.entry_price - current_price) * position.quantity
-                            logger.warning(f"🛑 STOP LOSS HIT: {position.symbol} LONG @ {current_price:.4f} <= SL {position.stop_loss:.4f}")
-                            logger.warning(f"🛑 Price drop: {price_drop_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
+                        # Check stop loss (only if floor not activated) - ENHANCED LOGGING
+                        if not position.profit_floor_activated and position.stop_loss:
+                            stop_loss_triggered = False
                             
-                        elif position.side == 'SHORT' and current_price >= position.stop_loss:
-                            stop_loss_triggered = True
-                            price_rise_pct = ((current_price - position.entry_price) / position.entry_price) * 100
-                            expected_loss = (current_price - position.entry_price) * position.quantity
-                            logger.warning(f"🛑 STOP LOSS HIT: {position.symbol} SHORT @ {current_price:.4f} >= SL {position.stop_loss:.4f}")
-                            logger.warning(f"🛑 Price rise: {price_rise_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
+                            if position.side == 'LONG' and current_price <= position.stop_loss:
+                                stop_loss_triggered = True
+                                price_drop_pct = ((position.entry_price - current_price) / position.entry_price) * 100
+                                expected_loss = (position.entry_price - current_price) * position.quantity
+                                logger.info(f"🔻 RULE 3 EXIT: {position.symbol} 0.5% stop loss hit (${expected_loss:.2f} loss)")
+                                logger.warning(f"🛑 STOP LOSS: {position.symbol} LONG @ {current_price:.4f} <= SL {position.stop_loss:.4f}")
+                                logger.warning(f"🛑 Price drop: {price_drop_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
+                                
+                            elif position.side == 'SHORT' and current_price >= position.stop_loss:
+                                stop_loss_triggered = True
+                                price_rise_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                                expected_loss = (current_price - position.entry_price) * position.quantity
+                                logger.info(f"🔻 RULE 3 EXIT: {position.symbol} 0.5% stop loss hit (${expected_loss:.2f} loss)")
+                                logger.warning(f"🛑 STOP LOSS: {position.symbol} SHORT @ {current_price:.4f} >= SL {position.stop_loss:.4f}")
+                                logger.warning(f"🛑 Price rise: {price_rise_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
+                            
+                            if stop_loss_triggered:
+                                positions_to_close.append((position_id, "stop_loss_0_5_percent"))
+                                continue
                         
-                        if stop_loss_triggered:
-                            positions_to_close.append((position_id, "stop_loss"))
-                            continue
-                    
-                    # Check take profit (only if floor not activated)
-                    if not position.profit_floor_activated and position.take_profit:
-                        if (position.side == 'LONG' and current_price >= position.take_profit) or \
-                           (position.side == 'SHORT' and current_price <= position.take_profit):
-                            positions_to_close.append((position_id, "take_profit"))
-                            continue
-                    
-                    # Optional: Add safety net for extremely long positions (7 days)
-                    # Only close if position is losing money to prevent runaway losses
-                    hold_time = datetime.utcnow() - position.entry_time
-                    if hold_time > timedelta(days=7) and position.unrealized_pnl < 0:
-                        positions_to_close.append((position_id, "safety_time_limit"))
-                        logger.warning(f"⚠️ Closing losing position {position_id} after 7 days for safety")
+                        # In pure mode, NO other exits are allowed below $7
+                        logger.debug(f"🎯 PURE MODE: {position.symbol} no other exits - waiting for $7+ or stop loss")
+                        
+                    else:
+                        # COMPLEX MODE: All original exit conditions
+                        logger.debug(f"🔧 COMPLEX MODE: {position.symbol} checking all exit conditions")
+                        
+                        # CRITICAL: Check for level breakdown/breakout BEFORE normal SL/TP
+                        breakdown_exit = await self._check_level_breakdown_exit(position, current_price)
+                        if breakdown_exit:
+                            positions_to_close.append((position_id, breakdown_exit))
+                            continue  # Skip other checks if level breakdown detected
+                        
+                        # Check for trend reversal exit
+                        trend_reversal_exit = await self._check_trend_reversal_exit(position, current_price)
+                        if trend_reversal_exit:
+                            positions_to_close.append((position_id, trend_reversal_exit))
+                            continue  # Skip other checks if trend reversal detected
+                        
+                        # Check stop loss (only if floor not activated) - ENHANCED LOGGING
+                        if not position.profit_floor_activated and position.stop_loss:
+                            stop_loss_triggered = False
+                            
+                            if position.side == 'LONG' and current_price <= position.stop_loss:
+                                stop_loss_triggered = True
+                                price_drop_pct = ((position.entry_price - current_price) / position.entry_price) * 100
+                                expected_loss = (position.entry_price - current_price) * position.quantity
+                                logger.warning(f"🛑 STOP LOSS HIT: {position.symbol} LONG @ {current_price:.4f} <= SL {position.stop_loss:.4f}")
+                                logger.warning(f"🛑 Price drop: {price_drop_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
+                                
+                            elif position.side == 'SHORT' and current_price >= position.stop_loss:
+                                stop_loss_triggered = True
+                                price_rise_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                                expected_loss = (current_price - position.entry_price) * position.quantity
+                                logger.warning(f"🛑 STOP LOSS HIT: {position.symbol} SHORT @ {current_price:.4f} >= SL {position.stop_loss:.4f}")
+                                logger.warning(f"🛑 Price rise: {price_rise_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
+                            
+                            if stop_loss_triggered:
+                                positions_to_close.append((position_id, "stop_loss"))
+                                continue
+                        
+                        # Check take profit (only if floor not activated)
+                        if not position.profit_floor_activated and position.take_profit:
+                            if (position.side == 'LONG' and current_price >= position.take_profit) or \
+                               (position.side == 'SHORT' and current_price <= position.take_profit):
+                                positions_to_close.append((position_id, "take_profit"))
+                                continue
+                        
+                        # Optional: Add safety net for extremely long positions (7 days)
+                        # Only close if position is losing money to prevent runaway losses
+                        hold_time = datetime.utcnow() - position.entry_time
+                        if hold_time > timedelta(days=7) and position.unrealized_pnl < 0:
+                            positions_to_close.append((position_id, "safety_time_limit"))
+                            logger.warning(f"⚠️ Closing losing position {position_id} after 7 days for safety")
                 
                 # Close positions with enhanced logging and error handling
                 for position_id, reason in positions_to_close:
