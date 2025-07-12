@@ -344,34 +344,62 @@ class EnhancedPaperTradingEngine:
             return None
     
     async def close_position(self, position_id: str, exit_reason: str = "manual") -> Optional[PaperTrade]:
-        """Close a paper position"""
+        """Close a paper position with enhanced race condition protection"""
         try:
+            logger.info(f"🔄 CLOSE REQUEST: Attempting to close position {position_id} (reason: {exit_reason})")
+            
+            # CRITICAL: Check if position exists and is not already closed
             if position_id not in self.positions:
-                logger.error(f"Position not found: {position_id}")
+                logger.error(f"❌ CLOSE FAILED: Position {position_id} not found in active positions")
                 return None
             
             position = self.positions[position_id]
             
-            # Mark position as closed to prevent race conditions
-            position.closed = True
-            
-            # Get current price
-            current_price = await self._get_current_price(position.symbol)
-            if not current_price:
-                logger.error(f"Could not get price for {position.symbol}")
+            # CRITICAL: Atomic check and mark as closed to prevent race conditions
+            if getattr(position, 'closed', False):
+                logger.warning(f"⚠️ CLOSE SKIPPED: Position {position_id} already marked as closed")
                 return None
             
-            # Calculate P&L
+            # ATOMIC OPERATION: Mark as closed immediately
+            position.closed = True
+            logger.info(f"🔒 POSITION LOCKED: {position_id} marked as closed to prevent race conditions")
+            
+            # Get current price with retry logic
+            current_price = None
+            for attempt in range(3):  # Try up to 3 times
+                try:
+                    current_price = await self._get_current_price(position.symbol)
+                    if current_price and current_price > 0:
+                        break
+                    logger.warning(f"⚠️ Price attempt {attempt + 1} failed for {position.symbol}: {current_price}")
+                except Exception as price_error:
+                    logger.warning(f"⚠️ Price fetch attempt {attempt + 1} error: {price_error}")
+                    if attempt < 2:  # Not the last attempt
+                        await asyncio.sleep(0.5)  # Brief delay before retry
+            
+            if not current_price or current_price <= 0:
+                logger.error(f"❌ CLOSE FAILED: Could not get valid price for {position.symbol} after 3 attempts")
+                # Revert closed status if we can't get price
+                position.closed = False
+                return None
+            
+            logger.info(f"💰 PRICE OBTAINED: {position.symbol} @ {current_price:.4f} for position {position_id}")
+            
+            # Calculate P&L with detailed logging
             if position.side == 'LONG':
                 pnl = (current_price - position.entry_price) * position.quantity
                 pnl_pct = (current_price - position.entry_price) / position.entry_price
+                logger.info(f"📊 LONG P&L: ({current_price:.4f} - {position.entry_price:.4f}) * {position.quantity:.6f} = ${pnl:.2f}")
             else:  # SHORT
                 pnl = (position.entry_price - current_price) * position.quantity
                 pnl_pct = (position.entry_price - current_price) / position.entry_price
+                logger.info(f"📊 SHORT P&L: ({position.entry_price:.4f} - {current_price:.4f}) * {position.quantity:.6f} = ${pnl:.2f}")
             
             # Calculate fees
             fees = (position.quantity * position.entry_price + position.quantity * current_price) * 0.001
             net_pnl = pnl - fees
+            
+            logger.info(f"💸 FEES: ${fees:.2f}, NET P&L: ${net_pnl:.2f} ({pnl_pct:.2%})")
             
             # Create completed trade
             duration = datetime.utcnow() - position.entry_time
@@ -397,7 +425,12 @@ class EnhancedPaperTradingEngine:
                 exit_time=datetime.utcnow()
             )
             
-            # Update account
+            logger.info(f"📋 TRADE CREATED: {trade.id} for {position.symbol}")
+            
+            # Update account with detailed logging
+            old_balance = self.account.balance
+            old_realized_pnl = self.account.realized_pnl
+            
             self.account.realized_pnl += net_pnl
             self.account.balance += net_pnl
             self.account.equity = self.account.balance + self._calculate_unrealized_pnl()
@@ -410,6 +443,9 @@ class EnhancedPaperTradingEngine:
             
             self.account.win_rate = self.account.winning_trades / self.account.total_trades
             
+            logger.info(f"💰 ACCOUNT UPDATED: Balance ${old_balance:.2f} → ${self.account.balance:.2f} (${net_pnl:+.2f})")
+            logger.info(f"📈 STATS: {self.account.winning_trades}W/{self.account.losing_trades}L ({self.account.win_rate:.1%} win rate)")
+            
             # Update strategy performance
             self._update_strategy_performance(trade)
             
@@ -417,24 +453,50 @@ class EnhancedPaperTradingEngine:
             self.completed_trades.append(trade)
             self.trade_history.append(trade)
             
-            # Remove position
-            del self.positions[position_id]
+            # CRITICAL: Remove position from active positions
+            try:
+                del self.positions[position_id]
+                logger.info(f"🗑️ POSITION REMOVED: {position_id} removed from active positions")
+            except KeyError:
+                logger.warning(f"⚠️ Position {position_id} already removed from active positions")
             
             # Log trade with formatted duration
             duration_formatted = format_duration(trade.duration_minutes)
-            logger.info(f"📉 Paper Trade Closed: {position.symbol} {position.side} @ {current_price:.4f} "
-                       f"P&L: {net_pnl:.2f} ({pnl_pct:.2%}) Duration: {duration_formatted}")
+            logger.info(f"✅ CLOSE COMPLETE: {position.symbol} {position.side} @ {current_price:.4f} "
+                       f"P&L: ${net_pnl:.2f} ({pnl_pct:.2%}) Duration: {duration_formatted} Reason: {exit_reason}")
             
-            # Store in database
-            await self._store_trade(trade)
+            # Store in database (non-blocking)
+            try:
+                await self._store_trade(trade)
+                logger.info(f"💾 DATABASE: Trade {trade.id} stored successfully")
+            except Exception as db_error:
+                logger.error(f"❌ DATABASE ERROR: Failed to store trade {trade.id}: {db_error}")
+                # Continue - don't fail the close operation due to database issues
             
-            # Collect ML training data
-            await self._collect_ml_data(trade)
+            # Collect ML training data (non-blocking)
+            try:
+                await self._collect_ml_data(trade)
+                logger.info(f"🧠 ML DATA: Trade {trade.id} added to ML training data")
+            except Exception as ml_error:
+                logger.error(f"❌ ML ERROR: Failed to collect ML data for trade {trade.id}: {ml_error}")
+                # Continue - don't fail the close operation due to ML issues
             
+            logger.info(f"🎉 POSITION CLOSED SUCCESSFULLY: {position_id} → Trade {trade.id}")
             return trade
             
         except Exception as e:
-            logger.error(f"Error closing position: {e}")
+            logger.error(f"❌ CRITICAL ERROR closing position {position_id}: {e}")
+            import traceback
+            logger.error(f"❌ FULL TRACEBACK: {traceback.format_exc()}")
+            
+            # Try to revert closed status if position still exists
+            try:
+                if position_id in self.positions:
+                    self.positions[position_id].closed = False
+                    logger.info(f"🔓 REVERTED: Position {position_id} closed status reverted due to error")
+            except Exception as revert_error:
+                logger.error(f"❌ Could not revert closed status: {revert_error}")
+            
             return None
     
     async def _position_monitoring_loop(self):
@@ -445,11 +507,19 @@ class EnhancedPaperTradingEngine:
                 
                 for position_id, position in self.positions.items():
                     # Skip already closed positions to prevent race conditions
-                    if position.closed:
+                    if getattr(position, 'closed', False):
                         continue
-                        
-                    current_price = await self._get_current_price(position.symbol)
-                    if not current_price:
+                    
+                    # CRITICAL FIX: Get current price with better error handling
+                    current_price = None
+                    try:
+                        current_price = await self._get_current_price(position.symbol)
+                    except Exception as price_error:
+                        logger.warning(f"⚠️ Price fetch failed for {position.symbol}: {price_error}")
+                        continue  # Skip this position this cycle, try again next cycle
+                    
+                    if not current_price or current_price <= 0:
+                        logger.warning(f"⚠️ Invalid price for {position.symbol}: {current_price}")
                         continue
                     
                     # Update unrealized P&L with DETAILED LOGGING
@@ -465,11 +535,13 @@ class EnhancedPaperTradingEngine:
                     # Calculate current profit in dollars
                     current_pnl_dollars = position.unrealized_pnl
                     
-                    # CRITICAL DEBUG LOGGING for positions approaching $10
+                    # ENHANCED DEBUG LOGGING for positions approaching $10
                     if current_pnl_dollars >= 8.0:  # Log when approaching $10 target
                         logger.info(f"🎯 PROFIT TRACKING: {position.symbol} @ ${current_pnl_dollars:.2f} profit (Target: $10)")
                         logger.info(f"   Entry: ${position.entry_price:.4f} | Current: ${current_price:.4f} | Quantity: {position.quantity:.6f}")
                         logger.info(f"   Side: {position.side} | Calculation: ({current_price:.4f} - {position.entry_price:.4f}) * {position.quantity:.6f} = ${current_pnl_dollars:.2f}")
+                    elif current_pnl_dollars >= 5.0:  # Also log $5+ positions
+                        logger.info(f"💰 PROFIT UPDATE: {position.symbol} @ ${current_pnl_dollars:.2f} profit")
                     
                     # Update highest profit ever reached
                     position.highest_profit_ever = max(position.highest_profit_ever, current_pnl_dollars)
@@ -481,8 +553,7 @@ class EnhancedPaperTradingEngine:
                         logger.info(f"🎯 PRIMARY TARGET HIT: {position.symbol} reached ${current_pnl_dollars:.2f} >= ${position.primary_target_profit:.2f}")
                         logger.info(f"🎯 IMMEDIATE EXIT: Marking position {position_id} for closure")
                         
-                        # ATOMIC OPERATION: Mark as closed immediately to prevent race conditions
-                        position.closed = True
+                        # CRITICAL FIX: Don't set closed=True here, let close_position handle it
                         positions_to_close.append((position_id, "primary_target_10_dollars"))
                         continue  # Skip ALL other checks - $10 target takes absolute precedence
                     
@@ -498,7 +569,6 @@ class EnhancedPaperTradingEngine:
                         # RULE 3: ABSOLUTE FLOOR PROTECTION - Never drop below $7
                         if current_pnl_dollars < position.absolute_floor_profit:
                             logger.info(f"💰 FLOOR VIOLATION: {position.symbol} dropped to ${current_pnl_dollars:.2f} < $7 floor")
-                            position.closed = True
                             positions_to_close.append((position_id, "absolute_floor_7_dollars"))
                             continue  # Skip all other checks - floor protection takes precedence
                     
@@ -509,22 +579,34 @@ class EnhancedPaperTradingEngine:
                     # CRITICAL: Check for level breakdown/breakout BEFORE normal SL/TP
                     breakdown_exit = await self._check_level_breakdown_exit(position, current_price)
                     if breakdown_exit:
-                        position.closed = True
                         positions_to_close.append((position_id, breakdown_exit))
                         continue  # Skip other checks if level breakdown detected
                     
                     # Check for trend reversal exit
                     trend_reversal_exit = await self._check_trend_reversal_exit(position, current_price)
                     if trend_reversal_exit:
-                        position.closed = True
                         positions_to_close.append((position_id, trend_reversal_exit))
                         continue  # Skip other checks if trend reversal detected
                     
-                    # Check stop loss (only if floor not activated)
+                    # Check stop loss (only if floor not activated) - ENHANCED LOGGING
                     if not position.profit_floor_activated and position.stop_loss:
-                        if (position.side == 'LONG' and current_price <= position.stop_loss) or \
-                           (position.side == 'SHORT' and current_price >= position.stop_loss):
-                            position.closed = True
+                        stop_loss_triggered = False
+                        
+                        if position.side == 'LONG' and current_price <= position.stop_loss:
+                            stop_loss_triggered = True
+                            price_drop_pct = ((position.entry_price - current_price) / position.entry_price) * 100
+                            expected_loss = (position.entry_price - current_price) * position.quantity
+                            logger.warning(f"🛑 STOP LOSS HIT: {position.symbol} LONG @ {current_price:.4f} <= SL {position.stop_loss:.4f}")
+                            logger.warning(f"🛑 Price drop: {price_drop_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
+                            
+                        elif position.side == 'SHORT' and current_price >= position.stop_loss:
+                            stop_loss_triggered = True
+                            price_rise_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                            expected_loss = (current_price - position.entry_price) * position.quantity
+                            logger.warning(f"🛑 STOP LOSS HIT: {position.symbol} SHORT @ {current_price:.4f} >= SL {position.stop_loss:.4f}")
+                            logger.warning(f"🛑 Price rise: {price_rise_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
+                        
+                        if stop_loss_triggered:
                             positions_to_close.append((position_id, "stop_loss"))
                             continue
                     
@@ -532,7 +614,6 @@ class EnhancedPaperTradingEngine:
                     if not position.profit_floor_activated and position.take_profit:
                         if (position.side == 'LONG' and current_price >= position.take_profit) or \
                            (position.side == 'SHORT' and current_price <= position.take_profit):
-                            position.closed = True
                             positions_to_close.append((position_id, "take_profit"))
                             continue
                     
@@ -540,20 +621,23 @@ class EnhancedPaperTradingEngine:
                     # Only close if position is losing money to prevent runaway losses
                     hold_time = datetime.utcnow() - position.entry_time
                     if hold_time > timedelta(days=7) and position.unrealized_pnl < 0:
-                        position.closed = True
                         positions_to_close.append((position_id, "safety_time_limit"))
                         logger.warning(f"⚠️ Closing losing position {position_id} after 7 days for safety")
                 
-                # Close positions with enhanced logging
+                # Close positions with enhanced logging and error handling
                 for position_id, reason in positions_to_close:
                     logger.info(f"🔄 CLOSING POSITION: {position_id} for reason: {reason}")
-                    await self.close_position(position_id, reason)
+                    try:
+                        await self.close_position(position_id, reason)
+                    except Exception as close_error:
+                        logger.error(f"❌ Failed to close position {position_id}: {close_error}")
+                        # Continue with other positions - don't let one failure stop everything
                 
                 # Update account equity
                 self.account.unrealized_pnl = self._calculate_unrealized_pnl()
                 self.account.equity = self.account.balance + self.account.unrealized_pnl
                 
-                await asyncio.sleep(3)  # Check every 3 seconds for faster $10 target detection
+                await asyncio.sleep(1)  # CRITICAL FIX: Check every 1 second for faster $10 target detection
                 
             except Exception as e:
                 logger.error(f"Error in position monitoring loop: {e}")
@@ -1031,82 +1115,36 @@ class EnhancedPaperTradingEngine:
             return 0.0
     
     async def _calculate_stop_loss(self, entry_price: float, side: str, symbol: str) -> float:
-        """Calculate DYNAMIC stop loss based on market conditions and support/resistance validation"""
+        """Calculate FIXED 0.5% stop loss for exactly $10 maximum loss per trade"""
         try:
-            # Get market trend and volatility
-            market_trend = await self._detect_market_trend(symbol)
-            volatility = await self._calculate_volatility(symbol)
-            
-            # CRITICAL: Validate support/resistance before setting SL
-            level_validation = await self._validate_support_resistance_holding(symbol, entry_price, side)
-            
-            # Base stop loss percentage
-            base_sl_pct = 0.003  # 0.3% base
-            
-            # SUPPORT/RESISTANCE VALIDATION ADJUSTMENT
-            if not level_validation['is_holding']:
-                # Level is breaking - use wider SL for protection
-                sl_pct = base_sl_pct * 2.0  # 0.6% wider SL
-                logger.warning(f"⚠️ LEVEL BREAKING: Wider SL - {level_validation['reason']}")
-                
-            elif level_validation['strength'] == 'strong':
-                # Strong level holding - can use tighter SL
-                sl_pct = base_sl_pct * 0.7  # 0.21% tighter SL
-                logger.info(f"💪 STRONG LEVEL: Tighter SL - {level_validation['reason']}")
-                
-            else:
-                # Standard level validation
-                sl_pct = base_sl_pct
-            
-            # DYNAMIC ADJUSTMENTS based on market conditions
-            if market_trend == 'strong_uptrend' and side == 'LONG' and level_validation['is_holding']:
-                # In strong uptrend with holding support, use tighter SL
-                sl_pct *= 0.8  # Further tighten
-                logger.info(f"🔥 TREND + SUPPORT: Tighter SL for LONG in strong uptrend")
-                
-            elif market_trend == 'strong_downtrend' and side == 'SHORT' and level_validation['is_holding']:
-                # In strong downtrend with holding resistance, use tighter SL
-                sl_pct *= 0.8  # Further tighten
-                logger.info(f"🔥 TREND + RESISTANCE: Tighter SL for SHORT in strong downtrend")
-                
-            elif market_trend == 'strong_downtrend' and side == 'LONG':
-                # LONG in downtrend - very risky, wider SL
-                sl_pct *= 2.0  # Much wider SL
-                logger.warning(f"🚨 HIGH RISK: LONG against strong downtrend - wider SL")
-                
-            elif market_trend == 'strong_uptrend' and side == 'SHORT':
-                # SHORT in uptrend - very risky, wider SL
-                sl_pct *= 2.0  # Much wider SL
-                logger.warning(f"🚨 HIGH RISK: SHORT against strong uptrend - wider SL")
-            
-            # VOLATILITY ADJUSTMENT
-            if volatility > 2.0:  # High volatility
-                sl_pct *= 1.3  # Wider SL for volatile markets
-                logger.info(f"📈 HIGH VOLATILITY: Wider SL ({volatility:.1f})")
-            elif volatility < 0.5:  # Low volatility
-                sl_pct *= 0.8  # Tighter SL for calm markets
-                logger.info(f"📉 LOW VOLATILITY: Tighter SL ({volatility:.1f})")
-            
-            # Cap SL at reasonable limits
-            sl_pct = max(0.002, min(0.015, sl_pct))  # Between 0.2% and 1.5%
+            # FIXED STOP LOSS: 0.5% price movement = $10 loss with current leverage setup
+            # $200 capital × 10x leverage = $2000 notional
+            # $10 loss ÷ $2000 notional = 0.5% price movement
+            fixed_sl_pct = 0.005  # 0.5% FIXED stop-loss for $10 maximum loss
             
             # Calculate final SL price
             if side == 'LONG':
-                sl_price = entry_price * (1 - sl_pct)
+                sl_price = entry_price * (1 - fixed_sl_pct)
             else:  # SHORT
-                sl_price = entry_price * (1 + sl_pct)
+                sl_price = entry_price * (1 + fixed_sl_pct)
             
-            logger.info(f"🛡️ VALIDATED SL: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({sl_pct:.3%}) [Trend: {market_trend}, Level: {level_validation['strength']}, Vol: {volatility:.1f}]")
+            # Calculate expected loss for verification
+            if side == 'LONG':
+                expected_loss = (entry_price - sl_price) * (200.0 * 10.0 / entry_price)  # $200 capital × 10x leverage
+            else:  # SHORT
+                expected_loss = (sl_price - entry_price) * (200.0 * 10.0 / entry_price)
+            
+            logger.info(f"🛡️ FIXED SL: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({fixed_sl_pct:.1%}) [Expected Loss: ${expected_loss:.2f}]")
             return sl_price
                 
         except Exception as e:
-            logger.error(f"Error calculating dynamic stop loss: {e}")
-            # Fallback to conservative SL
-            sl_pct = 0.006  # 0.6% conservative
+            logger.error(f"Error calculating fixed stop loss: {e}")
+            # Fallback to 0.5% SL for $10 loss
+            fixed_sl_pct = 0.005
             if side == 'LONG':
-                return entry_price * (1 - sl_pct)
+                return entry_price * (1 - fixed_sl_pct)
             else:
-                return entry_price * (1 + sl_pct)
+                return entry_price * (1 + fixed_sl_pct)
     
     async def _calculate_take_profit(self, entry_price: float, side: str, symbol: str) -> float:
         """Calculate take profit - FIXED $10 PROFIT TARGET (0.5% with 10x leverage)"""
@@ -1426,7 +1464,7 @@ class EnhancedPaperTradingEngine:
         return {
             'account': account_data,
             'positions': {pid: asdict(pos) for pid, pos in self.positions.items()},
-            'recent_trades': [asdict(t) for t in list(self.trade_history)[-10:]],
+            'recent_trades': [asdict(t) for t in list(self.trade_history)],  # Return all trades instead of just last 10
             'strategy_performance': dict(self.strategy_performance),
             'is_running': self.is_running
         }

@@ -362,13 +362,25 @@ class RealTradingEngine:
             return 0.0
     
     def _calculate_stop_loss(self, entry_price: float, side: str) -> float:
-        """Calculate stop loss price"""
-        stop_loss_pct = 0.02  # 2% stop loss (conservative for real trading)
+        """Calculate FIXED 0.5% stop loss for exactly $10 maximum loss per trade"""
+        # FIXED STOP LOSS: 0.5% price movement = $10 loss with current leverage setup
+        # $200 capital × 10x leverage = $2000 notional
+        # $10 loss ÷ $2000 notional = 0.5% price movement
+        fixed_sl_pct = 0.005  # 0.5% FIXED stop-loss for $10 maximum loss
         
         if side == 'LONG':
-            return entry_price * (1 - stop_loss_pct)
+            sl_price = entry_price * (1 - fixed_sl_pct)
         else:  # SHORT
-            return entry_price * (1 + stop_loss_pct)
+            sl_price = entry_price * (1 + fixed_sl_pct)
+        
+        # Calculate expected loss for verification
+        if side == 'LONG':
+            expected_loss = (entry_price - sl_price) * (200.0 * 10.0 / entry_price)  # $200 capital × 10x leverage
+        else:  # SHORT
+            expected_loss = (sl_price - entry_price) * (200.0 * 10.0 / entry_price)
+        
+        logger.info(f"🛡️ REAL TRADING FIXED SL: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({fixed_sl_pct:.1%}) [Expected Loss: ${expected_loss:.2f}]")
+        return sl_price
     
     def _calculate_take_profit(self, entry_price: float, side: str) -> float:
         """Calculate take profit price"""

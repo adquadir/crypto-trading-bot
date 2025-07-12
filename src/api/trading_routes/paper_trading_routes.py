@@ -627,21 +627,25 @@ async def get_account_details():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/trades")
-async def get_trade_history(limit: int = 50):
-    """Get trade history"""
+async def get_trade_history(limit: int = 1000):
+    """Get trade history - now returns all trades by default (up to 1000)"""
     try:
         engine = get_paper_engine()
         if not engine:
             raise HTTPException(status_code=404, detail="Paper trading engine not available")
         
         account_status = engine.get_account_status()
-        recent_trades = account_status['recent_trades'][-limit:] if len(account_status['recent_trades']) > limit else account_status['recent_trades']
+        # Now that engine returns all trades, we can apply the limit here if needed
+        all_trades = account_status['recent_trades']
+        recent_trades = all_trades[-limit:] if len(all_trades) > limit else all_trades
         
         return {
             "trades": recent_trades,
             "total_trades": account_status['account']['total_trades'],
             "winning_trades": account_status['account']['winning_trades'],
-            "win_rate": account_status['account']['win_rate']
+            "win_rate": account_status['account']['win_rate'],
+            "trades_returned": len(recent_trades),
+            "trades_available": len(all_trades)
         }
         
     except Exception as e:
@@ -691,35 +695,107 @@ async def execute_paper_trade(trade_request: PaperTradeRequest):
 
 @router.post("/positions/{position_id}/close")
 async def close_position(position_id: str, exit_reason: str = "manual"):
-    """Close a specific position"""
+    """Close a specific position with enhanced error handling and logging"""
     try:
+        logger.info(f"🔄 API CLOSE REQUEST: Received request to close position {position_id} (reason: {exit_reason})")
+        
+        # CRITICAL: Validate position_id format
+        if not position_id or not isinstance(position_id, str):
+            logger.error(f"❌ API CLOSE: Invalid position_id format: {position_id}")
+            raise HTTPException(status_code=400, detail="Invalid position ID format")
+        
+        # Get paper trading engine with detailed logging
         engine = get_paper_engine()
         if not engine:
-            raise HTTPException(status_code=400, detail="Paper trading engine not available")
+            logger.error(f"❌ API CLOSE: Paper trading engine not available for position {position_id}")
+            raise HTTPException(
+                status_code=503, 
+                detail="Paper trading engine not available - please start paper trading first"
+            )
         
+        logger.info(f"✅ API CLOSE: Engine available, attempting to close position {position_id}")
+        
+        # Check if engine is running
+        if not engine.is_running:
+            logger.error(f"❌ API CLOSE: Engine not running for position {position_id}")
+            raise HTTPException(
+                status_code=400, 
+                detail="Paper trading engine is not running - please start paper trading first"
+            )
+        
+        # Check if position exists before attempting to close
+        if position_id not in engine.positions:
+            logger.error(f"❌ API CLOSE: Position {position_id} not found in active positions")
+            logger.info(f"📊 API CLOSE: Available positions: {list(engine.positions.keys())}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Position {position_id} not found in active positions"
+            )
+        
+        # Get position details for logging
+        position = engine.positions[position_id]
+        logger.info(f"📋 API CLOSE: Found position {position_id} - {position.symbol} {position.side} @ {position.entry_price:.4f}")
+        
+        # Attempt to close the position
+        logger.info(f"🔄 API CLOSE: Calling engine.close_position for {position_id}")
         trade = await engine.close_position(position_id, exit_reason)
         
         if trade:
+            logger.info(f"✅ API CLOSE SUCCESS: Position {position_id} closed successfully")
+            logger.info(f"💰 API CLOSE: Trade details - P&L: ${trade.pnl:.2f} ({trade.pnl_pct:.2%}), Duration: {trade.duration_minutes}min")
+            
             return {
+                "status": "success",
                 "message": f"📉 Position closed successfully",
                 "trade": {
                     "id": trade.id,
                     "symbol": trade.symbol,
+                    "side": trade.side,
+                    "entry_price": trade.entry_price,
+                    "exit_price": trade.exit_price,
+                    "quantity": trade.quantity,
                     "pnl": trade.pnl,
                     "pnl_pct": trade.pnl_pct,
                     "duration_minutes": trade.duration_minutes,
-                    "exit_reason": trade.exit_reason
+                    "exit_reason": trade.exit_reason,
+                    "fees": trade.fees
+                },
+                "account_update": {
+                    "new_balance": engine.account.balance,
+                    "total_trades": engine.account.total_trades,
+                    "win_rate": engine.account.win_rate
                 },
                 "timestamp": datetime.utcnow().isoformat()
             }
         else:
-            raise HTTPException(status_code=404, detail="Position not found or could not be closed")
+            logger.error(f"❌ API CLOSE FAILED: engine.close_position returned None for {position_id}")
+            
+            # Additional debugging - check if position still exists
+            if position_id in engine.positions:
+                position_status = engine.positions[position_id]
+                logger.error(f"🔍 API CLOSE DEBUG: Position still exists - closed: {getattr(position_status, 'closed', 'unknown')}")
+            else:
+                logger.error(f"🔍 API CLOSE DEBUG: Position no longer in active positions")
+            
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to close position {position_id} - check server logs for details"
+            )
         
-    except HTTPException:
+    except HTTPException as http_error:
+        # Re-raise HTTP exceptions (they already have proper status codes)
+        logger.error(f"❌ API CLOSE HTTP ERROR: {http_error.detail}")
         raise
     except Exception as e:
-        logger.error(f"Error closing position: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Handle unexpected errors
+        logger.error(f"❌ API CLOSE CRITICAL ERROR: Unexpected error closing position {position_id}: {e}")
+        import traceback
+        logger.error(f"❌ API CLOSE TRACEBACK: {traceback.format_exc()}")
+        
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Internal server error while closing position: {str(e)}"
+        )
 
 @router.post("/reset")
 async def reset_paper_account():
