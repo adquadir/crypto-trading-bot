@@ -804,14 +804,14 @@ const PaperTrading = () => {
               <Typography variant="body2">
                 <strong>Virtual Money Testing:</strong> This uses the Flow Trading strategy with 4-layer approach: 
                 Market Regime Detection, Dynamic SL/TP, Correlation Filtering, and Volume/Momentum Triggers. 
-                Uses $10,000 virtual money - no real trades executed.
+                Uses $10,000 virtual money with $1,000 per position - no real trades executed.
               </Typography>
             </Alert>
             <Grid container spacing={3}>
               <Grid item xs={6} sm={3}>
                 <Box textAlign="center">
                   <Typography variant="h6" color="primary" fontWeight="bold">
-                    ${status.capital_per_position || 200}
+                    ${status.capital_per_position || 1000}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Virtual Capital Per Position

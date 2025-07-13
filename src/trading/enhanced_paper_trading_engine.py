@@ -170,7 +170,7 @@ class EnhancedPaperTradingEngine:
         self.feature_history = defaultdict(deque)
         
         # CORRECTED RISK MANAGEMENT - Percentage-based scaling with position limits
-        self.risk_per_trade_pct = self.config.get('risk_per_trade_pct', 0.02)  # 2% of balance per trade
+        self.risk_per_trade_pct = self.config.get('risk_per_trade_pct', 0.10)  # 10% of balance per trade = $1000 per position
         self.max_positions = self.config.get('max_positions', 50)  # Fixed 50 position limit
         self.leverage = self.config.get('leverage', 10.0)  # 10x leverage
         self.max_total_risk_pct = self.config.get('max_total_risk_pct', 1.0)  # 100% max total risk
@@ -1131,7 +1131,7 @@ class EnhancedPaperTradingEngine:
         try:
             # CORRECTED LEVERAGE CALCULATION - Percentage-based scaling
             current_balance = self.account.balance
-            capital_per_position = current_balance * self.risk_per_trade_pct  # 2% of current balance
+            capital_per_position = current_balance * self.risk_per_trade_pct  # 10% of current balance = $1000 per position
             leverage = self.leverage  # 10x leverage
             
             # Check position limits BEFORE calculating size
@@ -1170,7 +1170,7 @@ class EnhancedPaperTradingEngine:
             # We need to limit the loss to $10 regardless of price or leverage
             
             # Get the actual capital and leverage being used
-            capital_per_position = self.account.balance * self.risk_per_trade_pct  # 2% of balance = ~$200
+            capital_per_position = self.account.balance * self.risk_per_trade_pct  # 10% of balance = $1000
             leverage = self.leverage  # 10x leverage
             notional_value = capital_per_position * leverage  # Total position value
             quantity = notional_value / entry_price  # Actual quantity being traded
@@ -1215,11 +1215,11 @@ class EnhancedPaperTradingEngine:
                 return entry_price * (1 + fixed_sl_pct)
     
     async def _calculate_take_profit(self, entry_price: float, side: str, symbol: str) -> float:
-        """Calculate take profit - FIXED $10 PROFIT TARGET (0.5% with 10x leverage)"""
+        """Calculate take profit - FIXED $10 PROFIT TARGET (0.1% with 10x leverage)"""
         try:
             # FIXED PROFIT TARGET: $10 per position
-            # With $200 capital at risk and 10x leverage: $10 profit = 0.5% price movement
-            fixed_tp_pct = 0.005  # 0.5% fixed target for $10 profit
+            # With $1000 capital at risk and 10x leverage: $10 profit = 0.1% price movement
+            fixed_tp_pct = 0.001  # 0.1% fixed target for $10 profit
             
             # Calculate final TP price
             if side == 'LONG':
@@ -1232,8 +1232,8 @@ class EnhancedPaperTradingEngine:
                 
         except Exception as e:
             logger.error(f"Error calculating fixed take profit: {e}")
-            # Fallback to 0.5% TP for $10 profit
-            fixed_tp_pct = 0.005
+            # Fallback to 0.1% TP for $10 profit
+            fixed_tp_pct = 0.001
             if side == 'LONG':
                 return entry_price * (1 + fixed_tp_pct)
             else:
@@ -1527,7 +1527,7 @@ class EnhancedPaperTradingEngine:
         account_data['completed_trades'] = self.account.total_trades
         account_data['active_positions'] = len(self.positions)
         account_data['leverage'] = 10.0  # 10x leverage
-        account_data['capital_per_position'] = 200.0  # Fixed $200 per position
+        account_data['capital_per_position'] = 1000.0  # Fixed $1000 per position (10% of $10k balance)
         
         return {
             'account': account_data,

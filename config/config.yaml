@@ -11,6 +11,7 @@ paper_trading:
   enabled: true                     # 🔥 ENABLED for live market learning without real money
   mode: "live_learning"             # live_learning | backtesting | disabled
   initial_balance: 10000.0          # Virtual starting capital (USDT)
+  risk_per_trade_pct: 0.10          # 10% of balance per trade = $1000 per position
   use_real_market_data: true        # Use live market feeds (not simulation)
   simulate_real_conditions: true    # Include slippage, fees, latency
   learning_enabled: true            # Enable ML data collection

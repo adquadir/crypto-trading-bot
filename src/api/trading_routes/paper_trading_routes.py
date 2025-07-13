@@ -70,6 +70,7 @@ def get_paper_engine():
                 'paper_trading': {
                     'initial_balance': 10000.0,
                     'enabled': True,
+                    'risk_per_trade_pct': 0.10,  # 10% = $1000 per position
                     'max_position_size_pct': 0.02,
                     'max_total_exposure_pct': 1.0,
                     'max_daily_loss_pct': 0.50
@@ -111,6 +112,7 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
                 'paper_trading': {
                     'initial_balance': 10000.0,
                     'enabled': True,
+                    'risk_per_trade_pct': 0.10,  # 10% = $1000 per position
                     'max_position_size_pct': 0.02,
                     'max_total_exposure_pct': 1.0,
                     'max_daily_loss_pct': 0.50
@@ -415,7 +417,7 @@ async def get_paper_trading_status():
                     "completed_trades": 0,
                     "active_positions": 0,
                     "leverage": 10,
-                    "capital_per_position": 200,
+                    "capital_per_position": 1000,
                     "uptime_hours": 0.0,
                     "strategy_performance": {},
                     "message": "Paper trading engine not initialized - click Start to initialize",
@@ -464,7 +466,7 @@ async def get_paper_trading_status():
                 "completed_trades": 0,
                 "active_positions": 0,
                 "leverage": 10,
-                "capital_per_position": 200,
+                "capital_per_position": 1000,
                 "uptime_hours": 0.0,
                 "strategy_performance": {},
                 "error": str(e),
@@ -1250,6 +1252,7 @@ async def force_initialize_paper_engine():
             'paper_trading': {
                 'initial_balance': 10000.0,
                 'enabled': True,
+                'risk_per_trade_pct': 0.10,  # 10% = $1000 per position
                 'max_position_size_pct': 0.02,
                 'max_total_exposure_pct': 1.0,
                 'max_daily_loss_pct': 0.50
@@ -1639,8 +1642,8 @@ async def get_rule_configuration():
                 "configuration_source": "engine_current" if sample_position else "engine_defaults",
                 "leverage_info": {
                     "current_leverage": getattr(engine, 'leverage', 10.0),
-                    "capital_per_position": 200.0,
-                    "stop_loss_calculation": f"0.5% price movement = ~$10 loss with {getattr(engine, 'leverage', 10.0)}x leverage"
+                    "capital_per_position": 1000.0,
+                    "stop_loss_calculation": f"0.5% price movement = ~$50 loss with {getattr(engine, 'leverage', 10.0)}x leverage"
                 }
             }
         }
