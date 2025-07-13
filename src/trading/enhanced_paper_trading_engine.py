@@ -587,36 +587,26 @@ class EnhancedPaperTradingEngine:
                             continue  # Skip all other checks - floor protection takes precedence
                     
                     # ============================================================================
-                    # RULE 3: Below $7 - Apply remaining rules based on mode
+                    # RULE 3: DOLLAR-BASED STOP LOSS SYSTEM
                     # ============================================================================
                     
+                    # RULE 3A: HARD FAILSAFE - $15 loss maximum (overrides everything)
+                    if current_pnl_dollars <= -15.0:
+                        logger.error(f"🚨 FAILSAFE EXIT: {position.symbol} hit $15 loss limit (${current_pnl_dollars:.2f})")
+                        logger.error(f"🚨 HARD STOP: {position.symbol} exceeded maximum loss threshold")
+                        positions_to_close.append((position_id, "failsafe_15_dollar_loss"))
+                        continue  # Skip all other checks - failsafe takes absolute precedence
+                    
+                    # RULE 3B: STANDARD STOP LOSS - $10 loss maximum
+                    if current_pnl_dollars <= -10.0:
+                        logger.info(f"🔻 RULE 3 EXIT: {position.symbol} hit $10 stop loss (${current_pnl_dollars:.2f})")
+                        logger.warning(f"🛑 STOP LOSS: {position.symbol} reached -$10 loss limit")
+                        positions_to_close.append((position_id, "stop_loss_10_dollar_loss"))
+                        continue  # Skip all other checks - stop loss takes precedence
+                    
                     if self.pure_3_rule_mode:
-                        # PURE 3-RULE MODE: Only check 0.5% stop loss
-                        logger.debug(f"🎯 PURE MODE: {position.symbol} checking 0.5% stop loss only")
-                        
-                        # Check stop loss (only if floor not activated) - ENHANCED LOGGING
-                        if not position.profit_floor_activated and position.stop_loss:
-                            stop_loss_triggered = False
-                            
-                            if position.side == 'LONG' and current_price <= position.stop_loss:
-                                stop_loss_triggered = True
-                                price_drop_pct = ((position.entry_price - current_price) / position.entry_price) * 100
-                                expected_loss = (position.entry_price - current_price) * position.quantity
-                                logger.info(f"🔻 RULE 3 EXIT: {position.symbol} 0.5% stop loss hit (${expected_loss:.2f} loss)")
-                                logger.warning(f"🛑 STOP LOSS: {position.symbol} LONG @ {current_price:.4f} <= SL {position.stop_loss:.4f}")
-                                logger.warning(f"🛑 Price drop: {price_drop_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
-                                
-                            elif position.side == 'SHORT' and current_price >= position.stop_loss:
-                                stop_loss_triggered = True
-                                price_rise_pct = ((current_price - position.entry_price) / position.entry_price) * 100
-                                expected_loss = (current_price - position.entry_price) * position.quantity
-                                logger.info(f"🔻 RULE 3 EXIT: {position.symbol} 0.5% stop loss hit (${expected_loss:.2f} loss)")
-                                logger.warning(f"🛑 STOP LOSS: {position.symbol} SHORT @ {current_price:.4f} >= SL {position.stop_loss:.4f}")
-                                logger.warning(f"🛑 Price rise: {price_rise_pct:.2f}% | Expected loss: ${expected_loss:.2f}")
-                            
-                            if stop_loss_triggered:
-                                positions_to_close.append((position_id, "stop_loss_0_5_percent"))
-                                continue
+                        # PURE 3-RULE MODE: Only the 3 rules above apply
+                        logger.debug(f"🎯 PURE MODE: {position.symbol} all dollar-based rules checked - no other exits")
                         
                         # In pure mode, NO other exits are allowed below $7
                         logger.debug(f"🎯 PURE MODE: {position.symbol} no other exits - waiting for $7+ or stop loss")
