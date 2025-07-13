@@ -1164,31 +1164,50 @@ class EnhancedPaperTradingEngine:
             return 0.0
     
     async def _calculate_stop_loss(self, entry_price: float, side: str, symbol: str) -> float:
-        """Calculate FIXED 0.5% stop loss for exactly $10 maximum loss per trade"""
+        """Calculate stop loss that limits losses to exactly $10 per trade"""
         try:
-            # FIXED STOP LOSS: 0.5% price movement = $10 loss with current leverage setup
-            # $200 capital × 10x leverage = $2000 notional
-            # $10 loss ÷ $2000 notional = 0.5% price movement
-            fixed_sl_pct = 0.005  # 0.5% FIXED stop-loss for $10 maximum loss
+            # CORRECTED CALCULATION: Calculate SL based on actual position parameters
+            # We need to limit the loss to $10 regardless of price or leverage
             
-            # Calculate final SL price
+            # Get the actual capital and leverage being used
+            capital_per_position = self.account.balance * self.risk_per_trade_pct  # 2% of balance = ~$200
+            leverage = self.leverage  # 10x leverage
+            notional_value = capital_per_position * leverage  # Total position value
+            quantity = notional_value / entry_price  # Actual quantity being traded
+            
+            # Calculate the price movement needed for exactly $10 loss
+            target_loss = 10.0  # $10 maximum loss
+            
             if side == 'LONG':
-                sl_price = entry_price * (1 - fixed_sl_pct)
+                # For LONG: loss = (entry_price - sl_price) * quantity
+                # Solve for sl_price: sl_price = entry_price - (target_loss / quantity)
+                sl_price = entry_price - (target_loss / quantity)
             else:  # SHORT
-                sl_price = entry_price * (1 + fixed_sl_pct)
+                # For SHORT: loss = (sl_price - entry_price) * quantity
+                # Solve for sl_price: sl_price = entry_price + (target_loss / quantity)
+                sl_price = entry_price + (target_loss / quantity)
             
-            # Calculate expected loss for verification
+            # Calculate the percentage for logging
             if side == 'LONG':
-                expected_loss = (entry_price - sl_price) * (200.0 * 10.0 / entry_price)  # $200 capital × 10x leverage
-            else:  # SHORT
-                expected_loss = (sl_price - entry_price) * (200.0 * 10.0 / entry_price)
+                sl_pct = (entry_price - sl_price) / entry_price
+            else:
+                sl_pct = (sl_price - entry_price) / entry_price
             
-            logger.info(f"🛡️ FIXED SL: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({fixed_sl_pct:.1%}) [Expected Loss: ${expected_loss:.2f}]")
+            # Verify the calculation
+            if side == 'LONG':
+                expected_loss = (entry_price - sl_price) * quantity
+            else:
+                expected_loss = (sl_price - entry_price) * quantity
+            
+            logger.info(f"🛡️ CORRECTED SL: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({sl_pct:.3%})")
+            logger.info(f"🛡️ Position: {quantity:.6f} {symbol}, Capital: ${capital_per_position:.2f}, Leverage: {leverage}x")
+            logger.info(f"🛡️ Expected Loss: ${expected_loss:.2f} (Target: $10.00)")
+            
             return sl_price
                 
         except Exception as e:
-            logger.error(f"Error calculating fixed stop loss: {e}")
-            # Fallback to 0.5% SL for $10 loss
+            logger.error(f"Error calculating corrected stop loss: {e}")
+            # Fallback: Use a conservative 0.5% SL
             fixed_sl_pct = 0.005
             if side == 'LONG':
                 return entry_price * (1 - fixed_sl_pct)
