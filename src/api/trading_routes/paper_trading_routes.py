@@ -445,8 +445,8 @@ async def get_paper_trading_status():
                 "rule_mode": {
                     "pure_3_rule_mode": getattr(engine, 'pure_3_rule_mode', True),
                     "mode_name": "Pure 3-Rule Mode" if getattr(engine, 'pure_3_rule_mode', True) else "Complex Mode",
-                    "primary_target_dollars": engine.config.get('primary_target_dollars', 10.0),
-                    "absolute_floor_dollars": engine.config.get('absolute_floor_dollars', 7.0),
+                    "primary_target_dollars": engine.config.get('primary_target_dollars', 18.0),  # $18 gross = $10 net
+                    "absolute_floor_dollars": engine.config.get('absolute_floor_dollars', 15.0),  # $15 gross = $7 net
                     "stop_loss_percent": engine.config.get('stop_loss_percent', 0.5)
                 }
             }
@@ -1605,8 +1605,8 @@ async def get_rule_configuration():
             return {
                 "status": "success",
                 "data": {
-                    "primary_target_dollars": 10.0,
-                    "absolute_floor_dollars": 7.0,
+                    "primary_target_dollars": 18.0,  # $18 gross = $10 net
+                    "absolute_floor_dollars": 15.0,  # $15 gross = $7 net
                     "stop_loss_percent": 0.5,
                     "engine_available": False,
                     "configuration_source": "default_values"
@@ -1621,11 +1621,11 @@ async def get_rule_configuration():
         
         # Get configuration from position or defaults
         if sample_position:
-            primary_target = getattr(sample_position, 'primary_target_profit', 10.0)
-            absolute_floor = getattr(sample_position, 'absolute_floor_profit', 7.0)
+            primary_target = getattr(sample_position, 'primary_target_profit', 18.0) # $18 gross = $10 net
+            absolute_floor = getattr(sample_position, 'absolute_floor_profit', 15.0) # $15 gross = $7 net
         else:
-            primary_target = 10.0
-            absolute_floor = 7.0
+            primary_target = 18.0 # $18 gross = $10 net
+            absolute_floor = 15.0 # $15 gross = $7 net
         
         # Stop loss is calculated as 0.5% for $10 loss with current leverage
         stop_loss_percent = 0.5
@@ -1654,16 +1654,16 @@ async def get_rule_configuration():
             "status": "error",
             "message": f"Failed to get rule configuration: {str(e)}",
             "data": {
-                "primary_target_dollars": 10.0,
-                "absolute_floor_dollars": 7.0,
+                "primary_target_dollars": 18.0,  # $18 gross = $10 net
+                "absolute_floor_dollars": 15.0,  # $15 gross = $7 net
                 "stop_loss_percent": 0.5,
                 "configuration_source": "error_fallback"
             }
         }
 
 class RuleConfigUpdate(BaseModel):
-    primary_target_dollars: float = 10.0
-    absolute_floor_dollars: float = 7.0
+    primary_target_dollars: float = 18.0 # $18 gross = $10 net
+    absolute_floor_dollars: float = 15.0 # $15 gross = $7 net
     stop_loss_percent: float = 0.5
 
 @router.post("/rule-config")

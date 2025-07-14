@@ -560,40 +560,40 @@ const PaperTrading = () => {
             🎯 Pure 3-Rule Mode Configuration
           </Typography>
           
-                      <Alert severity="info" sx={{ mb: 2 }}>
-              <Typography variant="body2">
-                <strong>Pure 3-Rule Mode:</strong> Clean hierarchy with only 4 exit conditions: 
-                $10 Take Profit → $7 Floor Protection → $10 Stop Loss → $15 Failsafe. 
-                Complex Mode includes all technical exits.
-              </Typography>
-            </Alert>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <Typography variant="body2">
+              <strong>Pure 3-Rule Mode:</strong> Clean hierarchy with only 3 exit conditions: 
+              $10 Take Profit → $7 Floor Protection → 0.5% Stop Loss. 
+              Complex Mode includes all technical exits.
+            </Typography>
+          </Alert>
 
           <Grid container spacing={3} alignItems="center">
             <Grid item xs={12} md={6}>
               <Box>
-                                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={ruleMode.pure_3_rule_mode}
-                              onChange={(e) => handleRuleModeToggle(e.target.checked)}
-                              disabled={changingRuleMode}
-                              color="primary"
-                            />
-                          }
-                          label={
-                            <Box>
-                              <Typography variant="body1" fontWeight="bold">
-                                {ruleMode.mode_name}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {ruleMode.pure_3_rule_mode 
-                                  ? "Clean hierarchy: $10 TP → $7 Floor → $10 SL → $15 Failsafe"
-                                  : "All exit conditions active"
-                                }
-                              </Typography>
-                            </Box>
-                          }
-                        />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={ruleMode.pure_3_rule_mode}
+                      onChange={(e) => handleRuleModeToggle(e.target.checked)}
+                      disabled={changingRuleMode}
+                      color="primary"
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body1" fontWeight="bold">
+                        {ruleMode.mode_name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {ruleMode.pure_3_rule_mode 
+                          ? "Clean hierarchy: $10 TP → $7 Floor → 0.5% SL"
+                          : "All exit conditions active"
+                        }
+                      </Typography>
+                    </Box>
+                  }
+                />
                 
                 {changingRuleMode && (
                   <Box display="flex" alignItems="center" gap={1} mt={1}>
@@ -607,36 +607,30 @@ const PaperTrading = () => {
             </Grid>
             
             <Grid item xs={12} md={6}>
-                              <Box>
-                  <Typography variant="body2" fontWeight="bold" gutterBottom>
-                    Current Rule Configuration:
-                  </Typography>
-                  <Box display="flex" gap={2} flexWrap="wrap">
-                    <Chip 
-                      label={`Target: $${ruleMode.primary_target_dollars}`}
-                      color="success" 
-                      size="small"
-                      variant="outlined"
-                    />
-                    <Chip 
-                      label={`Floor: $${ruleMode.absolute_floor_dollars}`}
-                      color="warning" 
-                      size="small"
-                      variant="outlined"
-                    />
-                    <Chip 
-                      label={`Stop Loss: $10 loss`}
-                      color="error" 
-                      size="small"
-                      variant="outlined"
-                    />
-                    <Chip 
-                      label={`Failsafe: $15 loss`}
-                      color="error" 
-                      size="small"
-                      variant="filled"
-                    />
-                  </Box>
+              <Box>
+                <Typography variant="body2" fontWeight="bold" gutterBottom>
+                  Current Rule Configuration:
+                </Typography>
+                <Box display="flex" gap={2} flexWrap="wrap">
+                  <Chip 
+                    label={`Target: $${ruleMode.primary_target_dollars}`}
+                    color="success" 
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip 
+                    label={`Floor: $${ruleMode.absolute_floor_dollars}`}
+                    color="warning" 
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip 
+                    label={`Stop Loss: ${ruleMode.stop_loss_percent}%`}
+                    color="error" 
+                    size="small"
+                    variant="outlined"
+                  />
+                </Box>
                 
                 <Button
                   size="small"
@@ -659,7 +653,7 @@ const PaperTrading = () => {
               </Typography>
               
               <Grid container spacing={2}>
-                <Grid item xs={12} sm={3}>
+                <Grid item xs={12} sm={4}>
                   <Box>
                     <Typography variant="caption" color="text.secondary">
                       Primary Target (dollars)
@@ -673,7 +667,7 @@ const PaperTrading = () => {
                   </Box>
                 </Grid>
                 
-                <Grid item xs={12} sm={3}>
+                <Grid item xs={12} sm={4}>
                   <Box>
                     <Typography variant="caption" color="text.secondary">
                       Absolute Floor (dollars)
@@ -687,30 +681,16 @@ const PaperTrading = () => {
                   </Box>
                 </Grid>
                 
-                <Grid item xs={12} sm={3}>
+                <Grid item xs={12} sm={4}>
                   <Box>
                     <Typography variant="caption" color="text.secondary">
-                      Stop Loss (dollars)
+                      Stop Loss (percent)
                     </Typography>
                     <Typography variant="h6" color="error.main" fontWeight="bold">
-                      $10
+                      {ruleMode.stop_loss_percent}%
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       Maximum loss protection
-                    </Typography>
-                  </Box>
-                </Grid>
-                
-                <Grid item xs={12} sm={3}>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">
-                      Failsafe (dollars)
-                    </Typography>
-                    <Typography variant="h6" color="error.main" fontWeight="bold">
-                      $15
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Hard stop protection
                     </Typography>
                   </Box>
                 </Grid>
