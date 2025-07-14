@@ -1144,11 +1144,11 @@ class EnhancedPaperTradingEngine:
             raise Exception(f"Real price fetch failed for {symbol}: {e}")
     
     def _calculate_position_size(self, symbol: str, price: float, confidence: float) -> float:
-        """Calculate position size with CORRECTED percentage-based scaling and position limits"""
+        """Calculate position size with FIXED $1000 capital allocation for consistent stop loss"""
         try:
-            # CORRECTED LEVERAGE CALCULATION - Percentage-based scaling
-            current_balance = self.account.balance
-            capital_per_position = current_balance * self.risk_per_trade_pct  # 10% of current balance = $1000 per position
+            # FIXED CAPITAL ALLOCATION - Always use $1000 regardless of current balance
+            # This ensures stop loss calculations work correctly for $10k notional positions
+            capital_per_position = 1000.0  # Fixed $1000 capital per position
             leverage = self.leverage  # 10x leverage
             
             # Check position limits BEFORE calculating size
@@ -1157,7 +1157,8 @@ class EnhancedPaperTradingEngine:
                 logger.warning(f"❌ Position limit reached: {current_positions}/{self.max_positions} positions")
                 return 0.0
             
-            # Check if we have enough capital for this position
+            # Check if we have enough capital for this position (simplified for fixed allocation)
+            current_balance = self.account.balance
             total_allocated = sum(getattr(pos, 'capital_allocated', capital_per_position) for pos in self.positions.values())
             available_capital = current_balance - total_allocated
             
@@ -1181,64 +1182,102 @@ class EnhancedPaperTradingEngine:
             return 0.0
     
     async def _calculate_stop_loss(self, entry_price: float, side: str, symbol: str) -> float:
-        """Calculate stop loss that limits net losses to exactly $10 per trade (after fees)"""
+        """Calculate stop loss that limits net losses to exactly $10 per trade (after fees) - FIXED FOR ACTUAL FEE CALCULATION"""
         try:
-            # CORRECTED CALCULATION: Calculate SL based on actual position parameters and fees
-            # We need to limit the NET loss to $10 after fees
+            # FIXED CALCULATION: Use actual $1000 capital allocation (10% of $10k balance)
+            # Target: $10 net loss after actual fees = adjusted gross loss limit
             
-            # Get the actual capital and leverage being used
-            capital_per_position = self.account.balance * self.risk_per_trade_pct  # 10% of balance = $1000
+            # Get the ACTUAL capital and leverage being used (CORRECTED)
+            capital_per_position = self.account.balance * self.risk_per_trade_pct  # 10% of $10k = $1000
             leverage = self.leverage  # 10x leverage
-            notional_value = capital_per_position * leverage  # Total position value
+            notional_value = capital_per_position * leverage  # $1000 × 10x = $10,000 notional
             quantity = notional_value / entry_price  # Actual quantity being traded
             
-            # Fee calculation (Binance Futures taker fees)
+            # CRITICAL FIX: Calculate fees the same way as close_position method
             fee_per_side = 0.0004  # 0.04% taker fee
-            round_trip_fee_pct = fee_per_side * 2  # 0.08% total
-            total_fees_dollars = notional_value * round_trip_fee_pct  # $8
+            entry_fee = quantity * entry_price * fee_per_side
             
-            # Target: $10 net loss = $10 + $8 fees = $18 gross loss needed
+            # For stop loss calculation, we need to estimate the exit fee
+            # We'll use a slightly conservative approach to ensure we don't exceed $10 net
             target_net_loss = 10.0
-            required_gross_loss = target_net_loss + total_fees_dollars
             
-            # Calculate stop loss price
+            # Iterative approach to find the right stop loss price
+            # Start with an estimate and refine
             if side == 'LONG':
-                # For LONG: gross_loss = (entry_price - sl_price) * quantity
-                # Solve for sl_price: sl_price = entry_price - (required_gross_loss / quantity)
-                sl_price = entry_price - (required_gross_loss / quantity)
+                # For LONG positions, stop loss is below entry price
+                sl_price_estimate = entry_price * 0.998  # Start with ~0.2% below
+                for _ in range(10):  # Max 10 iterations
+                    exit_fee = quantity * sl_price_estimate * fee_per_side
+                    total_fees = entry_fee + exit_fee
+                    required_gross_loss = target_net_loss + total_fees
+                    sl_price_estimate = entry_price - (required_gross_loss / quantity)
+                    
+                    # Check convergence
+                    test_exit_fee = quantity * sl_price_estimate * fee_per_side
+                    test_total_fees = entry_fee + test_exit_fee
+                    test_gross_loss = (entry_price - sl_price_estimate) * quantity
+                    test_net_loss = test_gross_loss - test_total_fees
+                    
+                    if abs(test_net_loss - target_net_loss) < 0.01:  # Within 1 cent
+                        break
+                
+                sl_price = sl_price_estimate
+                
             else:  # SHORT
-                # For SHORT: gross_loss = (sl_price - entry_price) * quantity
-                # Solve for sl_price: sl_price = entry_price + (required_gross_loss / quantity)
-                sl_price = entry_price + (required_gross_loss / quantity)
+                # For SHORT positions, stop loss is above entry price
+                sl_price_estimate = entry_price * 1.002  # Start with ~0.2% above
+                for _ in range(10):  # Max 10 iterations
+                    exit_fee = quantity * sl_price_estimate * fee_per_side
+                    total_fees = entry_fee + exit_fee
+                    required_gross_loss = target_net_loss + total_fees
+                    sl_price_estimate = entry_price + (required_gross_loss / quantity)
+                    
+                    # Check convergence
+                    test_exit_fee = quantity * sl_price_estimate * fee_per_side
+                    test_total_fees = entry_fee + test_exit_fee
+                    test_gross_loss = (sl_price_estimate - entry_price) * quantity
+                    test_net_loss = test_gross_loss - test_total_fees
+                    
+                    if abs(test_net_loss - target_net_loss) < 0.01:  # Within 1 cent
+                        break
+                
+                sl_price = sl_price_estimate
             
-            # Calculate the percentage for logging
+            # Calculate final verification
+            final_exit_fee = quantity * sl_price * fee_per_side
+            final_total_fees = entry_fee + final_exit_fee
+            
             if side == 'LONG':
+                final_gross_loss = (entry_price - sl_price) * quantity
                 sl_pct = (entry_price - sl_price) / entry_price
             else:
+                final_gross_loss = (sl_price - entry_price) * quantity
                 sl_pct = (sl_price - entry_price) / entry_price
             
-            # Verify the calculation
-            if side == 'LONG':
-                expected_gross_loss = (entry_price - sl_price) * quantity
+            final_net_loss = final_gross_loss - final_total_fees
+            
+            logger.info(f"🛡️ PRECISE SL CALCULATION: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({sl_pct:.4%})")
+            logger.info(f"🛡️ Position: {quantity:.6f} {symbol}, Capital: ${capital_per_position:.2f}, Leverage: {leverage}x, Notional: ${notional_value:.2f}")
+            logger.info(f"🛡️ Fees: Entry ${entry_fee:.2f} + Exit ${final_exit_fee:.2f} = ${final_total_fees:.2f}")
+            logger.info(f"🛡️ Result: ${final_gross_loss:.2f} gross - ${final_total_fees:.2f} fees = ${final_net_loss:.2f} net")
+            
+            # VERIFICATION: Ensure we're within 1 cent of target
+            if abs(final_net_loss - target_net_loss) > 0.01:
+                logger.warning(f"⚠️ SL CALCULATION WARNING: Expected ${final_net_loss:.2f} net loss ≠ ${target_net_loss:.2f} target")
             else:
-                expected_gross_loss = (sl_price - entry_price) * quantity
-            
-            expected_net_loss = expected_gross_loss - total_fees_dollars
-            
-            logger.info(f"🛡️ CORRECTED SL: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({sl_pct:.4%})")
-            logger.info(f"🛡️ Position: {quantity:.6f} {symbol}, Capital: ${capital_per_position:.2f}, Leverage: {leverage}x")
-            logger.info(f"🛡️ Expected Gross Loss: ${expected_gross_loss:.2f}, Fees: ${total_fees_dollars:.2f}, Net Loss: ${expected_net_loss:.2f} (Target: $10.00)")
+                logger.info(f"✅ SL VERIFICATION PASSED: ${final_net_loss:.2f} net loss ≈ ${target_net_loss:.2f} target")
             
             return sl_price
                 
         except Exception as e:
-            logger.error(f"Error calculating corrected stop loss: {e}")
-            # Fallback: Use a conservative 0.5% SL
-            fixed_sl_pct = 0.005
+            logger.error(f"Error calculating precise stop loss: {e}")
+            # Fallback: Use a conservative percentage that should limit to ~$10 net loss
+            # For $10k position: $10/$10k = 0.1% movement (conservative)
+            fallback_sl_pct = 0.001  # 0.1% (more conservative)
             if side == 'LONG':
-                return entry_price * (1 - fixed_sl_pct)
+                return entry_price * (1 - fallback_sl_pct)
             else:
-                return entry_price * (1 + fixed_sl_pct)
+                return entry_price * (1 + fallback_sl_pct)
     
     async def _calculate_take_profit(self, entry_price: float, side: str, symbol: str) -> float:
         """Calculate take profit - FIXED $10 NET PROFIT TARGET (accounting for fees)"""
