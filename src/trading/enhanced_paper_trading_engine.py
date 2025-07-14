@@ -119,9 +119,28 @@ class EnhancedPaperTradingEngine:
         self.exchange_client = exchange_client
         self.flow_trading_strategy = flow_trading_strategy  # NEW: Strategy selection
         
-        # Initialize as None - will be set by the routes initialization
-        self.opportunity_manager = None
-        self.profit_scraping_engine = None
+        # 🎯 SIGNAL SOURCE CONFIGURATION - Profit Scraping Primary with Smart Fallbacks
+        self.signal_config = config.get('signal_sources', {
+            'profit_scraping_primary': True,
+            'allow_opportunity_fallback': False,  # Default OFF - Pure mode
+            'allow_flow_trading_fallback': False,  # Default OFF - Pure mode
+            'pure_profit_scraping_mode': True,     # Default ON - Pure mode
+            'adaptive_thresholds': True,           # Lower thresholds in quiet markets
+            'multi_timeframe_analysis': True,      # Check multiple timeframes
+            'expanded_symbol_pool': True           # More symbols during low activity
+        })
+        
+        # Initialize signal sources based on configuration
+        self.profit_scraping_engine = None  # Always available (primary)
+        self.opportunity_manager = None     # Only if fallback enabled
+        
+        logger.info(f"🎯 SIGNAL MODE: Pure Profit Scraping = {self.signal_config['pure_profit_scraping_mode']}")
+        if self.signal_config['allow_opportunity_fallback']:
+            logger.info("⚠️ Opportunity Manager fallback ENABLED")
+        if self.signal_config['allow_flow_trading_fallback']:
+            logger.info("⚠️ Flow Trading fallback ENABLED")
+        else:
+            logger.info("✅ Pure Profit Scraping Mode - No fallbacks enabled")
         
         # Initialize database - MUST work, no fallbacks
         self.db = Database()
@@ -836,61 +855,47 @@ class EnhancedPaperTradingEngine:
                 await asyncio.sleep(60)
     
     async def _get_fresh_opportunities(self) -> List[Dict[str, Any]]:
-        """Get fresh trading opportunities with PROFIT SCRAPING priority + Opportunity Manager + Flow Trading fallback"""
+        """Get trading opportunities with PROFIT SCRAPING primary + optional fallbacks"""
         try:
-            # PRIORITY 1: Use Profit Scraping Engine for high-quality scalping signals
+            # PRIORITY 1: Profit Scraping Engine (ALWAYS FIRST)
             if self.profit_scraping_engine and hasattr(self.profit_scraping_engine, 'active') and self.profit_scraping_engine.active:
-                logger.info("🎯 Getting opportunities from PROFIT SCRAPING ENGINE")
+                logger.info("[SIGNAL] Fetching from Profit Scraping Engine (PRIMARY)")
                 profit_opportunities = await self._get_profit_scraping_opportunities()
                 
                 if profit_opportunities:
-                    logger.info(f"🎯 Profit Scraping: Found {len(profit_opportunities)} high-quality level-based opportunities")
+                    logger.info(f"[SIGNAL] Pure mode: {len(profit_opportunities)} profit-scraping signals found")
+                    for opp in profit_opportunities:
+                        logger.info(f"[TRADE EXEC] Pure mode: Profit Scraping signal ready for {opp['symbol']}")
                     return profit_opportunities
                 else:
-                    logger.info("🎯 Profit Scraping: Engine active but no opportunities available")
-            else:
-                logger.info("🎯 Paper Trading: Profit scraping engine not active, using fallback")
-
-            # PRIORITY 2: Use connected opportunity manager
-            if self.opportunity_manager:
-                logger.info("🎯 Getting opportunities from connected Opportunity Manager")
+                    logger.info("[SIGNAL] No profit-scraping opportunities this cycle.")
+                    
+                    # Check if fallbacks are enabled
+                    if not self.signal_config.get('allow_opportunity_fallback', False):
+                        logger.info("[SIGNAL] Pure mode: No fallbacks enabled, skipping cycle")
+                        return []
+            
+            # FALLBACK 1: Opportunity Manager (ONLY IF ENABLED)
+            if self.signal_config.get('allow_opportunity_fallback', False) and self.opportunity_manager:
+                logger.warning("[SIGNAL] FALLBACK: Using Opportunity Manager (profit scraping unavailable)")
                 opportunities = self.opportunity_manager.get_opportunities()
-                
-                # DEBUG: Log what we received
-                logger.info(f"🎯 DEBUG: Received {len(opportunities)} opportunities from opportunity manager")
                 if opportunities:
-                    logger.info(f"🎯 DEBUG: First opportunity: {opportunities[0]}")
-                
-                if opportunities:
-                    # Filter for tradable opportunities only with higher confidence for non-profit-scraping
-                    tradable_opportunities = [
-                        opp for opp in opportunities 
-                        if opp.get('tradable', False) and opp.get('confidence', 0) >= 0.65  # Higher threshold without profit scraping
-                    ]
-                    
-                    logger.info(f"🎯 DEBUG: After filtering: {len(tradable_opportunities)} tradable opportunities")
+                    tradable_opportunities = [opp for opp in opportunities if opp.get('tradable', False)]
                     if tradable_opportunities:
-                        logger.info(f"🎯 DEBUG: First tradable opportunity: {tradable_opportunities[0]}")
-                    
-                    if tradable_opportunities:
-                        logger.info(f"🎯 Opportunity Manager: Found {len(tradable_opportunities)} tradable opportunities (from {len(opportunities)} total)")
+                        logger.info(f"[SIGNAL] Fallback mode: {len(tradable_opportunities)} opportunity manager signals")
                         return tradable_opportunities
-                    else:
-                        logger.info(f"🎯 Opportunity Manager: Found {len(opportunities)} opportunities but none meet higher confidence threshold")
-                else:
-                    logger.info("🎯 Opportunity Manager: No opportunities available")
-            else:
-                logger.warning("🎯 Paper Trading: Opportunity manager not connected, using fallback")
             
-            # PRIORITY 3: Use Flow Trading system as final fallback
-            flow_opportunities = await self._get_flow_trading_opportunities()
+            # FALLBACK 2: Flow Trading (ONLY IF ENABLED)
+            if self.signal_config.get('allow_flow_trading_fallback', False):
+                logger.warning("[SIGNAL] FALLBACK: Using Flow Trading (all other sources failed)")
+                flow_opportunities = await self._get_flow_trading_opportunities()
+                if flow_opportunities:
+                    logger.info(f"[SIGNAL] Flow fallback: {len(flow_opportunities)} flow trading signals")
+                    return flow_opportunities
             
-            if flow_opportunities:
-                logger.info(f"🌊 Flow Trading Fallback: Found {len(flow_opportunities)} opportunities using {self.flow_trading_strategy} strategy")
-                return flow_opportunities
-            else:
-                logger.info(f"🌊 Flow Trading Fallback: No opportunities found with {self.flow_trading_strategy} strategy")
-                return []
+            # No signals available
+            logger.info("[SIGNAL] No signals from any enabled source this cycle")
+            return []
             
         except Exception as e:
             logger.error(f"Error getting opportunities: {e}")

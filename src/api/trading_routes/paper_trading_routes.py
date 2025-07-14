@@ -1719,3 +1719,228 @@ async def update_rule_configuration(config: RuleConfigUpdate):
     except Exception as e:
         logger.error(f"Error updating rule configuration: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update rule configuration: {str(e)}")
+
+# ============================================================================
+# SIGNAL SOURCE CONFIGURATION API ENDPOINTS
+# ============================================================================
+
+@router.get("/signal-config")
+async def get_signal_configuration():
+    """🎯 GET SIGNAL SOURCE CONFIGURATION"""
+    try:
+        engine = get_paper_engine()
+        if not engine:
+            # Return default configuration
+            return {
+                "status": "success",
+                "data": {
+                    "signal_config": {
+                        "profit_scraping_primary": True,
+                        "allow_opportunity_fallback": False,
+                        "allow_flow_trading_fallback": False,
+                        "pure_profit_scraping_mode": True,
+                        "adaptive_thresholds": True,
+                        "multi_timeframe_analysis": True,
+                        "expanded_symbol_pool": True
+                    },
+                    "engine_available": False,
+                    "configuration_source": "default_values"
+                }
+            }
+        
+        # Get current signal configuration from engine
+        signal_config = getattr(engine, 'signal_config', {
+            "profit_scraping_primary": True,
+            "allow_opportunity_fallback": False,
+            "allow_flow_trading_fallback": False,
+            "pure_profit_scraping_mode": True,
+            "adaptive_thresholds": True,
+            "multi_timeframe_analysis": True,
+            "expanded_symbol_pool": True
+        })
+        
+        return {
+            "status": "success",
+            "data": {
+                "signal_config": signal_config,
+                "engine_available": True,
+                "engine_running": engine.is_running,
+                "configuration_source": "engine_current",
+                "mode_description": {
+                    "pure_profit_scraping_mode": "Only profit scraping signals, no fallbacks" if signal_config.get('pure_profit_scraping_mode') else "Fallbacks enabled",
+                    "fallback_status": {
+                        "opportunity_manager": "enabled" if signal_config.get('allow_opportunity_fallback') else "disabled",
+                        "flow_trading": "enabled" if signal_config.get('allow_flow_trading_fallback') else "disabled"
+                    }
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting signal configuration: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to get signal configuration: {str(e)}",
+            "data": {
+                "signal_config": {
+                    "profit_scraping_primary": True,
+                    "allow_opportunity_fallback": False,
+                    "allow_flow_trading_fallback": False,
+                    "pure_profit_scraping_mode": True
+                },
+                "configuration_source": "error_fallback"
+            }
+        }
+
+class SignalConfigUpdate(BaseModel):
+    profit_scraping_primary: bool = True
+    allow_opportunity_fallback: bool = False
+    allow_flow_trading_fallback: bool = False
+    pure_profit_scraping_mode: bool = True
+    adaptive_thresholds: bool = True
+    multi_timeframe_analysis: bool = True
+    expanded_symbol_pool: bool = True
+
+@router.post("/signal-config")
+async def update_signal_configuration(config: SignalConfigUpdate):
+    """🎯 UPDATE SIGNAL SOURCE CONFIGURATION"""
+    try:
+        engine = get_paper_engine()
+        if not engine:
+            raise HTTPException(status_code=400, detail="Paper trading engine not available")
+        
+        # Store old configuration for logging
+        old_config = getattr(engine, 'signal_config', {})
+        
+        # Update signal configuration
+        engine.signal_config = {
+            'profit_scraping_primary': config.profit_scraping_primary,
+            'allow_opportunity_fallback': config.allow_opportunity_fallback,
+            'allow_flow_trading_fallback': config.allow_flow_trading_fallback,
+            'pure_profit_scraping_mode': config.pure_profit_scraping_mode,
+            'adaptive_thresholds': config.adaptive_thresholds,
+            'multi_timeframe_analysis': config.multi_timeframe_analysis,
+            'expanded_symbol_pool': config.expanded_symbol_pool
+        }
+        
+        # Log the configuration change
+        logger.info(f"🎯 SIGNAL CONFIG UPDATED:")
+        logger.info(f"   Pure Profit Scraping Mode: {config.pure_profit_scraping_mode}")
+        logger.info(f"   Opportunity Manager Fallback: {config.allow_opportunity_fallback}")
+        logger.info(f"   Flow Trading Fallback: {config.allow_flow_trading_fallback}")
+        
+        # Determine mode description
+        if config.pure_profit_scraping_mode and not config.allow_opportunity_fallback and not config.allow_flow_trading_fallback:
+            mode_description = "Pure Profit Scraping Mode - No fallbacks enabled"
+        elif config.allow_opportunity_fallback and config.allow_flow_trading_fallback:
+            mode_description = "Full Fallback Mode - All signal sources enabled"
+        elif config.allow_opportunity_fallback:
+            mode_description = "Opportunity Manager Fallback Enabled"
+        elif config.allow_flow_trading_fallback:
+            mode_description = "Flow Trading Fallback Enabled"
+        else:
+            mode_description = "Custom Configuration"
+        
+        return {
+            "status": "success",
+            "message": f"🎯 Signal configuration updated: {mode_description}",
+            "data": {
+                "old_config": old_config,
+                "new_config": engine.signal_config,
+                "mode_description": mode_description,
+                "engine_running": engine.is_running,
+                "active_positions": len(engine.positions),
+                "change_applied": "immediately",
+                "fallback_summary": {
+                    "profit_scraping": "primary" if config.profit_scraping_primary else "disabled",
+                    "opportunity_manager": "enabled" if config.allow_opportunity_fallback else "disabled",
+                    "flow_trading": "enabled" if config.allow_flow_trading_fallback else "disabled"
+                },
+                "updated_at": datetime.utcnow().isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating signal configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update signal configuration: {str(e)}")
+
+@router.post("/signal-config/pure-mode")
+async def enable_pure_profit_scraping_mode():
+    """🎯 ENABLE PURE PROFIT SCRAPING MODE (Quick Toggle)"""
+    try:
+        engine = get_paper_engine()
+        if not engine:
+            raise HTTPException(status_code=400, detail="Paper trading engine not available")
+        
+        # Set pure profit scraping mode
+        engine.signal_config = {
+            'profit_scraping_primary': True,
+            'allow_opportunity_fallback': False,
+            'allow_flow_trading_fallback': False,
+            'pure_profit_scraping_mode': True,
+            'adaptive_thresholds': True,
+            'multi_timeframe_analysis': True,
+            'expanded_symbol_pool': True
+        }
+        
+        logger.info("🎯 PURE PROFIT SCRAPING MODE ENABLED - No fallbacks")
+        
+        return {
+            "status": "success",
+            "message": "🎯 Pure Profit Scraping Mode enabled - No fallbacks",
+            "data": {
+                "mode": "pure_profit_scraping",
+                "signal_config": engine.signal_config,
+                "fallback_status": "all_disabled",
+                "engine_running": engine.is_running,
+                "updated_at": datetime.utcnow().isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error enabling pure profit scraping mode: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to enable pure mode: {str(e)}")
+
+@router.post("/signal-config/fallback-mode")
+async def enable_fallback_mode():
+    """🎯 ENABLE FALLBACK MODE (Quick Toggle)"""
+    try:
+        engine = get_paper_engine()
+        if not engine:
+            raise HTTPException(status_code=400, detail="Paper trading engine not available")
+        
+        # Enable all fallbacks
+        engine.signal_config = {
+            'profit_scraping_primary': True,
+            'allow_opportunity_fallback': True,
+            'allow_flow_trading_fallback': True,
+            'pure_profit_scraping_mode': False,
+            'adaptive_thresholds': True,
+            'multi_timeframe_analysis': True,
+            'expanded_symbol_pool': True
+        }
+        
+        logger.info("🎯 FALLBACK MODE ENABLED - All signal sources available")
+        
+        return {
+            "status": "success",
+            "message": "🎯 Fallback Mode enabled - All signal sources available",
+            "data": {
+                "mode": "fallback_enabled",
+                "signal_config": engine.signal_config,
+                "fallback_status": "all_enabled",
+                "engine_running": engine.is_running,
+                "signal_priority": ["profit_scraping", "opportunity_manager", "flow_trading"],
+                "updated_at": datetime.utcnow().isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error enabling fallback mode: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to enable fallback mode: {str(e)}")
