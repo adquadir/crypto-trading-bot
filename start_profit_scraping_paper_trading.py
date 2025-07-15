@@ -33,8 +33,22 @@ async def main():
         # Initialize exchange client
         exchange_client = ExchangeClient()
         
-        # Initialize opportunity manager
-        opportunity_manager = OpportunityManager(exchange_client, db)
+        # Initialize strategy manager
+        from src.strategy.strategy_manager import StrategyManager
+        strategy_manager = StrategyManager(exchange_client)
+        
+        # Initialize risk manager
+        from src.risk.risk_manager import RiskManager
+        from src.utils.config import load_config
+        config = load_config()
+        risk_manager = RiskManager(config)
+        
+        # Initialize signal tracker
+        from src.signals.enhanced_signal_tracker import EnhancedSignalTracker
+        signal_tracker = EnhancedSignalTracker()
+        
+        # Initialize opportunity manager with correct parameters
+        opportunity_manager = OpportunityManager(exchange_client, strategy_manager, risk_manager, signal_tracker)
         
         # Paper trading configuration with tight SL/TP
         paper_config = {

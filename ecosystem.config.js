@@ -17,6 +17,22 @@ module.exports = {
       }
     },
     {
+      name: 'paper-trading-auto-start',
+      script: './venv/bin/python',
+      args: 'auto_start_paper_trading.py',
+      cwd: '/home/ubuntu/crypto-trading-bot',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '200M',
+      error_file: './logs/paper-trading-err.log',
+      out_file: './logs/paper-trading-out.log',
+      log_file: './logs/paper-trading-combined.log',
+      env: {
+        PYTHONPATH: '/home/ubuntu/crypto-trading-bot'
+      }
+    },
+    {
       name: 'crypto-trading-frontend',
       script: '/usr/bin/npm',
       args: 'run start',

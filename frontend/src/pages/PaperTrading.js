@@ -73,6 +73,56 @@ const PaperTrading = () => {
   const [startingEngine, setStartingEngine] = useState(false);
   const [stoppingEngine, setStoppingEngine] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
+
+  // 🎯 SIGNAL SOURCE DISPLAY MAPPING - Clear, accurate names
+  const getSignalSourceDisplay = (signalSource) => {
+    const sourceMap = {
+      // Profit Scraping Engine
+      'profit_scraping_support': 'Profit Scraping (Support)',
+      'profit_scraping_resistance': 'Profit Scraping (Resistance)',
+      'profit_scraping_engine': 'Profit Scraping Engine',
+      'profit_scraping': 'Profit Scraping',
+      
+      // Opportunity Manager + Profit Scraping Integration
+      'opportunity_manager': 'Opportunity Manager',
+      'opportunity_scalping': 'Opportunity Manager (Scalping)',
+      'opportunity_swing': 'Opportunity Manager (Swing)',
+      'opportunity_profit_scraping': 'Opportunity Manager (Profit Scraping)', // 🔥 FIX: This was causing "Opportunity Profit"
+      
+      // Flow Trading System
+      'flow_trading_adaptive': 'Flow Trading (Adaptive)',
+      'flow_trading_breakout': 'Flow Trading (Breakout)',
+      'flow_trading_support_resistance': 'Flow Trading (S/R)',
+      'flow_trading_momentum': 'Flow Trading (Momentum)',
+      'flow_trading_engine': 'Flow Trading Engine',
+      
+      // Auto Signal Generator
+      'auto_signal_generator': 'Auto Signal Generator',
+      'auto_signal_scalping': 'Auto Signals (Scalping)',
+      'auto_signal_swing': 'Auto Signals (Swing)',
+      
+      // Scalping Engine
+      'scalping_engine': 'Scalping Engine',
+      'realtime_scalping': 'Realtime Scalping',
+      
+      // Generic/Fallback
+      'unknown': 'Unknown Source',
+      'manual': 'Manual Trade',
+      'other': 'Other Strategy'
+    };
+    
+    return sourceMap[signalSource] || signalSource || 'Unknown Source';
+  };
+
+  // 🎨 SIGNAL SOURCE COLOR MAPPING - Visual distinction
+  const getSignalSourceColor = (signalSource) => {
+    if (signalSource?.startsWith('profit_scraping')) return 'primary';
+    if (signalSource?.startsWith('opportunity')) return 'secondary';
+    if (signalSource?.startsWith('flow_trading')) return 'info';
+    if (signalSource?.startsWith('auto_signal')) return 'warning';
+    if (signalSource?.startsWith('scalping')) return 'success';
+    return 'default';
+  };
   const [availableStrategies, setAvailableStrategies] = useState({
     adaptive: {
       name: "🤖 Adaptive Strategy",
@@ -939,6 +989,7 @@ const PaperTrading = () => {
                           <TableRow>
                             <TableCell>Symbol</TableCell>
                             <TableCell>Side</TableCell>
+                            <TableCell>Signal Source</TableCell>
                             <TableCell align="right">Entry Price</TableCell>
                             <TableCell align="right">Current Price</TableCell>
                             <TableCell align="right">Price Change</TableCell>
@@ -966,6 +1017,15 @@ const PaperTrading = () => {
                                     label={position.side}
                                     color={position.side === 'LONG' ? 'success' : 'error'}
                                     size="small"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={getSignalSourceDisplay(position.signal_source)}
+                                    color={getSignalSourceColor(position.signal_source)}
+                                    size="small"
+                                    variant="outlined"
+                                    title={`${getSignalSourceDisplay(position.signal_source)} - ${position.entry_reason || 'No details available'}`}
                                   />
                                 </TableCell>
                                 <TableCell align="right">
@@ -1050,6 +1110,7 @@ const PaperTrading = () => {
                           <TableRow>
                             <TableCell>Symbol</TableCell>
                             <TableCell>Side</TableCell>
+                            <TableCell>Signal Source</TableCell>
                             <TableCell align="right">Entry Price</TableCell>
                             <TableCell align="right">Exit Price</TableCell>
                             <TableCell align="right">PnL</TableCell>
@@ -1074,6 +1135,15 @@ const PaperTrading = () => {
                                     label={trade.side}
                                     color={trade.side === 'LONG' ? 'success' : 'error'}
                                     size="small"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={getSignalSourceDisplay(trade.signal_source)}
+                                    color={getSignalSourceColor(trade.signal_source)}
+                                    size="small"
+                                    variant="outlined"
+                                    title={`${getSignalSourceDisplay(trade.signal_source)} - ${trade.entry_reason || 'No details available'}`}
                                   />
                                 </TableCell>
                                 <TableCell align="right">

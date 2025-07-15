@@ -646,3 +646,8 @@ def create_app():
 
 # Create the app instance
 app = create_app()
+
+# Add Uvicorn startup for direct execution
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

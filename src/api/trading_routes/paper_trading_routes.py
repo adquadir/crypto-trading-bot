@@ -401,55 +401,134 @@ async def stop_paper_trading():
 
 @router.get("/status")
 async def get_paper_trading_status():
-    """Get current paper trading status"""
+    """Get paper trading status and performance metrics"""
     try:
-        engine = get_paper_engine()
-        if not engine:
-            # Return informative default state instead of error
-            return {
-                "status": "success",
-                "data": {
-                    "enabled": False,
-                    "virtual_balance": 10000.0,
-                    "initial_balance": 10000.0,
-                    "total_return_pct": 0.0,
-                    "win_rate_pct": 0.0,
-                    "completed_trades": 0,
-                    "active_positions": 0,
-                    "leverage": 10,
-                    "capital_per_position": 1000,
-                    "uptime_hours": 0.0,
-                    "strategy_performance": {},
-                    "message": "Paper trading engine not initialized - click Start to initialize",
-                    "ready_to_start": True
-                }
-            }
+        if not paper_engine:
+            raise HTTPException(status_code=500, detail="Paper trading engine not initialized")
         
-        account_status = engine.get_account_status()
+        # Enhanced strategy performance with signal sources
+        strategy_performance = {}
+        signal_sources = {}
+        
+        for trade in paper_engine.completed_trades:
+            strategy = trade.strategy_type
+            if strategy not in strategy_performance:
+                strategy_performance[strategy] = {
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'total_pnl': 0.0,
+                    'win_rate': 0.0,
+                    'profit_factor': 0.0,
+                    'avg_trade_duration': 0.0,
+                    'total_duration': 0
+                }
+            
+            # Track signal sources - get from trade entry_reason or default
+            signal_source = 'unknown'
+            if hasattr(trade, 'entry_reason') and trade.entry_reason:
+                if 'profit_scraping' in trade.entry_reason.lower():
+                    signal_source = 'profit_scraping_engine'
+                elif 'opportunity' in trade.entry_reason.lower():
+                    signal_source = 'opportunity_manager'
+                elif 'flow' in trade.entry_reason.lower():
+                    signal_source = 'flow_trading_engine'
+                elif 'auto_signal' in trade.entry_reason.lower():
+                    signal_source = 'auto_signal_generator'
+                else:
+                    signal_source = 'other'
+            
+            if signal_source not in signal_sources:
+                signal_sources[signal_source] = {
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'total_pnl': 0.0,
+                    'win_rate': 0.0
+                }
+            
+            # Update strategy performance
+            strategy_performance[strategy]['total_trades'] += 1
+            strategy_performance[strategy]['total_pnl'] += trade.pnl
+            strategy_performance[strategy]['total_duration'] += trade.duration_minutes
+            
+            # Update signal source tracking
+            signal_sources[signal_source]['total_trades'] += 1
+            signal_sources[signal_source]['total_pnl'] += trade.pnl
+            
+            if trade.pnl > 0:
+                strategy_performance[strategy]['winning_trades'] += 1
+                signal_sources[signal_source]['winning_trades'] += 1
+        
+        # Calculate win rates
+        for strategy in strategy_performance:
+            if strategy_performance[strategy]['total_trades'] > 0:
+                strategy_performance[strategy]['win_rate'] = (
+                    strategy_performance[strategy]['winning_trades'] / 
+                    strategy_performance[strategy]['total_trades']
+                )
+                strategy_performance[strategy]['avg_trade_duration'] = (
+                    strategy_performance[strategy]['total_duration'] / 
+                    strategy_performance[strategy]['total_trades']
+                )
+        
+        for source in signal_sources:
+            if signal_sources[source]['total_trades'] > 0:
+                signal_sources[source]['win_rate'] = (
+                    signal_sources[source]['winning_trades'] / 
+                    signal_sources[source]['total_trades']
+                )
+        
+        # Get monitoring status
+        monitoring_status = await verify_monitoring_loop_running(paper_engine)
+        
+        # Get active positions with signal sources
+        active_positions_with_sources = []
+        for position in paper_engine.positions.values():
+            # Determine signal source from entry_reason
+            signal_source = 'unknown'
+            if hasattr(position, 'entry_reason') and position.entry_reason:
+                if 'profit_scraping' in position.entry_reason.lower():
+                    signal_source = 'profit_scraping_engine'
+                elif 'opportunity' in position.entry_reason.lower():
+                    signal_source = 'opportunity_manager'
+                elif 'flow' in position.entry_reason.lower():
+                    signal_source = 'flow_trading_engine'
+                elif 'auto_signal' in position.entry_reason.lower():
+                    signal_source = 'auto_signal_generator'
+                else:
+                    signal_source = 'other'
+            
+            active_positions_with_sources.append({
+                'symbol': position.symbol,
+                'side': position.side,
+                'entry_price': position.entry_price,
+                'current_price': position.current_price,
+                'unrealized_pnl': position.unrealized_pnl,
+                'signal_source': signal_source,
+                'strategy_type': position.strategy_type,
+                'entry_reason': position.entry_reason,
+                'entry_time': position.entry_time.isoformat()
+            })
+        
+        response_data = {
+            'enabled': paper_engine.is_running,
+            'virtual_balance': paper_engine.account.balance,
+            'initial_balance': paper_engine.config.get('initial_balance', 10000.0),
+            'total_return_pct': ((paper_engine.account.balance - paper_engine.config.get('initial_balance', 10000.0)) / paper_engine.config.get('initial_balance', 10000.0)) * 100,
+            'win_rate_pct': paper_engine.account.win_rate * 100,
+            'completed_trades': paper_engine.account.total_trades,
+            'active_positions': len(paper_engine.positions),
+            'active_positions_detail': active_positions_with_sources,
+            'leverage': paper_engine.leverage,
+            'capital_per_position': paper_engine.config.get('capital_per_position', 1000.0),
+            'uptime_hours': paper_engine.get_uptime_hours(),
+            'strategy_performance': strategy_performance,
+            'signal_sources': signal_sources,  # NEW: Track signal sources
+            "monitoring_loop_status": monitoring_status
+        }
         
         return {
             "status": "success",
-            "data": {
-                "enabled": engine.is_running,
-                "virtual_balance": account_status['account']['balance'],
-                "initial_balance": 10000.0,
-                "total_return_pct": ((account_status['account']['balance'] - 10000.0) / 10000.0) * 100,
-                "win_rate_pct": account_status['account']['win_rate'] * 100,
-                "completed_trades": account_status['account']['completed_trades'],
-                "active_positions": account_status['account']['active_positions'],
-                "leverage": account_status['account']['leverage'],
-                "capital_per_position": account_status['account']['capital_per_position'],
-                "uptime_hours": engine.get_uptime_hours(),
-                "strategy_performance": account_status['strategy_performance'],
-                # NEW: Include rule mode information
-                "rule_mode": {
-                    "pure_3_rule_mode": getattr(engine, 'pure_3_rule_mode', True),
-                    "mode_name": "Pure 3-Rule Mode" if getattr(engine, 'pure_3_rule_mode', True) else "Complex Mode",
-                    "primary_target_dollars": engine.config.get('primary_target_dollars', 18.0),  # $18 gross = $10 net
-                    "absolute_floor_dollars": engine.config.get('absolute_floor_dollars', 15.0),  # $15 gross = $7 net
-                    "stop_loss_percent": engine.config.get('stop_loss_percent', 0.5)
-                }
-            }
+            "data": response_data
         }
         
     except Exception as e:
@@ -515,6 +594,8 @@ async def get_active_positions():
                 "unrealized_pnl_pct": position['unrealized_pnl_pct'],
                 "confidence_score": position.get('confidence_score', 0),
                 "strategy_type": position.get('strategy_type', 'unknown'),
+                "signal_source": position.get('signal_source', 'unknown'),
+                "entry_reason": position.get('entry_reason', 'No reason provided'),
                 "age_minutes": age_minutes
             })
         

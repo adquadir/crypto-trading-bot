@@ -50,6 +50,7 @@ class PaperPosition:
     entry_price: float
     quantity: float
     entry_time: datetime
+    signal_source: str = "unknown"  # NEW: Track where the signal came from
     capital_allocated: float = 0.0  # NEW: Actual capital at risk (not leveraged amount)
     leverage: float = 10.0  # NEW: Leverage multiplier
     notional_value: float = 0.0  # NEW: Total position value (capital * leverage)
@@ -91,6 +92,7 @@ class PaperTrade:
     duration_minutes: int
     market_regime: str
     volatility_regime: str
+    signal_source: str  # NEW: Track where the signal came from
     entry_time: datetime
     exit_time: datetime
 
@@ -326,6 +328,7 @@ class EnhancedPaperTradingEngine:
                 entry_price=current_price,
                 quantity=position_size,
                 entry_time=datetime.utcnow(),
+                signal_source=signal.get('signal_source', 'unknown'),
                 capital_allocated=capital_allocated,  # NEW: Track actual capital at risk
                 leverage=self.leverage,  # NEW: Track leverage used
                 notional_value=notional_value,  # NEW: Track total position value
@@ -456,6 +459,7 @@ class EnhancedPaperTradingEngine:
                 duration_minutes=int(duration.total_seconds() / 60),
                 market_regime=position.market_regime,
                 volatility_regime=position.volatility_regime,
+                signal_source=position.signal_source,  # NEW: Copy signal source from position
                 entry_time=position.entry_time,
                 exit_time=datetime.utcnow()
             )
@@ -829,12 +833,18 @@ class EnhancedPaperTradingEngine:
                         if signal:
                             logger.info(f"🎯 Paper Trading: Converted to signal: {signal}")
                             
+                            # CRITICAL FIX: Preserve original strategy type from profit scraping
+                            if hasattr(opportunity, 'strategy_type'):
+                                signal['strategy_type'] = opportunity.strategy_type
+                            elif opportunity.get('strategy_type'):
+                                signal['strategy_type'] = opportunity['strategy_type']
+                            
                             # Add debug: log all filter checks
                             filter_passed = self._should_trade_signal(signal)
                             if not filter_passed:
                                 logger.info(f"❌ Signal rejected by filters: {signal['symbol']} {signal['side']} | Details: {signal}")
                             else:
-                                logger.info(f"🚀 Paper Trading: Executing trade for {signal['symbol']} {signal['side']}")
+                                logger.info(f"🚀 Paper Trading: Executing trade for {signal['symbol']} {signal['side']} | Strategy: {signal['strategy_type']} | Source: {signal.get('signal_source', 'unknown')}")
                                 position_id = await self.execute_trade(signal)
                                 
                                 if position_id:
@@ -905,31 +915,50 @@ class EnhancedPaperTradingEngine:
         """Get high-quality opportunities from profit scraping engine"""
         try:
             if not self.profit_scraping_engine:
+                logger.warning("❌ No profit scraping engine available")
                 return []
             
             # Get current opportunities from profit scraping engine
             opportunities = self.profit_scraping_engine.get_opportunities()
             
             if not opportunities:
+                logger.info("📊 No opportunities available from profit scraping engine")
                 return []
+            
+            logger.info(f"📊 Got {len(opportunities)} symbols with opportunities from profit scraping engine")
             
             converted_opportunities = []
             
             for symbol, symbol_opportunities in opportunities.items():
+                logger.info(f"📊 Processing {symbol}: {len(symbol_opportunities)} opportunities")
+                
                 for opp in symbol_opportunities:
+                    logger.info(f"📊 Converting opportunity: {symbol} {opp.get('level', {}).get('level_type', 'unknown')} (score: {opp.get('opportunity_score', 0)})")
+                    
                     # Convert profit scraping opportunity to signal format
                     signal = self._convert_profit_scraping_opportunity_to_signal(opp)
                     if signal:
                         converted_opportunities.append(signal)
+                        logger.info(f"✅ Successfully converted {symbol} opportunity to signal")
+                    else:
+                        logger.warning(f"❌ Failed to convert {symbol} opportunity to signal")
             
             # Sort by opportunity score (highest first)
             converted_opportunities.sort(key=lambda x: x.get('opportunity_score', 0), reverse=True)
             
             logger.info(f"🎯 Profit Scraping: Converted {len(converted_opportunities)} opportunities to signals")
+            
+            if converted_opportunities:
+                logger.info("🚀 TOP PROFIT SCRAPING SIGNALS:")
+                for i, signal in enumerate(converted_opportunities[:5]):  # Show top 5
+                    logger.info(f"  {i+1}. {signal['symbol']} {signal['side']} (confidence: {signal['confidence']:.3f}, score: {signal['opportunity_score']})")
+            
             return converted_opportunities
             
         except Exception as e:
-            logger.error(f"Error getting profit scraping opportunities: {e}")
+            logger.error(f"❌ Error getting profit scraping opportunities: {e}")
+            import traceback
+            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
             return []
     
     def _convert_profit_scraping_opportunity_to_signal(self, opp: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -943,20 +972,27 @@ class EnhancedPaperTradingEngine:
             distance_to_level = opp['distance_to_level']
             opportunity_score = opp['opportunity_score']
             
+            logger.info(f"🔧 Converting profit scraping opportunity: {symbol} {level['level_type']} @ {level['price']:.4f} (score: {opportunity_score})")
+            
             # Determine trade direction based on level type
             if level['level_type'] == 'support':
                 side = 'LONG'
             elif level['level_type'] == 'resistance':
                 side = 'SHORT'
             else:
+                logger.warning(f"❌ Unknown level type: {level['level_type']} for {symbol}")
                 return None
+            
+            # Convert confidence score to 0-1 scale
+            confidence = targets['confidence_score'] / 100.0
             
             # Convert to signal format
             signal = {
                 'symbol': symbol,
                 'side': side,
-                'confidence': targets['confidence_score'] / 100.0,  # Convert to 0-1 scale
+                'confidence': confidence,
                 'strategy_type': 'profit_scraping',
+                'signal_source': f"profit_scraping_{level['level_type']}",  # More specific signal source
                 'entry_price': current_price,
                 'stop_loss': targets['stop_loss'],
                 'take_profit': targets['profit_target'],
@@ -970,13 +1006,17 @@ class EnhancedPaperTradingEngine:
                 'risk_reward_ratio': targets['risk_reward_ratio'],
                 'market_regime': 'level_based',
                 'volatility_regime': 'medium',
-                'entry_reason': f"Profit scraping: {level['level_type']} @ {level['price']:.4f} (score: {opportunity_score})"
+                'reason': f"Profit scraping: {level['level_type']} @ {level['price']:.4f} (score: {opportunity_score})"
             }
             
+            logger.info(f"✅ Converted to signal: {symbol} {side} (confidence: {confidence:.3f}) - PROFIT SCRAPING")
             return signal
             
         except Exception as e:
-            logger.error(f"Error converting profit scraping opportunity to signal: {e}")
+            logger.error(f"❌ Error converting profit scraping opportunity to signal: {e}")
+            logger.error(f"❌ Opportunity data: {opp}")
+            import traceback
+            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
             return None
     
     def _convert_scraping_opportunity(self, opp: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
@@ -1027,6 +1067,7 @@ class EnhancedPaperTradingEngine:
             signal = {
                 'symbol': opportunity.get('symbol'),
                 'strategy_type': 'scalping',  # Default to scalping for paper trading
+                'signal_source': f"opportunity_{opportunity.get('strategy_type', 'unknown')}",  # More specific signal source
                 'side': direction,  # Use direction field from opportunity
                 'confidence': opportunity.get('confidence', 0.0),
                 'ml_score': opportunity.get('ml_score', opportunity.get('confidence', 0.0)),
@@ -1035,7 +1076,7 @@ class EnhancedPaperTradingEngine:
                 'volatility_regime': opportunity.get('volatility_regime', 'medium')
             }
             
-            logger.info(f"🔄 Signal conversion: {opportunity.get('symbol')} {direction} (confidence: {opportunity.get('confidence', 0.0):.3f})")
+            logger.info(f"🔄 Signal conversion: {opportunity.get('symbol')} {direction} (confidence: {opportunity.get('confidence', 0.0):.3f}) - OPPORTUNITY MANAGER")
             
             return signal
             
@@ -1055,6 +1096,8 @@ class EnhancedPaperTradingEngine:
             strategy_type = signal.get('strategy_type', 'unknown')
             base_confidence = signal.get('confidence', 0)
             
+            logger.info(f"🔍 Evaluating signal: {symbol} {signal.get('side')} (strategy: {strategy_type}, confidence: {base_confidence:.3f})")
+            
             # PAPER TRADING MODE: Much more aggressive approval
             # Lower confidence thresholds for testing
             if strategy_type == 'profit_scraping':
@@ -1065,6 +1108,8 @@ class EnhancedPaperTradingEngine:
                 min_confidence = 0.50  # Reduced from 0.65
             else:
                 min_confidence = 0.40  # Reduced from 0.50
+            
+            logger.info(f"🔍 Confidence check: {base_confidence:.3f} >= {min_confidence:.3f} ({strategy_type})")
             
             # Basic confidence check
             if base_confidence < min_confidence:
