@@ -5,7 +5,7 @@ Main engine that coordinates level analysis, monitoring, and trade execution
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 import json
@@ -94,7 +94,7 @@ class ProfitScrapingEngine:
         self.active_trades: Dict[str, ActiveTrade] = {}
         
         # Configuration
-        self.max_symbols = 5
+        self.max_symbols = 100  # Increased from 5 to allow more symbols
         self.max_trades_per_symbol = 2
         self.leverage = 10
         self.account_balance = 10000  # Mock balance
@@ -397,16 +397,25 @@ class ProfitScrapingEngine:
                 trade_result = {'success': position_id is not None, 'position_id': position_id}
                 
             elif self.paper_trading_engine:
-                # PAPER TRADING EXECUTION
-                trade_result = await self.paper_trading_engine.execute_trade(
-                    symbol=opportunity.symbol,
-                    side=side,
-                    quantity=position_size,
-                    price=current_price,
-                    leverage=self.leverage,
-                    profit_target=opportunity.targets.profit_target,
-                    stop_loss=opportunity.targets.stop_loss
-                )
+                # PAPER TRADING EXECUTION - Create signal dictionary for enhanced paper trading engine
+                signal = {
+                    'symbol': opportunity.symbol,
+                    'side': side,
+                    'confidence': opportunity.targets.confidence_score / 100.0,
+                    'strategy_type': 'profit_scraping',
+                    'ml_score': opportunity.targets.confidence_score / 100.0,
+                    'entry_reason': f"profit_scraping_{opportunity.level.level_type}",
+                    'market_regime': 'level_based',
+                    'volatility_regime': 'medium',
+                    'quantity': position_size,
+                    'price': current_price,
+                    'leverage': self.leverage,
+                    'profit_target': opportunity.targets.profit_target,
+                    'stop_loss': opportunity.targets.stop_loss
+                }
+                
+                position_id = await self.paper_trading_engine.execute_trade(signal)
+                trade_result = {'success': position_id is not None, 'position_id': position_id}
             
             if trade_result and trade_result.get('success'):
                 # Track active trade
@@ -580,8 +589,8 @@ class ProfitScrapingEngine:
         """Get current price for a symbol"""
         try:
             if self.exchange_client:
-                ticker = await self.exchange_client.get_ticker(symbol)
-                return float(ticker.get('price', 0)) if ticker else None
+                ticker = await self.exchange_client.get_ticker_24h(symbol)
+                return float(ticker.get('lastPrice', 0)) if ticker else None
             else:
                 # Mock price for testing
                 base_price = 50000 if 'BTC' in symbol else 3000
@@ -617,10 +626,10 @@ class ProfitScrapingEngine:
             logger.error(f"Error calculating opportunity score: {e}")
             return 50
     
-    def get_status(self) -> Dict:
-        """Get current scraping status"""
+    def get_status(self) -> Dict[str, Any]:
+        """Get current profit scraping engine status"""
         try:
-            win_rate = self.winning_trades / max(self.total_trades, 1)
+            win_rate = self.winning_trades / self.total_trades if self.total_trades > 0 else 0.0
             
             return {
                 'active': self.active,
@@ -631,12 +640,21 @@ class ProfitScrapingEngine:
                 'win_rate': win_rate,
                 'total_profit': self.total_profit,
                 'start_time': self.start_time.isoformat() if self.start_time else None,
-                'uptime_minutes': (datetime.now() - self.start_time).total_seconds() / 60 if self.start_time else 0
+                'uptime_minutes': (datetime.now() - self.start_time).total_seconds() / 60 if self.start_time else 0,
+                'opportunities_count': sum(len(opps) for opps in self.active_opportunities.values()),
+                'identified_levels_count': sum(len(levels) for levels in self.identified_levels.values()),
+                'magnet_levels_count': sum(len(levels) for levels in self.magnet_levels.values()),
+                'is_real_trading': self.is_real_trading,
+                'trading_engine_type': 'real' if self.is_real_trading else 'paper'
             }
-            
         except Exception as e:
             logger.error(f"Error getting status: {e}")
-            return {'active': False, 'error': str(e)}
+            return {
+                'active': False,
+                'error': str(e)
+            }
+    
+
     
     def get_opportunities(self) -> Dict[str, List[Dict]]:
         """Get current opportunities for all symbols"""

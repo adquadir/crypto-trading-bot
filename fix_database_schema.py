@@ -1,78 +1,131 @@
 #!/usr/bin/env python3
 """
-Fix Database Schema Issues
-Adds missing columns to flow_performance table
+Fix Database Schema - Add missing winning_trades column to flow_performance table
 """
 
-import asyncio
 import logging
-from src.database.database import DatabaseManager
-from src.utils.logger import setup_logger
+import sys
+from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+import os
 
-logger = setup_logger(__name__)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-async def fix_database_schema():
-    """Fix database schema issues"""
+# Load environment variables
+load_dotenv()
+
+# Get database configuration from environment variables
+DB_USER = os.getenv("POSTGRES_USER", "trader")
+DB_PASS = os.getenv("POSTGRES_PASSWORD", "current_password")
+DB_NAME = os.getenv("POSTGRES_DB", "crypto_trading")
+DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
+DB_PORT = os.getenv("POSTGRES_PORT", "5432")
+
+# Construct database URL
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+def fix_database_schema():
+    """Fix the missing winning_trades column in flow_performance table"""
     try:
-        logger.info("🔧 Fixing database schema issues...")
+        # Create engine
+        engine = create_engine(DATABASE_URL)
         
-        db_manager = DatabaseManager()
+        logger.info("🔧 Connecting to database...")
         
-        # Add missing columns to flow_performance table
-        alter_queries = [
-            """
-            ALTER TABLE flow_performance 
-            ADD COLUMN IF NOT EXISTS winning_trades INTEGER DEFAULT 0
-            """,
-            """
-            ALTER TABLE flow_performance 
-            ADD COLUMN IF NOT EXISTS losing_trades INTEGER DEFAULT 0
-            """
-        ]
-        
-        for query in alter_queries:
-            try:
-                await db_manager.execute_query(query)
-                logger.info(f"✅ Executed: {query.strip()}")
-            except Exception as e:
-                if "already exists" in str(e).lower():
-                    logger.info(f"✅ Column already exists, skipping")
+        with engine.connect() as conn:
+            # Check if flow_performance table exists
+            result = conn.execute(text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'flow_performance'
+                );
+            """))
+            
+            table_exists = result.scalar()
+            
+            if not table_exists:
+                logger.info("📋 Creating flow_performance table...")
+                conn.execute(text("""
+                    CREATE TABLE flow_performance (
+                        id SERIAL PRIMARY KEY,
+                        symbol VARCHAR(20) NOT NULL,
+                        strategy_type VARCHAR(50) NOT NULL,
+                        total_pnl DECIMAL(20, 8) NOT NULL DEFAULT 0,
+                        trades_count INTEGER NOT NULL DEFAULT 0,
+                        winning_trades INTEGER NOT NULL DEFAULT 0,
+                        losing_trades INTEGER NOT NULL DEFAULT 0,
+                        win_rate DECIMAL(5, 4) DEFAULT 0,
+                        max_drawdown_pct DECIMAL(10, 6) DEFAULT 0,
+                        sharpe_ratio DECIMAL(10, 6) DEFAULT 0,
+                        profit_factor DECIMAL(10, 6) DEFAULT 0,
+                        avg_trade_duration_minutes DECIMAL(10, 2) DEFAULT 0,
+                        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """))
+                logger.info("✅ Created flow_performance table")
+            else:
+                logger.info("📋 Checking for missing columns...")
+                
+                # Check if winning_trades column exists
+                result = conn.execute(text("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.columns 
+                        WHERE table_name = 'flow_performance' 
+                        AND column_name = 'winning_trades'
+                    );
+                """))
+                
+                column_exists = result.scalar()
+                
+                if not column_exists:
+                    logger.info("🔧 Adding missing winning_trades column...")
+                    conn.execute(text("""
+                        ALTER TABLE flow_performance 
+                        ADD COLUMN winning_trades INTEGER NOT NULL DEFAULT 0;
+                    """))
+                    logger.info("✅ Added winning_trades column")
                 else:
-                    logger.error(f"❌ Error executing query: {e}")
-        
-        # Test the table structure
-        test_query = """
-        SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_name = 'flow_performance'
-        ORDER BY ordinal_position
-        """
-        
-        result = await db_manager.fetch_all(test_query)
-        
-        logger.info("📊 Current flow_performance table structure:")
-        for row in result:
-            logger.info(f"   {row['column_name']}: {row['data_type']}")
-        
-        # Test inserting a record
-        test_insert = """
-        INSERT INTO flow_performance 
-        (symbol, strategy_type, total_pnl, trades_count, winning_trades, losing_trades, win_rate, max_drawdown_pct, sharpe_ratio)
-        VALUES ('TEST', 'test', 0.0, 0, 0, 0, 0.0, 0.0, 0.0)
-        ON CONFLICT DO NOTHING
-        """
-        
-        await db_manager.execute_query(test_insert)
-        logger.info("✅ Test insert successful")
-        
-        # Clean up test record
-        await db_manager.execute_query("DELETE FROM flow_performance WHERE symbol = 'TEST'")
-        
-        logger.info("🎉 Database schema fixed successfully!")
-        
+                    logger.info("✅ winning_trades column already exists")
+                
+                # Check if losing_trades column exists
+                result = conn.execute(text("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.columns 
+                        WHERE table_name = 'flow_performance' 
+                        AND column_name = 'losing_trades'
+                    );
+                """))
+                
+                column_exists = result.scalar()
+                
+                if not column_exists:
+                    logger.info("🔧 Adding missing losing_trades column...")
+                    conn.execute(text("""
+                        ALTER TABLE flow_performance 
+                        ADD COLUMN losing_trades INTEGER NOT NULL DEFAULT 0;
+                    """))
+                    logger.info("✅ Added losing_trades column")
+                else:
+                    logger.info("✅ losing_trades column already exists")
+            
+            # Commit changes
+            conn.commit()
+            logger.info("✅ Database schema fixed successfully!")
+            
     except Exception as e:
         logger.error(f"❌ Error fixing database schema: {e}")
-        raise
+        return False
+    
+    return True
 
 if __name__ == "__main__":
-    asyncio.run(fix_database_schema())
+    success = fix_database_schema()
+    if success:
+        logger.info("🎉 Database schema fix completed successfully!")
+        sys.exit(0)
+    else:
+        logger.error("❌ Database schema fix failed!")
+        sys.exit(1)

@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'crypto-trading-api',
       script: './venv/bin/python',
-      args: 'simple_api.py',
+      args: '-m src.api.main',  // Use the new main with profit scraping support
       cwd: '/home/ubuntu/crypto-trading-bot',
       instances: 1,
       autorestart: true,

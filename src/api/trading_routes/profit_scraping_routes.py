@@ -21,6 +21,12 @@ router = APIRouter(prefix="/profit-scraping", tags=["profit-scraping"])
 # Global profit scraping engine instance
 profit_scraping_engine: Optional[ProfitScrapingEngine] = None
 
+def set_profit_scraping_engine(engine: ProfitScrapingEngine):
+    """Set the profit scraping engine instance from main module"""
+    global profit_scraping_engine
+    profit_scraping_engine = engine
+    logger.info("✅ Profit scraping engine set from main module")
+
 class ProfitScrapingSettings(BaseModel):
     symbols: List[str]
     ml_enhanced: bool = True
@@ -32,27 +38,40 @@ class OptimizationRequest(BaseModel):
     optimization_target: str = "risk_adjusted_return"
 
 async def get_profit_scraping_engine():
-    """Get or create profit scraping engine instance"""
+    """Get or create profit scraping engine instance for PAPER TRADING"""
     global profit_scraping_engine
     
     if profit_scraping_engine is None:
         try:
-            # Initialize components for REAL TRADING
-            exchange_client = ExchangeClient()
-            real_trading_engine = RealTradingEngine(exchange_client)
+            # Try to get from main module first (paper trading connection)
+            import src.api.main as main_module
+            if hasattr(main_module, 'profit_scraping_engine') and main_module.profit_scraping_engine:
+                profit_scraping_engine = main_module.profit_scraping_engine
+                logger.info("✅ Retrieved profit scraping engine from main module (PAPER TRADING)")
+                return profit_scraping_engine
             
-            # Create profit scraping engine with REAL TRADING ENGINE
+            # Fallback: Initialize for PAPER TRADING (safe mode)
+            logger.info("🎯 Creating fallback profit scraping engine for PAPER TRADING...")
+            exchange_client = ExchangeClient()
+            
+            # Initialize paper trading engine for safe mode
+            from src.trading.enhanced_paper_trading_engine import EnhancedPaperTradingEngine
+            paper_config = {'paper_trading': {'initial_balance': 10000.0, 'enabled': True}}
+            paper_trading_engine = EnhancedPaperTradingEngine(paper_config, exchange_client)
+            
+            # Create profit scraping engine with PAPER TRADING ENGINE (safe mode)
             profit_scraping_engine = ProfitScrapingEngine(
                 exchange_client=exchange_client,
-                real_trading_engine=real_trading_engine
+                paper_trading_engine=paper_trading_engine,
+                real_trading_engine=None  # No real trading - safe mode
             )
             
-            logger.info("✅ Profit scraping engine initialized with REAL TRADING ENGINE")
-            logger.warning("⚠️  This will execute REAL TRADES with REAL MONEY")
+            logger.info("✅ Profit scraping engine initialized for PAPER TRADING (safe mode)")
+            logger.info("🎯 All trades will be virtual - no real money at risk")
             
         except Exception as e:
             logger.error(f"Error initializing profit scraping engine: {e}")
-            # Create engine without external dependencies for testing
+            # Create minimal engine for testing
             profit_scraping_engine = ProfitScrapingEngine()
     
     return profit_scraping_engine
