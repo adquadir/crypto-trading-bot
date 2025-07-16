@@ -11,7 +11,6 @@ from src.signals.signal_generator import SignalGenerator
 from src.opportunity.direct_market_data import DirectMarketDataFetcher
 from src.market_data.symbol_discovery import SymbolDiscovery
 from src.signals.signal_tracker import real_signal_tracker
-from src.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -26,42 +25,6 @@ class OpportunityManager:
         self.enhanced_signal_tracker = enhanced_signal_tracker
         self.opportunities = {}
         self.symbols = []
-        
-        # Load configuration for strict paper trading settings
-        try:
-            config = load_config()
-            paper_config = config.get('paper_trading', {})
-            validation_config = paper_config.get('validation', {})
-            risk_config = paper_config.get('risk_management', {})
-            
-            # Strict paper mode settings
-            self.strict_paper_mode = validation_config.get('strict_mode', True)
-            self.exploratory_mode = validation_config.get('exploratory_mode', False)
-            
-            # Risk management settings
-            self.symbol_cooldown_minutes = risk_config.get('symbol_cooldown_minutes', 20)
-            self.max_consecutive_losses = risk_config.get('max_consecutive_losses', 5)
-            self.min_win_rate_threshold = risk_config.get('min_win_rate_threshold', 0.30)
-            self.cooldown_confidence_override = risk_config.get('cooldown_confidence_override', 0.85)
-            
-            # Paper trading mode detection
-            self.paper_trading_mode = paper_config.get('enabled', False)
-            
-            logger.info(f"🎯 Strict Paper Mode: {'ENABLED' if self.strict_paper_mode else 'DISABLED'}")
-            logger.info(f"🔬 Exploratory Mode: {'ENABLED' if self.exploratory_mode else 'DISABLED'}")
-            logger.info(f"⏸️ Symbol Cooldown: {self.symbol_cooldown_minutes} minutes")
-            logger.info(f"🚨 Auto-pause: {self.max_consecutive_losses} consecutive losses")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to load paper trading config, using defaults: {e}")
-            # Safe defaults
-            self.strict_paper_mode = True
-            self.exploratory_mode = False
-            self.symbol_cooldown_minutes = 20
-            self.max_consecutive_losses = 5
-            self.min_win_rate_threshold = 0.30
-            self.cooldown_confidence_override = 0.85
-            self.paper_trading_mode = True
         
         # 🧠 LEARNING CRITERIA - Initialize as dataclass for consistency
         from src.learning.automated_learning_manager import LearningCriteria
@@ -2837,35 +2800,25 @@ class OpportunityManager:
                 volume_points = 0
                 volume_score = "🔴 Low"
             
-            # ✅ STRICT VALIDATION LOGIC
-            # Paper trading uses EXACT same criteria as live trading for validation
-            strict_paper_mode = getattr(self, 'strict_paper_mode', True)  # Strict by default
-            
-            if paper_trading_mode and not strict_paper_mode:
-                # EXPLORATORY mode only: Slightly relaxed for research purposes
+            # ✅ IMPROVED VALIDATION LOGIC
+            # Paper trading still applies some quality filters but with relaxed criteria
+            if paper_trading_mode:
+                # Relaxed but not completely bypassed validation for paper trading
                 validation_passed = (
-                    confidence >= min_confidence_required * 0.9 and  # 90% of normal confidence
-                    adjusted_move >= min_move_required * 0.8 and     # 80% of normal move requirement
-                    adjusted_rr >= min_rr_required * 0.7             # 70% of normal R/R requirement
+                    confidence >= min_confidence_required * 0.8 and  # 80% of normal confidence
+                    adjusted_move >= min_move_required * 0.6 and     # 60% of normal move requirement
+                    adjusted_rr >= min_rr_required * 0.5             # 50% of normal R/R requirement
                 )
-                logger.info(f"🔬 EXPLORATORY PAPER MODE: Using research criteria for {symbol}")
+                if validation_passed:
+                    logger.info(f"🎯 PAPER TRADING: Signal approved with relaxed criteria for {symbol}")
+                else:
+                    logger.info(f"🎯 PAPER TRADING: Signal rejected - even relaxed criteria not met for {symbol}")
             else:
-                # STRICT validation - same for both paper and live trading
                 validation_passed = (
                     adjusted_rr >= min_rr_required and 
                     adjusted_move >= min_move_required and 
                     confidence >= min_confidence_required
                 )
-                mode_label = "STRICT PAPER" if paper_trading_mode else "LIVE"
-                logger.info(f"🎯 {mode_label} TRADING: Using production criteria for {symbol}")
-                
-            # Check for symbol cooldown after recent losses
-            if validation_passed and paper_trading_mode:
-                validation_passed = self._check_symbol_cooldown(symbol)
-                
-            # Check for auto-pause due to consecutive losses
-            if validation_passed and paper_trading_mode:
-                validation_passed = self._check_auto_pause_conditions()
             
             if validation_passed:
                 verdict = "✅ Tradable"
@@ -3627,112 +3580,6 @@ class OpportunityManager:
             
         except Exception as e:
             logger.error(f"❌ Failed to update learning criteria: {e}")
-    
-    def _check_symbol_cooldown(self, symbol: str) -> bool:
-        """Check if symbol is in cooldown period after recent losses"""
-        try:
-            cooldown_minutes = getattr(self, 'symbol_cooldown_minutes', 20)  # 20 min default
-            min_confidence_override = getattr(self, 'cooldown_confidence_override', 0.85)  # 85% to override
-            
-            if not hasattr(self, '_symbol_loss_tracker'):
-                self._symbol_loss_tracker = {}
-                
-            current_time = time.time()
-            
-            # Check if symbol had recent loss
-            if symbol in self._symbol_loss_tracker:
-                last_loss_time, loss_count = self._symbol_loss_tracker[symbol]
-                time_since_loss = (current_time - last_loss_time) / 60  # minutes
-                
-                if time_since_loss < cooldown_minutes:
-                    # Still in cooldown period
-                    logger.info(f"⏸️ {symbol}: In cooldown for {cooldown_minutes - time_since_loss:.1f} more minutes (had {loss_count} recent losses)")
-                    return False
-                else:
-                    # Cooldown expired, remove tracking
-                    del self._symbol_loss_tracker[symbol]
-                    logger.info(f"✅ {symbol}: Cooldown period expired, allowing new trades")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Error checking symbol cooldown for {symbol}: {e}")
-            return True  # Default to allowing trade on error
-    
-    def _record_symbol_loss(self, symbol: str):
-        """Record a loss for symbol to trigger cooldown"""
-        try:
-            if not hasattr(self, '_symbol_loss_tracker'):
-                self._symbol_loss_tracker = {}
-                
-            current_time = time.time()
-            
-            if symbol in self._symbol_loss_tracker:
-                _, loss_count = self._symbol_loss_tracker[symbol]
-                self._symbol_loss_tracker[symbol] = (current_time, loss_count + 1)
-            else:
-                self._symbol_loss_tracker[symbol] = (current_time, 1)
-                
-            logger.info(f"📉 {symbol}: Recorded loss, cooldown period started")
-            
-        except Exception as e:
-            logger.error(f"❌ Error recording symbol loss for {symbol}: {e}")
-    
-    def _check_auto_pause_conditions(self) -> bool:
-        """Check if system should auto-pause due to consecutive losses"""
-        try:
-            max_consecutive_losses = getattr(self, 'max_consecutive_losses', 5)  # 5 losses = pause
-            min_win_rate_threshold = getattr(self, 'min_win_rate_threshold', 0.3)  # 30% win rate minimum
-            
-            if not hasattr(self, '_consecutive_loss_count'):
-                self._consecutive_loss_count = 0
-                self._total_trades = 0
-                self._total_wins = 0
-                
-            # Check consecutive losses
-            if self._consecutive_loss_count >= max_consecutive_losses:
-                logger.warning(f"🚨 AUTO-PAUSE: {self._consecutive_loss_count} consecutive losses detected")
-                logger.warning(f"🔒 System paused until manual review - check strategy performance")
-                return False
-                
-            # Check overall win rate if we have enough trades
-            if self._total_trades >= 10:
-                win_rate = self._total_wins / self._total_trades
-                if win_rate < min_win_rate_threshold:
-                    logger.warning(f"🚨 AUTO-PAUSE: Win rate {win_rate:.1%} below {min_win_rate_threshold:.1%} threshold")
-                    logger.warning(f"🔒 System paused for performance review")
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Error checking auto-pause conditions: {e}")
-            return True  # Default to allowing trade on error
-    
-    def _record_trade_outcome(self, symbol: str, is_win: bool):
-        """Record trade outcome for auto-pause tracking"""
-        try:
-            if not hasattr(self, '_consecutive_loss_count'):
-                self._consecutive_loss_count = 0
-                self._total_trades = 0
-                self._total_wins = 0
-            
-            self._total_trades += 1
-            
-            if is_win:
-                self._total_wins += 1
-                self._consecutive_loss_count = 0  # Reset consecutive losses
-                logger.info(f"✅ {symbol}: Win recorded, consecutive loss count reset")
-            else:
-                self._consecutive_loss_count += 1
-                self._record_symbol_loss(symbol)  # Trigger symbol cooldown
-                logger.info(f"❌ {symbol}: Loss recorded, consecutive losses: {self._consecutive_loss_count}")
-                
-            current_win_rate = self._total_wins / self._total_trades if self._total_trades > 0 else 0
-            logger.info(f"📊 Overall performance: {self._total_wins}/{self._total_trades} ({current_win_rate:.1%} win rate)")
-            
-        except Exception as e:
-            logger.error(f"❌ Error recording trade outcome for {symbol}: {e}")
     
     def get_current_learning_criteria(self):
         """Get current learning criteria for debugging"""

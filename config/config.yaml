@@ -42,18 +42,6 @@ paper_trading:
     auto_close_on_margin_call: true # Simulate margin calls
     leverage_limits: true           # Respect leverage limits
     
-  # STRICT VALIDATION SETTINGS - For Production Validation
-  validation:
-    strict_mode: true               # 🎯 TRUE = Use same criteria as live trading
-    exploratory_mode: false         # FALSE = Disable relaxed research mode
-    
-  # RISK MANAGEMENT & AUTO-PAUSE
-  risk_management:
-    symbol_cooldown_minutes: 20     # Cooldown after symbol loss (20 min)
-    max_consecutive_losses: 5       # Auto-pause after 5 consecutive losses
-    min_win_rate_threshold: 0.30    # Auto-pause if win rate < 30%
-    cooldown_confidence_override: 0.85  # 85% confidence can override cooldown
-    
   # Monitoring & Alerts
   monitoring:
     real_time_dashboard: true       # Live dashboard updates
