@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 import asyncio
 import logging
+import sys
+import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
+from datetime import datetime
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from src.api import routes
 router = routes.router
 from src.trading_bot import trading_bot
 from src.market_data.exchange_client import ExchangeClient
 from src.api.connection_manager import ConnectionManager
 from src.market_data.symbol_discovery import SymbolDiscovery
-from datetime import datetime
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +34,17 @@ manager = ConnectionManager()
 
 # Include API routes
 app.include_router(router, prefix="/api/v1")
+
+# Include paper trading routes
+from src.api.trading_routes.paper_trading_routes import router as paper_trading_router
+app.include_router(paper_trading_router, prefix="/api/v1")
+
+# Add basic health endpoint
+@app.get("/api/health")
+@app.get("/api/v1/health")
+async def health_check():
+    """Basic health check endpoint."""
+    return {"status": "healthy", "message": "API is running"}
 
 @app.websocket("/ws/signals")
 async def websocket_endpoint(websocket: WebSocket):

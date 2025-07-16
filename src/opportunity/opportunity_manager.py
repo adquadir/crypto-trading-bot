@@ -1442,17 +1442,21 @@ class OpportunityManager:
                     confidence = 0.6 + min(0.2, abs(price_change_5) * 10)
                     reasoning = ['Mean reversion: Overbought correction']
             
-            # Fallback signal generation
+            # 🎯 CONFLUENCE-BASED DIRECTION DETERMINATION (replaces fallback logic)
             if not direction:
-                # Generate based on recent price action
-                if current_price > sma_20:
-                    direction = 'LONG'
-                    confidence = 0.55
-                    reasoning = ['Price above SMA20 - bullish bias']
+                logger.info(f"🔍 No strategy signals found for {symbol}, checking confluence...")
+                confluence_signal = self._determine_direction_with_confluence(
+                    symbol, market_data, current_price, volatility, volume_ratio
+                )
+                
+                if confluence_signal:
+                    direction = confluence_signal['direction']
+                    confidence = confluence_signal['confidence']
+                    reasoning = confluence_signal['reasoning']
+                    logger.info(f"✅ CONFLUENCE SIGNAL: {symbol} {direction} (conf: {confidence:.2f})")
                 else:
-                    direction = 'SHORT'
-                    confidence = 0.55
-                    reasoning = ['Price below SMA20 - bearish bias']
+                    logger.info(f"⏸️ NO CONFLUENCE: {symbol} - skipping trade (no forced signals)")
+                    return None  # SKIP trade when confluence requirements aren't met
             
             # Calculate dynamic TP/SL based on volatility
             atr_estimate = volatility * current_price
@@ -2624,8 +2628,20 @@ class OpportunityManager:
                 confidence += min(0.2, abs(price_vs_sma) * 20)  # Boost based on momentum
                 confidence += min(0.1, (volume_ratio - 1.0) * 0.1)  # Volume boost
             
+            # Apply confluence system for basic swing signals too
             if not direction:
-                return None
+                logger.info(f"🔍 Basic swing: No momentum signals for {symbol}, checking confluence...")
+                confluence_signal = self._determine_direction_with_confluence(
+                    symbol, market_data, current_price, volatility, volume_ratio
+                )
+                
+                if confluence_signal:
+                    direction = confluence_signal['direction']
+                    confidence = confluence_signal['confidence'] * 0.9  # Slightly lower confidence for basic signals
+                    logger.info(f"✅ BASIC SWING CONFLUENCE: {symbol} {direction} (conf: {confidence:.2f})")
+                else:
+                    logger.info(f"⏸️ BASIC SWING: No confluence for {symbol} - skipping")
+                    return None
             
             # 5. Calculate swing-style TP/SL (wider than stable signals)
             atr = self._calculate_atr(highs, lows, closes, period=10)
@@ -3589,3 +3605,530 @@ class OpportunityManager:
         except Exception as e:
             logger.error(f"Error copying learning criteria: {e}")
             return self.learning_criteria
+
+    def _determine_direction_with_confluence(self, symbol: str, market_data: Dict[str, Any], 
+                                           current_price: float, volatility: float, 
+                                           volume_ratio: float) -> Optional[Dict[str, Any]]:
+        """
+        🎯 CONFLUENCE-BASED DIRECTION DETERMINATION
+        
+        Uses multiple confirmation layers instead of fallback logic:
+        ✅ Market regime (uptrend/downtrend/range)
+        ✅ Trend slope (multi-timeframe analysis)
+        ✅ Recent candle momentum
+        ✅ Magnet level positioning (support/resistance)
+        ✅ ML filter confidence (must confirm direction)
+        
+        Returns None if confluence requirements aren't met (no forced trades)
+        """
+        try:
+            logger.info(f"🎯 CONFLUENCE ANALYSIS: {symbol} at ${current_price:.6f}")
+            
+            # === LAYER 1: MARKET REGIME DETECTION ===
+            regime_data = self._detect_comprehensive_market_regime(market_data)
+            regime = regime_data['regime']
+            regime_confidence = regime_data['confidence']
+            
+            logger.info(f"   📊 Market Regime: {regime} (confidence: {regime_confidence:.2f})")
+            
+            # === LAYER 2: TREND SLOPE ANALYSIS ===
+            trend_data = self._analyze_multi_timeframe_trend_slope(market_data)
+            trend_direction = trend_data['direction']
+            trend_strength = trend_data['strength']
+            
+            logger.info(f"   📈 Trend Slope: {trend_direction} (strength: {trend_strength:.2f})")
+            
+            # === LAYER 3: RECENT MOMENTUM ===
+            momentum_data = self._analyze_recent_momentum(market_data)
+            momentum_direction = momentum_data['direction']
+            momentum_strength = momentum_data['strength']
+            
+            logger.info(f"   ⚡ Recent Momentum: {momentum_direction} (strength: {momentum_strength:.2f})")
+            
+            # === LAYER 4: MAGNET LEVEL POSITIONING ===
+            magnet_analysis = self._analyze_magnet_level_positioning(symbol, current_price, market_data)
+            near_support = magnet_analysis['near_support']
+            near_resistance = magnet_analysis['near_resistance']
+            level_strength = magnet_analysis['level_strength']
+            
+            logger.info(f"   🧲 Magnet Analysis: Support={near_support}, Resistance={near_resistance}, Strength={level_strength}")
+            
+            # === LAYER 5: ML CONFIDENCE CHECK ===
+            ml_confidence = self._get_ml_direction_confidence(symbol, regime, trend_direction, magnet_analysis)
+            
+            logger.info(f"   🧠 ML Confidence: {ml_confidence:.2f}")
+            
+            # === CONFLUENCE REQUIREMENTS ===
+            min_ml_confidence = 0.6
+            min_regime_confidence = 0.5
+            min_level_strength = 60
+            min_momentum_strength = 0.4
+            
+            # === LONG SIGNAL CONFLUENCE ===
+            if (regime in ['uptrend', 'trending_up'] and 
+                regime_confidence >= min_regime_confidence and
+                trend_direction in ['bullish', 'neutral'] and
+                momentum_direction in ['bullish', 'neutral'] and
+                near_support and 
+                level_strength >= min_level_strength and
+                ml_confidence >= min_ml_confidence and
+                momentum_strength >= min_momentum_strength):
+                
+                # Calculate confluence confidence
+                confluence_confidence = min(0.95, (
+                    regime_confidence + 
+                    trend_strength + 
+                    momentum_strength + 
+                    ml_confidence + 
+                    (level_strength/100)
+                ) / 5)
+                
+                logger.info(f"✅ LONG CONFLUENCE CONFIRMED: {symbol} - Final confidence: {confluence_confidence:.2f}")
+                return {
+                    'direction': 'LONG',
+                    'confidence': confluence_confidence,
+                    'reasoning': [
+                        f'Uptrend regime (conf: {regime_confidence:.2f})',
+                        f'Bullish trend slope (strength: {trend_strength:.2f})',
+                        f'Bullish momentum (strength: {momentum_strength:.2f})',
+                        f'At support level (strength: {level_strength})',
+                        f'ML confirms direction (conf: {ml_confidence:.2f})',
+                        'All confluence confirmed'
+                    ],
+                    'strategy': 'confluence_long'
+                }
+            
+            # === SHORT SIGNAL CONFLUENCE ===
+            elif (regime in ['downtrend', 'trending_down'] and 
+                  regime_confidence >= min_regime_confidence and
+                  trend_direction in ['bearish', 'neutral'] and
+                  momentum_direction in ['bearish', 'neutral'] and
+                  near_resistance and 
+                  level_strength >= min_level_strength and
+                  ml_confidence >= min_ml_confidence and
+                  momentum_strength >= min_momentum_strength):
+                
+                # Calculate confluence confidence
+                confluence_confidence = min(0.95, (
+                    regime_confidence + 
+                    trend_strength + 
+                    momentum_strength + 
+                    ml_confidence + 
+                    (level_strength/100)
+                ) / 5)
+                
+                logger.info(f"✅ SHORT CONFLUENCE CONFIRMED: {symbol} - Final confidence: {confluence_confidence:.2f}")
+                return {
+                    'direction': 'SHORT',
+                    'confidence': confluence_confidence,
+                    'reasoning': [
+                        f'Downtrend regime (conf: {regime_confidence:.2f})',
+                        f'Bearish trend slope (strength: {trend_strength:.2f})',
+                        f'Bearish momentum (strength: {momentum_strength:.2f})',
+                        f'At resistance level (strength: {level_strength})',
+                        f'ML confirms direction (conf: {ml_confidence:.2f})',
+                        'All confluence confirmed'
+                    ],
+                    'strategy': 'confluence_short'
+                }
+            
+            # === NO CONFLUENCE - SKIP TRADE ===
+            else:
+                skip_reasons = []
+                if regime not in ['uptrend', 'trending_up', 'downtrend', 'trending_down']:
+                    skip_reasons.append(f"Neutral regime: {regime}")
+                if regime_confidence < min_regime_confidence:
+                    skip_reasons.append(f"Low regime confidence: {regime_confidence:.2f}")
+                if trend_direction not in ['bullish', 'bearish', 'neutral']:
+                    skip_reasons.append(f"Unclear trend: {trend_direction}")
+                if momentum_direction not in ['bullish', 'bearish', 'neutral']:
+                    skip_reasons.append(f"Unclear momentum: {momentum_direction}")
+                if not near_support and not near_resistance:
+                    skip_reasons.append("Not near key levels")
+                if level_strength < min_level_strength:
+                    skip_reasons.append(f"Weak level strength: {level_strength}")
+                if ml_confidence < min_ml_confidence:
+                    skip_reasons.append(f"Low ML confidence: {ml_confidence:.2f}")
+                if momentum_strength < min_momentum_strength:
+                    skip_reasons.append(f"Weak momentum: {momentum_strength:.2f}")
+                
+                logger.info(f"⏸️ SKIPPING TRADE: {symbol} - {', '.join(skip_reasons)}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in confluence analysis for {symbol}: {e}")
+            return None
+
+    def _detect_comprehensive_market_regime(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Enhanced market regime detection using multiple indicators"""
+        try:
+            klines = market_data['klines']
+            if len(klines) < 30:
+                return {'regime': 'unknown', 'confidence': 0.0}
+            
+            closes = [float(k['close']) for k in klines[-30:]]
+            highs = [float(k['high']) for k in klines[-30:]]
+            lows = [float(k['low']) for k in klines[-30:]]
+            volumes = [float(k['volume']) for k in klines[-30:]]
+            
+            current_price = closes[-1]
+            
+            # Multiple timeframe SMAs
+            sma_5 = sum(closes[-5:]) / 5
+            sma_10 = sum(closes[-10:]) / 10
+            sma_20 = sum(closes[-20:]) / 20
+            
+            # Regime scoring
+            uptrend_score = 0.0
+            downtrend_score = 0.0
+            ranging_score = 0.0
+            
+            # SMA alignment scoring
+            if sma_5 > sma_10 > sma_20:
+                uptrend_score += 0.4
+            elif sma_5 < sma_10 < sma_20:
+                downtrend_score += 0.4
+            else:
+                ranging_score += 0.4
+            
+            # Price position relative to SMAs
+            if current_price > sma_20 * 1.005:  # 0.5% above SMA20
+                uptrend_score += 0.3
+            elif current_price < sma_20 * 0.995:  # 0.5% below SMA20
+                downtrend_score += 0.3
+            else:
+                ranging_score += 0.3
+            
+            # Volume confirmation
+            recent_volume = sum(volumes[-5:]) / 5
+            avg_volume = sum(volumes) / len(volumes)
+            volume_confirmation = recent_volume / avg_volume if avg_volume > 0 else 1
+            
+            if volume_confirmation > 1.2:
+                uptrend_score += 0.2
+                downtrend_score += 0.2  # Volume supports both trend directions
+            else:
+                ranging_score += 0.2
+            
+            # Higher high / lower low analysis
+            recent_high = max(highs[-10:])
+            recent_low = min(lows[-10:])
+            previous_high = max(highs[-20:-10])
+            previous_low = min(lows[-20:-10])
+            
+            if recent_high > previous_high and recent_low > previous_low:
+                uptrend_score += 0.1
+            elif recent_high < previous_high and recent_low < previous_low:
+                downtrend_score += 0.1
+            else:
+                ranging_score += 0.1
+            
+            # Determine regime
+            max_score = max(uptrend_score, downtrend_score, ranging_score)
+            
+            if uptrend_score == max_score and uptrend_score >= 0.6:
+                regime = 'uptrend'
+                confidence = uptrend_score
+            elif downtrend_score == max_score and downtrend_score >= 0.6:
+                regime = 'downtrend' 
+                confidence = downtrend_score
+            else:
+                regime = 'ranging'
+                confidence = ranging_score
+            
+            return {
+                'regime': regime,
+                'confidence': confidence,
+                'scores': {
+                    'uptrend': uptrend_score,
+                    'downtrend': downtrend_score,
+                    'ranging': ranging_score
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error detecting market regime: {e}")
+            return {'regime': 'unknown', 'confidence': 0.0}
+
+    def _analyze_multi_timeframe_trend_slope(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze trend slope across multiple timeframes"""
+        try:
+            klines = market_data['klines']
+            if len(klines) < 20:
+                return {'direction': 'neutral', 'strength': 0.0}
+            
+            closes = [float(k['close']) for k in klines[-20:]]
+            
+            # Short-term slope (5 periods)
+            short_slope = (closes[-1] - closes[-6]) / closes[-6] if len(closes) > 5 else 0
+            
+            # Medium-term slope (10 periods)  
+            medium_slope = (closes[-1] - closes[-11]) / closes[-11] if len(closes) > 10 else 0
+            
+            # Long-term slope (20 periods)
+            long_slope = (closes[-1] - closes[-21]) / closes[-21] if len(closes) > 20 else 0
+            
+            # Slope consistency scoring
+            bullish_score = 0.0
+            bearish_score = 0.0
+            
+            # Short-term slope scoring
+            if short_slope > 0.002:  # 0.2% positive slope
+                bullish_score += 0.4
+            elif short_slope < -0.002:  # 0.2% negative slope
+                bearish_score += 0.4
+            
+            # Medium-term slope scoring
+            if medium_slope > 0.001:  # 0.1% positive slope
+                bullish_score += 0.3
+            elif medium_slope < -0.001:  # 0.1% negative slope
+                bearish_score += 0.3
+            
+            # Long-term slope scoring
+            if long_slope > 0:
+                bullish_score += 0.3
+            elif long_slope < 0:
+                bearish_score += 0.3
+            
+            # Determine trend direction and strength
+            if bullish_score > bearish_score and bullish_score >= 0.6:
+                direction = 'bullish'
+                strength = bullish_score
+            elif bearish_score > bullish_score and bearish_score >= 0.6:
+                direction = 'bearish'
+                strength = bearish_score
+            else:
+                direction = 'neutral'
+                strength = 0.5
+            
+            return {
+                'direction': direction,
+                'strength': strength,
+                'slopes': {
+                    'short': short_slope,
+                    'medium': medium_slope,
+                    'long': long_slope
+                },
+                'scores': {
+                    'bullish': bullish_score,
+                    'bearish': bearish_score
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing trend slope: {e}")
+            return {'direction': 'neutral', 'strength': 0.0}
+
+    def _analyze_recent_momentum(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze recent candle momentum"""
+        try:
+            klines = market_data['klines']
+            if len(klines) < 10:
+                return {'direction': 'neutral', 'strength': 0.0}
+            
+            closes = [float(k['close']) for k in klines[-10:]]
+            highs = [float(k['high']) for k in klines[-10:]]
+            lows = [float(k['low']) for k in klines[-10:]]
+            
+            # Recent momentum calculations
+            recent_momentum = (closes[-1] - closes[-4]) / closes[-4] if len(closes) > 3 else 0
+            
+            # Candle strength analysis
+            recent_candles = []
+            for i in range(max(0, len(klines) - 5), len(klines)):
+                open_price = float(klines[i]['open'])
+                close_price = float(klines[i]['close'])
+                high_price = float(klines[i]['high'])
+                low_price = float(klines[i]['low'])
+                
+                body_size = abs(close_price - open_price)
+                total_range = high_price - low_price
+                
+                if total_range > 0:
+                    body_ratio = body_size / total_range
+                    candle_direction = 'bullish' if close_price > open_price else 'bearish'
+                    recent_candles.append({
+                        'direction': candle_direction,
+                        'strength': body_ratio
+                    })
+            
+            # Momentum scoring
+            bullish_momentum = 0.0
+            bearish_momentum = 0.0
+            
+            # Price momentum scoring
+            if recent_momentum > 0.003:  # 0.3% positive momentum
+                bullish_momentum += 0.4
+            elif recent_momentum < -0.003:  # 0.3% negative momentum
+                bearish_momentum += 0.4
+            
+            # Candle pattern scoring
+            if recent_candles:
+                bullish_candles = [c for c in recent_candles if c['direction'] == 'bullish']
+                bearish_candles = [c for c in recent_candles if c['direction'] == 'bearish']
+                
+                if len(bullish_candles) >= len(bearish_candles):
+                    bullish_momentum += 0.3
+                else:
+                    bearish_momentum += 0.3
+                
+                # Candle strength scoring
+                avg_strength = sum(c['strength'] for c in recent_candles) / len(recent_candles)
+                if avg_strength > 0.6:
+                    bullish_momentum += 0.3
+                    bearish_momentum += 0.3
+            
+            # Determine momentum direction and strength
+            if bullish_momentum > bearish_momentum and bullish_momentum >= 0.6:
+                direction = 'bullish'
+                strength = bullish_momentum
+            elif bearish_momentum > bullish_momentum and bearish_momentum >= 0.6:
+                direction = 'bearish'
+                strength = bearish_momentum
+            else:
+                direction = 'neutral'
+                strength = 0.4
+            
+            return {
+                'direction': direction,
+                'strength': strength,
+                'recent_momentum': recent_momentum,
+                'candle_data': recent_candles
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing recent momentum: {e}")
+            return {'direction': 'neutral', 'strength': 0.0}
+
+    def _analyze_magnet_level_positioning(self, symbol: str, current_price: float, 
+                                        market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze if price is near support or resistance magnet levels"""
+        try:
+            from ..strategies.profit_scraping.magnet_level_detector import MagnetLevelDetector
+            
+            # Initialize detector
+            detector = MagnetLevelDetector()
+            
+            # Get klines for price history
+            klines = market_data['klines']
+            if len(klines) < 20:
+                return {'near_support': False, 'near_resistance': False, 'level_strength': 0}
+            
+            # Create price history for magnet detection
+            price_history = [float(k['close']) for k in klines[-50:]] if len(klines) >= 50 else [float(k['close']) for k in klines]
+            
+            # Detect magnet levels
+            magnet_levels = detector.detect_magnet_levels(symbol, current_price, price_history, None)
+            
+            # Find nearest support and resistance
+            supports = [m for m in magnet_levels if m.price < current_price]
+            resistances = [m for m in magnet_levels if m.price > current_price]
+            
+            # Check proximity to levels (1% threshold)
+            proximity_threshold = current_price * 0.01
+            
+            near_support = False
+            near_resistance = False
+            max_level_strength = 0
+            
+            # Check support levels
+            if supports:
+                nearest_support = max(supports, key=lambda x: x.price)  # Highest support below price
+                distance_to_support = current_price - nearest_support.price
+                if distance_to_support <= proximity_threshold:
+                    near_support = True
+                    max_level_strength = max(max_level_strength, nearest_support.strength)
+            
+            # Check resistance levels  
+            if resistances:
+                nearest_resistance = min(resistances, key=lambda x: x.price)  # Lowest resistance above price
+                distance_to_resistance = nearest_resistance.price - current_price
+                if distance_to_resistance <= proximity_threshold:
+                    near_resistance = True
+                    max_level_strength = max(max_level_strength, nearest_resistance.strength)
+            
+            return {
+                'near_support': near_support,
+                'near_resistance': near_resistance,
+                'level_strength': max_level_strength,
+                'total_levels': len(magnet_levels),
+                'supports_count': len(supports),
+                'resistances_count': len(resistances)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing magnet levels for {symbol}: {e}")
+            # Fallback to basic support/resistance detection
+            return self._basic_support_resistance_detection(current_price, market_data)
+
+    def _basic_support_resistance_detection(self, current_price: float, 
+                                          market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Basic support/resistance detection fallback"""
+        try:
+            klines = market_data['klines']
+            if len(klines) < 20:
+                return {'near_support': False, 'near_resistance': False, 'level_strength': 0}
+            
+            highs = [float(k['high']) for k in klines[-20:]]
+            lows = [float(k['low']) for k in klines[-20:]]
+            
+            # Find recent high and low
+            recent_high = max(highs[-10:])
+            recent_low = min(lows[-10:])
+            
+            # Check proximity (2% threshold for basic detection)
+            proximity_threshold = current_price * 0.02
+            
+            near_support = abs(current_price - recent_low) <= proximity_threshold
+            near_resistance = abs(current_price - recent_high) <= proximity_threshold
+            
+            # Basic strength calculation
+            level_strength = 70 if near_support or near_resistance else 30
+            
+            return {
+                'near_support': near_support,
+                'near_resistance': near_resistance,
+                'level_strength': level_strength,
+                'method': 'basic_detection'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in basic support/resistance detection: {e}")
+            return {'near_support': False, 'near_resistance': False, 'level_strength': 0}
+
+    def _get_ml_direction_confidence(self, symbol: str, regime: str, trend_direction: str,
+                                   magnet_analysis: Dict[str, Any]) -> float:
+        """Get ML confidence for the proposed direction based on current conditions"""
+        try:
+            # Get current learning criteria
+            min_confidence = getattr(self.learning_criteria, 'min_confidence', 0.6)
+            
+            # Base confidence from regime
+            regime_confidence_map = {
+                'uptrend': 0.7,
+                'downtrend': 0.7,
+                'ranging': 0.4,
+                'unknown': 0.2
+            }
+            base_confidence = regime_confidence_map.get(regime, 0.2)
+            
+            # Trend direction boost
+            trend_boost = 0.0
+            if trend_direction in ['bullish', 'bearish']:
+                trend_boost = 0.1
+            
+            # Magnet level boost
+            level_strength = magnet_analysis.get('level_strength', 0)
+            level_boost = min(0.2, level_strength / 500)  # Max 0.2 boost
+            
+            # Combine factors
+            final_confidence = base_confidence + trend_boost + level_boost
+            
+            # Apply learned minimum
+            final_confidence = max(min_confidence, final_confidence)
+            
+            return min(0.95, final_confidence)
+            
+        except Exception as e:
+            logger.error(f"Error calculating ML confidence: {e}")
+            return 0.5
