@@ -191,8 +191,8 @@ class OpportunityManager:
             # Process symbols one by one with stability checks
             for i, symbol in enumerate(symbols_to_scan):
                 try:
-                    # FORCE SIGNAL GENERATION - Skip all checks for now
-                    logger.info(f"🔧 FORCING signal generation for {symbol}")
+                    # Strategy-based signal generation (forced override removed)
+                    logger.debug(f"🎯 Generating strategy-based signal for {symbol}")
                     
                     # Get market data for signal generation
                     market_data = await self._get_market_data_for_signal_stable(symbol)
@@ -972,29 +972,33 @@ class OpportunityManager:
                         'strategy': strategy_name
                     })
             
-            # Mean reversion signals (more liberal conditions for SHORT)
+            # Mean reversion signals (using learned criteria)
             distance_from_sma20 = (current_price - sma_20) / sma_20
-            if distance_from_sma20 < -0.005 and volatility > 0.005:  # More aggressive LONG threshold
-                confidence = 0.55 + (abs(distance_from_sma20) * 5) + (volatility * 2)
-                confidence = min(0.9, max(0.5, confidence))
+            if distance_from_sma20 < -0.005 and volatility > 0.005 and volatility <= max_volatility and volume_ratio >= min_volume_ratio:
+                strategy_name = 'mean_reversion'
+                if strategy_name not in disabled_strategies:
+                    confidence = min_confidence + (abs(distance_from_sma20) * 5) + (volatility * 2)
+                    confidence = min(0.9, max(min_confidence, confidence))
                 
-                signals.append({
-                    'direction': 'LONG',
-                    'confidence': confidence,
-                    'reasoning': ['Mean reversion opportunity', f'Price {distance_from_sma20:.1%} below SMA20', 'Oversold condition'],
-                    'strategy': 'mean_reversion'
-                })
+                    signals.append({
+                        'direction': 'LONG',
+                        'confidence': confidence,
+                        'reasoning': ['Mean reversion opportunity', f'Price {distance_from_sma20:.1%} below SMA20', 'Oversold condition', f'Learned criteria applied'],
+                        'strategy': strategy_name
+                    })
                 
-            elif distance_from_sma20 > 0.005 and volatility > 0.005:  # More aggressive SHORT threshold
-                confidence = 0.55 + (distance_from_sma20 * 5) + (volatility * 2)
-                confidence = min(0.9, max(0.5, confidence))
-                
-                signals.append({
-                    'direction': 'SHORT',
-                    'confidence': confidence,
-                    'reasoning': ['Mean reversion opportunity', f'Price {distance_from_sma20:.1%} above SMA20', 'Overbought condition'],
-                    'strategy': 'mean_reversion'
-                })
+            elif distance_from_sma20 > 0.005 and volatility > 0.005 and volatility <= max_volatility and volume_ratio >= min_volume_ratio:
+                strategy_name = 'mean_reversion'
+                if strategy_name not in disabled_strategies:
+                    confidence = min_confidence + (distance_from_sma20 * 5) + (volatility * 2)
+                    confidence = min(0.9, max(min_confidence, confidence))
+                    
+                    signals.append({
+                        'direction': 'SHORT',
+                        'confidence': confidence,
+                        'reasoning': ['Mean reversion opportunity', f'Price {distance_from_sma20:.1%} above SMA20', 'Overbought condition', f'Learned criteria applied'],
+                        'strategy': strategy_name
+                    })
             
                 # Breakout signals (using learned criteria)
             if current_price > recent_high * 1.0005 and volume_ratio >= min_volume_ratio and volatility <= max_volatility:
@@ -1003,97 +1007,68 @@ class OpportunityManager:
                     confidence = min_confidence + 0.05 + (volume_ratio * 0.1)  # Small breakout bonus
                     confidence = min(0.9, max(min_confidence, confidence))
                 
-                signals.append({
-                    'direction': 'LONG',
-                    'confidence': confidence,
-                    'reasoning': ['Breakout above resistance', f'Volume confirmation', f'Volume ratio: {volume_ratio:.1f}x'],
-                    'strategy': 'breakout'
-                })
-                
-            elif current_price < recent_low * 0.9995 and volume_ratio > 1.05:  # More aggressive breakdown threshold
-                confidence = 0.65 + (volume_ratio * 0.1)
-                confidence = min(0.9, max(0.5, confidence))
-                
-                signals.append({
-                    'direction': 'SHORT',
-                    'confidence': confidence,
-                    'reasoning': ['Breakdown below support', f'Volume confirmation', f'Volume ratio: {volume_ratio:.1f}x'],
-                    'strategy': 'breakout'
-                })
-            
-            # Add time and symbol-based variation to create dynamic signals (more balanced)
-            if not signals and (time_factor + symbol_hash) > 0.8:  # Reduced threshold from 1.3 to 0.8
-                # More balanced direction selection
-                direction = 'LONG' if (current_time + hash(symbol)) % 3 == 0 else 'SHORT'  # 1/3 LONG, 2/3 SHORT
-                confidence = 0.5 + (time_factor * 0.2) + (symbol_hash * 0.2)
-                
-                signals.append({
-                    'direction': direction,
-                    'confidence': confidence,
-                    'reasoning': ['Market timing opportunity', f'Technical setup forming', 'Dynamic signal'],
-                    'strategy': 'dynamic'
-                })
-            
-            # Additional momentum signals for more coverage (balanced)
-            if not signals:
-                # Simple momentum-based signals
-                if price_change_5 > 0.0005:  # More aggressive LONG threshold
-                    confidence = 0.5 + (price_change_5 * 20)
-                    confidence = min(0.85, max(0.5, confidence))
-                    
                     signals.append({
                         'direction': 'LONG',
                         'confidence': confidence,
-                        'reasoning': ['Positive momentum detected', f'5-period change: {price_change_5:.1%}', 'Momentum signal'],
-                        'strategy': 'momentum'
+                        'reasoning': ['Breakout above resistance', f'Volume confirmation', f'Volume ratio: {volume_ratio:.1f}x', f'Learned criteria applied'],
+                        'strategy': strategy_name
                     })
-                    
-                elif price_change_5 < -0.0005:  # More aggressive SHORT threshold
-                    confidence = 0.5 + (abs(price_change_5) * 20)
-                    confidence = min(0.85, max(0.5, confidence))
+                
+            elif current_price < recent_low * 0.9995 and volume_ratio >= min_volume_ratio and volatility <= max_volatility:
+                strategy_name = 'breakout'
+                if strategy_name not in disabled_strategies:
+                    confidence = min_confidence + 0.05 + (volume_ratio * 0.1)
+                    confidence = min(0.9, max(min_confidence, confidence))
                     
                     signals.append({
                         'direction': 'SHORT',
                         'confidence': confidence,
-                        'reasoning': ['Negative momentum detected', f'5-period change: {price_change_5:.1%}', 'Momentum signal'],
-                        'strategy': 'momentum'
+                        'reasoning': ['Breakdown below support', f'Volume confirmation', f'Volume ratio: {volume_ratio:.1f}x', f'Learned criteria applied'],
+                        'strategy': strategy_name
                     })
             
-            # Final fallback - ensure every symbol gets a signal (balanced)
-            if not signals:
-                # Generate a signal based on current market conditions (more balanced)
-                direction = 'LONG' if sma_5 > sma_20 and (hash(symbol) % 2 == 0) else 'SHORT'  # 50/50 split
-                confidence = 0.5 + (volatility * 5) + (abs(price_change_5) * 10)
-                confidence = min(0.8, max(0.5, confidence))
-                
-                signals.append({
-                    'direction': direction,
-                    'confidence': confidence,
-                    'reasoning': ['Market structure signal', f'SMA5 vs SMA20 bias', 'Fallback signal'],
-                    'strategy': 'structure'
-                })
+            # REMOVED: Time-based signal forcing that was creating random trades
+            # This was generating signals based on hash and time rather than real market conditions
             
-            # GUARANTEED SIGNAL GENERATION - Always generate at least one signal per symbol (balanced)
-            if not signals:
-                # This should never happen, but just in case (balanced)
-                direction = 'LONG' if (hash(symbol) + current_time) % 3 == 0 else 'SHORT'  # 1/3 LONG, 2/3 SHORT
-                confidence = 0.5 + (symbol_hash * 0.3)
-                
-                signals.append({
-                    'direction': direction,
-                    'confidence': confidence,
-                    'reasoning': ['Guaranteed signal', f'Symbol-based direction', 'Emergency fallback'],
-                    'strategy': 'guaranteed'
-                })
+            # IMPROVED: Momentum signals with proper criteria enforcement
+            if not signals and price_change_5 > 0.001 and volume_ratio >= min_volume_ratio and volatility <= max_volatility:
+                strategy_name = 'momentum'
+                if strategy_name not in disabled_strategies:
+                    confidence = min_confidence + (price_change_5 * 20)
+                    confidence = min(0.85, max(min_confidence, confidence))
+                    
+                    signals.append({
+                        'direction': 'LONG',
+                        'confidence': confidence,
+                        'reasoning': ['Positive momentum detected', f'5-period change: {price_change_5:.1%}', 'Learned criteria applied'],
+                        'strategy': strategy_name
+                    })
+                    
+            elif not signals and price_change_5 < -0.001 and volume_ratio >= min_volume_ratio and volatility <= max_volatility:
+                strategy_name = 'momentum'
+                if strategy_name not in disabled_strategies:
+                    confidence = min_confidence + (abs(price_change_5) * 20)
+                    confidence = min(0.85, max(min_confidence, confidence))
+                    
+                    signals.append({
+                        'direction': 'SHORT',
+                        'confidence': confidence,
+                        'reasoning': ['Negative momentum detected', f'5-period change: {price_change_5:.1%}', 'Learned criteria applied'],
+                        'strategy': strategy_name
+                    })
             
-            # FORCE SIGNAL GENERATION - Skip all complex logic for now
-            logger.info(f"🎯 {symbol}: FORCING simple signal generation...")
-            signals = [{
-                'direction': 'LONG' if (hash(symbol) % 2 == 0) else 'SHORT',
-                'confidence': 0.7,
-                'reasoning': ['Forced signal for testing'],
-                'strategy': 'forced_test'
-            }]
+            # REMOVED: Final fallback that was ensuring every symbol gets a signal
+            # This was creating random trades when no strategy conditions were met
+            
+            # IMPROVED: Only trade when strategy conditions are actually met
+            # No guaranteed signals - sitting out is better than guessing
+            if not signals:
+                logger.debug(f"⏸️ {symbol}: No strategy conditions met - skipping trade (no forced signals)")
+                return None  # Return None instead of forcing a signal
+            
+            # REMOVED: Forced signal generation that was causing random trades
+            # This was overriding all strategy logic with coin-flip decisions
+            logger.debug(f"🎯 {symbol}: Using strategy-based signal generation (forced override removed)")
             
             # Select best signal
             if not signals:
@@ -2825,11 +2800,19 @@ class OpportunityManager:
                 volume_points = 0
                 volume_score = "🔴 Low"
             
-            # ✅ MAIN VALIDATION LOGIC
-            # FORCE PASS FOR PAPER TRADING - Skip all validation
+            # ✅ IMPROVED VALIDATION LOGIC
+            # Paper trading still applies some quality filters but with relaxed criteria
             if paper_trading_mode:
-                validation_passed = True
-                logger.info(f"🎯 PAPER TRADING: Bypassing validation for {symbol} - signal approved")
+                # Relaxed but not completely bypassed validation for paper trading
+                validation_passed = (
+                    confidence >= min_confidence_required * 0.8 and  # 80% of normal confidence
+                    adjusted_move >= min_move_required * 0.6 and     # 60% of normal move requirement
+                    adjusted_rr >= min_rr_required * 0.5             # 50% of normal R/R requirement
+                )
+                if validation_passed:
+                    logger.info(f"🎯 PAPER TRADING: Signal approved with relaxed criteria for {symbol}")
+                else:
+                    logger.info(f"🎯 PAPER TRADING: Signal rejected - even relaxed criteria not met for {symbol}")
             else:
                 validation_passed = (
                     adjusted_rr >= min_rr_required and 
