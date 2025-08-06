@@ -70,8 +70,9 @@ async def initialize_all_components():
         # Initialize enhanced signal tracker
         logger.info("Initializing enhanced signal tracker...")
         enhanced_signal_tracker = EnhancedSignalTracker()
-        await enhanced_signal_tracker.initialize()
-        logger.info("✅ Enhanced signal tracker initialized")
+        # Initialize in background to avoid blocking
+        asyncio.create_task(enhanced_signal_tracker.initialize())
+        logger.info("✅ Enhanced signal tracker initialized (async)")
         
         # Attach enhanced signal tracker to opportunity manager
         if opportunity_manager:
@@ -83,31 +84,80 @@ async def initialize_all_components():
         from src.api.connection_manager import ConnectionManager
         connection_manager = ConnectionManager()
         realtime_scalping_manager = RealtimeScalpingManager(opportunity_manager, exchange_client, connection_manager)
-        await realtime_scalping_manager.start()
-        logger.info("✅ Realtime scalping manager initialized and started")
+        # Start in background to avoid blocking HTTP server startup
+        asyncio.create_task(realtime_scalping_manager.start())
+        logger.info("✅ Realtime scalping manager initialized and starting (async)")
         
-        # Initialize paper trading engine
-        logger.info("Initializing enhanced paper trading engine...")
+        # Initialize paper trading engine with PROFIT SCRAPING INTEGRATION (RULE COMPLIANT)
+        logger.info("Initializing enhanced paper trading engine with PROFIT SCRAPING...")
         try:
             # Load paper trading config with defaults
             paper_config = config.get('paper_trading', {}) if config else {}
             paper_config.setdefault('initial_balance', 10000.0)
             paper_config.setdefault('enabled', True)
             
+            # RULE COMPLIANT: Initialize paper trading engine
             paper_trading_engine = await initialize_paper_trading_engine(
-                {'paper_trading': paper_config}, 
-                exchange_client,
-                opportunity_manager
+                config={'paper_trading': paper_config},
+                exchange_client=exchange_client,
+                flow_trading_strategy='adaptive'
             )
             
             if paper_trading_engine:
-                set_paper_engine(paper_trading_engine)
-                logger.info("🟢 Enhanced paper trading engine initialized")
-            else:
-                logger.warning("🟡 Paper trading engine initialization failed")
+                logger.info("✅ Enhanced paper trading engine initialized")
                 
-        except Exception as e:
-            logger.error(f"Paper trading engine initialization failed: {e}")
+                # CRITICAL: Initialize and connect profit scraping engine (RULE COMPLIANT)
+                logger.info("🎯 Initializing profit scraping engine (MAIN SIGNAL SOURCE)...")
+                try:
+                    from src.strategies.profit_scraping.profit_scraping_engine import ProfitScrapingEngine
+                    
+                    # Initialize profit scraping engine with paper trading connection
+                    profit_scraping_engine = ProfitScrapingEngine(
+                        exchange_client=exchange_client,
+                        paper_trading_engine=paper_trading_engine,
+                        real_trading_engine=None  # Paper trading only
+                    )
+                    
+                    # Connect profit scraping to paper trading engine
+                    paper_trading_engine.connect_profit_scraping_engine(profit_scraping_engine)
+                    logger.info("✅ Profit scraping engine connected to paper trading (RULE COMPLIANT)")
+                    
+                    # RULE COMPLIANCE: Start profit scraping with active monitoring
+                    logger.info("🎯 Starting profit scraping engine (MAIN SIGNAL SOURCE)...")
+                    symbols_to_monitor = [
+                        'BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 
+                        'BCHUSDT', 'LTCUSDT', 'TRXUSDT', 'ETCUSDT', 'LINKUSDT',
+                        'XLMUSDT', 'XMRUSDT', 'DASHUSDT', 'ZECUSDT', 'XTZUSDT',
+                        'BNBUSDT', 'ATOMUSDT', 'ONTUSDT', 'IOTAUSDT', 'BATUSDT', 'VETUSDT'
+                    ]
+                    
+                    profit_scraping_started = await profit_scraping_engine.start_scraping(symbols_to_monitor)
+                    
+                    if profit_scraping_started:
+                        logger.info("✅ RULE COMPLIANT: Profit scraping engine started and active")
+                        logger.info("✅ RULE COMPLIANT: Profit scraping is now the main source of signals")
+                    else:
+                        logger.error("❌ RULE VIOLATION: Failed to start profit scraping engine!")
+                        logger.error("❌ RULE VIOLATION: Profit scraping should be the main source of signals!")
+                    
+                except Exception as profit_error:
+                    logger.error(f"❌ RULE VIOLATION: Failed to initialize profit scraping engine: {profit_error}")
+                    logger.error("❌ RULE VIOLATION: Paper trading will not have proper signal source!")
+                
+                # Connect opportunity manager as secondary/fallback source
+                if opportunity_manager:
+                    paper_trading_engine.connect_opportunity_manager(opportunity_manager)
+                    logger.info("✅ Opportunity manager connected as fallback source")
+                
+                # Store globally
+                set_paper_engine(paper_trading_engine)
+                logger.info("✅ Paper trading engine set globally")
+                
+            else:
+                logger.error("❌ Failed to initialize enhanced paper trading engine")
+                
+        except Exception as paper_error:
+            logger.error(f"❌ Paper trading engine initialization error: {paper_error}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
         
@@ -161,8 +211,8 @@ async def initialize_all_components():
 async def lifespan(app):
     """Manage application lifespan"""
     try:
-        # Startup
-        await initialize_all_components()
+        # Startup - initialize components in background to avoid blocking HTTP server
+        asyncio.create_task(initialize_all_components())
         logger.info("🚀 API server ready!")
         yield
     except Exception as e:

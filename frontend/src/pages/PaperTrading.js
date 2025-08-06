@@ -169,6 +169,8 @@ const PaperTrading = () => {
 
   const fetchData = async () => {
     try {
+      console.log("🔄 Fetching paper trading data...");
+      console.log("📡 API Base URL:", config.API_BASE_URL);
       const [statusRes, positionsRes, completedTradesRes, performanceRes, strategiesRes, currentStrategyRes, ruleModeRes] = await Promise.all([
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/status`),
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/positions`),
@@ -179,8 +181,16 @@ const PaperTrading = () => {
         fetch(`${config.API_BASE_URL}/api/v1/paper-trading/rule-mode`)
       ]);
 
+      console.log("🔍 Response statuses:", {
+        status: statusRes.status,
+        positions: positionsRes.status,
+        trades: completedTradesRes.status,
+        performance: performanceRes.status
+      });
+
       if (statusRes.ok) {
         const statusData = await statusRes.json();
+        console.log("✅ Status data:", statusData);
         if (statusData.data) {
           // Fix for virtual_balance showing 0 due to initialization issue
           const virtualBalance = statusData.data.virtual_balance === 0.0 && statusData.data.initial_balance > 0
@@ -195,11 +205,18 @@ const PaperTrading = () => {
           // Set running state from backend, not local state
           setIsRunning(statusData.data.enabled || false);
         }
+      } else {
+        console.error("❌ Status request failed:", statusRes.status, statusRes.statusText);
       }
 
       if (positionsRes.ok) {
         const positionsData = await positionsRes.json();
+        console.log("📊 Positions data:", positionsData);
+        console.log("📊 Positions array:", positionsData.data);
+        console.log("📊 Number of positions:", positionsData.data?.length || 0);
         setPositions(positionsData.data || []);
+      } else {
+        console.error("❌ Positions request failed:", positionsRes.status, positionsRes.statusText);
       }
 
       if (completedTradesRes.ok) {
@@ -235,6 +252,12 @@ const PaperTrading = () => {
       // If API fails, keep the default rule mode state
     } catch (error) {
       console.error('Failed to fetch paper trading data:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      setError(`Failed to fetch data: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -438,30 +461,88 @@ const PaperTrading = () => {
 
   const handleClosePosition = async (positionId) => {
     try {
+      console.log(`🔄 CLOSE REQUEST: Starting close for position ${positionId}`);
+      
+      // Validate position ID
+      if (!positionId || typeof positionId !== 'string') {
+        console.error(`❌ CLOSE ERROR: Invalid position ID: ${positionId}`);
+        setError(`Invalid position ID: ${positionId}`);
+        return;
+      }
+      
+      // Check if position exists in current positions
+      const position = positions.find(p => p.id === positionId);
+      if (!position) {
+        console.error(`❌ CLOSE ERROR: Position ${positionId} not found in current positions`);
+        console.log(`📊 Available positions:`, positions.map(p => ({ id: p.id, symbol: p.symbol })));
+        setError(`Position ${positionId} not found`);
+        return;
+      }
+      
+      console.log(`✅ CLOSE VALIDATION: Position found - ${position.symbol} ${position.side}`);
+      
+      // Prevent duplicate close requests
+      if (closingPositions.has(positionId)) {
+        console.warn(`⚠️ CLOSE DUPLICATE: Already closing position ${positionId}`);
+        return;
+      }
+      
       setClosingPositions(prev => new Set([...prev, positionId]));
+      console.log(`🔒 CLOSE LOCK: Position ${positionId} marked as closing`);
+      
+      const requestBody = { exit_reason: 'manual_close' };
+      console.log(`📤 CLOSE REQUEST: Sending to API`, {
+        url: `${config.API_BASE_URL}/api/v1/paper-trading/positions/${positionId}/close`,
+        method: 'POST',
+        body: requestBody
+      });
       
       const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/positions/${positionId}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exit_reason: 'manual_close' })
+        body: JSON.stringify(requestBody)
       });
       
-      const data = await response.json();
+      console.log(`📥 CLOSE RESPONSE: Status ${response.status} ${response.statusText}`);
       
-      if (response.ok && data.message) {
-        // Success - refresh data to show updated positions
-        await fetchData();
-        setError(null);
+      let data;
+      try {
+        data = await response.json();
+        console.log(`📋 CLOSE DATA:`, data);
+      } catch (parseError) {
+        console.error(`❌ CLOSE PARSE ERROR: Failed to parse response`, parseError);
+        setError('Invalid response from server');
+        return;
+      }
+      
+      if (response.ok) {
+        if (data.status === 'success') {
+          console.log(`✅ CLOSE SUCCESS: Position ${positionId} closed successfully`);
+          console.log(`💰 CLOSE RESULT: P&L ${data.trade?.pnl || 'unknown'}, New Balance: ${data.account_update?.new_balance || 'unknown'}`);
+          
+          // Success - refresh data to show updated positions
+          await fetchData();
+          setError(null);
+          
+          // Show success message briefly
+          setError(`✅ Position closed successfully: ${position.symbol} P&L $${data.trade?.pnl?.toFixed(2) || '0.00'}`);
+          setTimeout(() => setError(null), 5000);
+        } else {
+          console.error(`❌ CLOSE FAILED: Server returned success=false`, data);
+          setError(data.message || data.detail || 'Failed to close position');
+        }
       } else {
-        setError(data.detail || 'Failed to close position');
+        console.error(`❌ CLOSE HTTP ERROR: ${response.status}`, data);
+        setError(data.detail || data.message || `HTTP ${response.status}: Failed to close position`);
       }
     } catch (error) {
-      console.error('Error closing position:', error);
-      setError('Failed to close position - Network error');
+      console.error(`❌ CLOSE NETWORK ERROR: ${error.message}`, error);
+      setError(`Network error: ${error.message}`);
     } finally {
       setClosingPositions(prev => {
         const newSet = new Set(prev);
         newSet.delete(positionId);
+        console.log(`🔓 CLOSE UNLOCK: Position ${positionId} removed from closing set`);
         return newSet;
       });
     }
@@ -982,7 +1063,12 @@ const PaperTrading = () => {
                     <TimelineIcon color="primary" />
                     Live Virtual Positions ({positions?.length || 0})
                   </Typography>
-                  {positions?.length > 0 ? (
+                  {console.log("🎯 RENDER CHECK - Positions length:", positions?.length, "Positions:", positions)}
+                  {console.log("🎯 RENDER CHECK - Positions type:", typeof positions, "Is Array:", Array.isArray(positions))}
+                  {console.log("🎯 RENDER CHECK - Raw positions data:", JSON.stringify(positions, null, 2))}
+                  
+                  {/* FORCE DISPLAY TEST - Show table if we have any positions data */}
+                  {(Array.isArray(positions) && positions.length > 0) || positions ? (
                     <TableContainer component={Paper} sx={{ maxHeight: 400, overflowX: 'auto' }}>
                       <Table size="small">
                         <TableHead>
@@ -1114,6 +1200,7 @@ const PaperTrading = () => {
                             <TableCell align="right">Entry Price</TableCell>
                             <TableCell align="right">Exit Price</TableCell>
                             <TableCell align="right">PnL</TableCell>
+                            <TableCell align="right">Fees</TableCell>
                             <TableCell align="right">Duration</TableCell>
                             <TableCell align="center">Result</TableCell>
                           </TableRow>
@@ -1167,6 +1254,11 @@ const PaperTrading = () => {
                                     <Typography variant="caption" component="span">
                                       ({trade.pnl_pct?.toFixed(1)}%)
                                     </Typography>
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">
+                                  <Typography variant="body2" color="text.secondary">
+                                    ${trade.fees?.toFixed(2) || '0.00'}
                                   </Typography>
                                 </TableCell>
                                 <TableCell align="right">

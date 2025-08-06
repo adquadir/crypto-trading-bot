@@ -1,37 +1,30 @@
 module.exports = {
   apps: [
+    // 🎯 CONSOLIDATED: Main Trading API with Profit Scraping Engine
     {
       name: 'crypto-trading-api',
       script: './venv/bin/python',
-      args: '-m src.api.main',  // Use the new main with profit scraping support
+      args: 'lightweight_api.py',
       cwd: '/home/ubuntu/crypto-trading-bot',
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: '500M',
+      max_memory_restart: '800M',
+      restart_delay: 5000,
+      max_restarts: 10,
+      min_uptime: '30s',
       error_file: './logs/api-err.log',
       out_file: './logs/api-out.log',
       log_file: './logs/api-combined.log',
       env: {
-        PYTHONPATH: '/home/ubuntu/crypto-trading-bot'
+        PYTHONPATH: '/home/ubuntu/crypto-trading-bot',
+        PURE_PROFIT_SCRAPING_MODE: 'true',
+        PROFIT_SCRAPING_PRIMARY: 'true',
+        AUTO_START_PAPER_TRADING: 'true',
+        AUTO_START_PROFIT_SCRAPING: 'true'
       }
     },
-    {
-      name: 'paper-trading-auto-start',
-      script: './venv/bin/python',
-      args: 'auto_start_paper_trading.py',
-      cwd: '/home/ubuntu/crypto-trading-bot',
-      instances: 1,
-      autorestart: true,
-      watch: false,
-      max_memory_restart: '200M',
-      error_file: './logs/paper-trading-err.log',
-      out_file: './logs/paper-trading-out.log',
-      log_file: './logs/paper-trading-combined.log',
-      env: {
-        PYTHONPATH: '/home/ubuntu/crypto-trading-bot'
-      }
-    },
+    // 🎯 Frontend Service
     {
       name: 'crypto-trading-frontend',
       script: '/usr/bin/npm',
@@ -41,6 +34,8 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: '200M',
+      restart_delay: 10000,
+      depends_on: ['crypto-trading-api'],
       error_file: './logs/frontend-err.log',
       out_file: './logs/frontend-out.log',
       env: {

@@ -1,0 +1,21 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Services are managed through pm2 services
+
+The Paper trading positions should have these criteria:
+$500 virtual capital
+10x Leverage
+$18 take take profit(fee included)
+$15 floor on reversal
+$18 dollar stop loss (fee included)
+
+Virtual starting capital is $10,000 with $500 for each trade we will have 20 trades starting.
+
+The paper trading works by using the profit scraper with the opportunity manager to excute trades.
+
+the paper trading engine is configured for "Pure Profit Scraping Mode" by default, the profit scraping engine should always be connected and active. 
+
+Profit Scraping is the main source of signals

@@ -1,194 +1,78 @@
 exchange:
   name: binance
-  testnet: false
-  api_key: ${BINANCE_API_KEY}
-  api_secret: ${BINANCE_API_SECRET}
-  base_url: ${BINANCE_API_URL}
-  ws_url: ${BINANCE_WS_URL}
-
-# 📊 LIVE PAPER TRADING - ML Learning Mode
-paper_trading:
-  enabled: true                     # 🔥 ENABLED for live market learning without real money
-  mode: "live_learning"             # live_learning | backtesting | disabled
-  initial_balance: 10000.0          # Virtual starting capital (USDT)
-  risk_per_trade_pct: 0.10          # 10% of balance per trade = $1000 per position
-  use_real_market_data: true        # Use live market feeds (not simulation)
-  simulate_real_conditions: true    # Include slippage, fees, latency
-  learning_enabled: true            # Enable ML data collection
-  
-  # Realistic trading simulation
-  slippage:
-    market_orders: 0.0003           # 0.03% average slippage for market orders
-    limit_orders: 0.0001            # 0.01% slippage for limit orders
-  
-  fees:
-    maker_fee: 0.0002               # 0.02% maker fee (Binance Futures)
-    taker_fee: 0.0004               # 0.04% taker fee
-  
-  latency:
-    order_execution_ms: 50          # Simulate 50ms order execution
-    market_data_delay_ms: 10        # 10ms market data delay
-  
-  # ML Learning Configuration
-  learning:
-    collect_all_signals: true       # Log every signal for learning
-    track_market_regime: true       # Track market conditions
-    save_strategy_performance: true # Per-symbol strategy performance
-    learning_data_retention_days: 90 # Keep learning data for 90 days
-    
-  # Virtual Position Management
-  positions:
-    max_concurrent: 50              # Max simultaneous virtual positions
-    auto_close_on_margin_call: true # Simulate margin calls
-    leverage_limits: true           # Respect leverage limits
-    
-  # Monitoring & Alerts
-  monitoring:
-    real_time_dashboard: true       # Live dashboard updates
-    performance_alerts: true        # Alert on significant performance changes
-    learning_insights: true         # Show ML learning progress
-    risk_monitoring: true           # Monitor virtual risk metrics
+  api_key: ${BINANCE_API_KEY:-}
+  api_secret: ${BINANCE_API_SECRET:-}
+  testnet: ${USE_TESTNET:-false}
+  base_url: https://fapi.binance.com
+  ws_url: wss://fstream.binance.com/ws
 
 trading:
-  funding_rate_interval: 300        # seconds
-  position_interval: 30             # seconds
-  signal_interval: 15               # seconds
-  monitor_interval: 10              # seconds
-  scan_interval: 10                 # seconds
-  max_open_trades: ${MAX_OPEN_TRADES}
-  min_volume: ${MIN_VOLUME}
-  min_liquidity_usdt: 500000
-  min_market_cap: ${MIN_MARKET_CAP}
-  max_spread: ${MAX_SPREAD}
-  min_volatility: ${MIN_VOLATILITY}
-  max_volatility: ${MAX_VOLATILITY}
-  scalping_mode: true
-  risk_per_trade: ${RISK_PER_TRADE}
-
-flow_trading:
-  enabled: true
-  scalping:
-    profit_target_pct: 0.5
-    stop_loss_pct: 0.3
-    trailing_stop: true
-    min_trend_strength: 25  # ADX threshold
-    max_trade_duration_minutes: 30
-    re_entry_cooldown_minutes: 5
-  grid:
-    levels: 5
-    spacing_multiplier: 1.0  # x ATR
-    max_spread_pct: 2.0
-    breakout_threshold_pct: 3.0
-    min_order_size_usd: 10.0
-    grid_rebalance_threshold_pct: 1.0
-  adaptive:
-    switch_cooldown_minutes: 15
-    trend_threshold_adx: 25
-    ranging_threshold_bb_width: 0.02
-    volatility_threshold_atr_pct: 3.0
-    min_performance_score: -5.0
-    strategy_timeout_hours: 4
-    regime_confirmation_periods: 3
-  risk:
-    max_concurrent_grids: 3
-    max_portfolio_exposure_pct: 20.0
-    max_single_position_pct: 5.0
-    daily_loss_limit_pct: 5.0
-    position_size_pct: 0.5
-    correlation_limit: 0.7
-    var_limit_pct: 2.0
-    min_margin_buffer_pct: 10.0
-  monitoring:
-    update_interval_seconds: 5
-    performance_tracking_enabled: true
-    risk_alerts_enabled: true
-    regime_detection_interval_seconds: 60
-
-strategy:
-  default_profile: "moderate"
-  profiles:
-    conservative:
-      description: "Low risk, stable returns"
-      macd_fast_period: 12
-      macd_slow_period: 26
-      macd_signal_period: 9
-      rsi_overbought: 70
-      rsi_oversold: 30
-      bb_std_dev: 2.0
-      max_position_size: 0.1
-      max_leverage: 2.0
-      risk_per_trade: 0.01
-      max_daily_loss: 0.02
-      max_drawdown: 0.05
-      volatility_factor: 0.8
-      confidence_threshold: 0.8
-      
-    moderate:
-      description: "Balanced risk and returns"
-      macd_fast_period: 10
-      macd_slow_period: 21
-      macd_signal_period: 7
-      rsi_overbought: 75
-      rsi_oversold: 25
-      bb_std_dev: 2.2
-      max_position_size: 0.15
-      max_leverage: 3.0
-      risk_per_trade: 0.015
-      max_daily_loss: 0.03
-      max_drawdown: 0.08
-      volatility_factor: 1.0
-      confidence_threshold: 0.7
-      
-    aggressive:
-      description: "Higher risk, higher potential returns"
-      macd_fast_period: 8
-      macd_slow_period: 17
-      macd_signal_period: 5
-      rsi_overbought: 80
-      rsi_oversold: 20
-      bb_std_dev: 2.5
-      max_position_size: 0.2
-      max_leverage: 5.0
-      risk_per_trade: 0.02
-      max_daily_loss: 0.04
-      max_drawdown: 0.12
-      volatility_factor: 1.2
-      confidence_threshold: 0.6
+  base_currency: USDT
+  max_open_trades: 20
+  stake_amount: 500
+  stake_currency: USDT
+  dry_run: false
+  health_check_interval: 60
+  position_check_interval: 300
+  funding_rate_check_interval: 3600
+  risk_per_trade: 0.05
 
 risk:
-  initial_balance: ${INITIAL_BALANCE:-1000}
-  max_daily_loss: ${DAILY_LOSS_LIMIT}
-  max_drawdown: ${MAX_DRAWDOWN}
-  max_leverage: ${MAX_LEVERAGE}
-  position_sizing:
-    base_risk: 0.01
-    max_risk: 0.05
-    confidence_multiplier: 1.5
-    volatility_divider: 2.0
-  position_size_limit: ${POSITION_SIZE_LIMIT}
-  daily_loss_limit: ${DAILY_LOSS_LIMIT}
+  max_daily_loss: 5.0
+  max_drawdown: 10.0
+  max_leverage: 10.0
+  position_size_limit: 0.05
+  daily_loss_limit: 5.0
+  initial_balance: 10000.0
 
 monitoring:
-  health_check_interval: ${HEALTH_CHECK_INTERVAL}
-  funding_rate_check_interval: ${FUNDING_RATE_CHECK_INTERVAL}
-  position_update_interval: ${POSITION_UPDATE_INTERVAL}
+  health_check_interval: 60
+  log_level: INFO
+  enable_telegram: false
+  telegram_token: ${TELEGRAM_TOKEN:-}
+  telegram_chat_id: ${TELEGRAM_CHAT_ID:-}
+  metrics_enabled: true
 
-logging:
-  level: INFO
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/trading_bot.log"
+paper_trading:
+  enabled: true
+  initial_balance: 10000.0
+  risk_per_trade_pct: 0.05
+  max_positions: 20
+  leverage: 10.0
+  primary_target_dollars: 18.0
+  absolute_floor_dollars: 15.0
+  stop_loss_dollars: 18.0
+  pure_3_rule_mode: true
+  mode: pure_profit_scraping
+
+signal_sources:
+  pure_profit_scraping_mode: true
+  profit_scraping_primary: true
+  allow_opportunity_fallback: false
+  allow_flow_trading_fallback: false
 
 proxy:
-  USE_PROXY: ${USE_PROXY}
-  host: ${PROXY_HOST}
-  port: ${PROXY_PORT}
-  username: ${PROXY_USER}
-  password: ${PROXY_PASS}
-  proxy_ports: ${PROXY_LIST}
-  failover_ports: ${FAILOVER_PORTS}
-  symbols: ${TRADING_SYMBOLS}
-  # 418 Error Handling Configuration
-  rotation_on_418: true                    # Enable immediate proxy rotation on 418 errors
-  proxy_cooldown_after_418_minutes: 30    # Minutes to block proxy after 418 errors
-  max_418_errors_per_proxy: 3             # Max 418 errors before blocking proxy
-  rotation_threshold: 0.8                 # Error rate threshold for rotation
+  USE_PROXY: ${USE_PROXY:-false}
+  PROXY_HOST: ${PROXY_HOST:-}
+  PROXY_PORT: ${PROXY_PORT:-}
+  PROXY_USER: ${PROXY_USER:-}
+  PROXY_PASS: ${PROXY_PASS:-}
+
+strategy:
+  default_profile: default
+  profiles:
+    default:
+      name: default
+      description: Default trading strategy
+      parameters:
+        entry_threshold: 0.02
+        exit_threshold: 0.01
+        stop_loss: 0.03
+        take_profit: 0.05
+        max_position_size: 0.1
+        leverage: 10.0
+        min_volume: 1000000.0
+        min_market_cap: 100000000.0
+        max_spread: 0.5
+        min_volatility: 0.5
+        max_volatility: 5.0

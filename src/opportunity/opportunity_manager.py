@@ -67,10 +67,25 @@ class OpportunityManager:
         """Get all current trading opportunities."""
         # Check if we need to refresh opportunities
         current_time = time.time()
-        if current_time - self.last_scan_time > self.scan_interval:
+        
+        # FIXED: Increase interval to 120 seconds (2 minutes) to reduce excessive scanning
+        # and add better task management to prevent untracked background tasks
+        if current_time - self.last_scan_time > 120:  # Changed from scan_interval to fixed 120s
             logger.info(f"Opportunities are stale (last scan: {int(current_time - self.last_scan_time)}s ago), triggering background refresh")
-            # Trigger background scan but return current data immediately
-            asyncio.create_task(self.scan_opportunities_incremental())
+            
+            # CRITICAL FIX: Only create background task if one isn't already running
+            if not hasattr(self, '_background_refresh_task') or self._background_refresh_task.done():
+                try:
+                    self._background_refresh_task = asyncio.create_task(
+                        self.scan_opportunities_incremental(),
+                        name="background_opportunity_refresh"
+                    )
+                    logger.debug("✅ Background refresh task created")
+                except Exception as e:
+                    logger.error(f"❌ Failed to create background refresh task: {e}")
+            else:
+                logger.debug("⏳ Background refresh already in progress, skipping")
+                
             self.last_scan_time = current_time  # Update to prevent multiple concurrent scans
         
         # Convert dict of opportunities to list format expected by frontend

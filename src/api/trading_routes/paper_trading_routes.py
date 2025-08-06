@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from src.trading.enhanced_paper_trading_engine import EnhancedPaperTradingEngine
 from src.config.flow_trading_config import get_config_manager
+from src.utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +49,19 @@ def get_paper_engine():
     
     # CRITICAL FIX: Always ensure we have a working engine
     if paper_engine is None:
-        logger.warning("Paper engine is None - attempting emergency initialization")
+        logger.warning("Paper engine is None - attempting to get from simple_api first")
         
-        # Try to get from main module first
+        # PRIORITY 1: Try to get from simple_api module (where it's actually initialized)
+        try:
+            import simple_api
+            if hasattr(simple_api, 'paper_trading_engine') and simple_api.paper_trading_engine:
+                paper_engine = simple_api.paper_trading_engine
+                logger.info("✅ Retrieved paper trading engine from simple_api module (with connections)")
+                return paper_engine
+        except Exception as e:
+            logger.warning(f"Could not get engine from simple_api module: {e}")
+        
+        # FALLBACK 1: Try to get from main module
         try:
             import src.api.main as main_module
             if hasattr(main_module, 'paper_trading_engine') and main_module.paper_trading_engine:
@@ -65,15 +76,18 @@ def get_paper_engine():
             logger.warning("🚨 Creating emergency paper trading engine")
             from src.trading.enhanced_paper_trading_engine import EnhancedPaperTradingEngine
             
-            # Emergency configuration
+            # Emergency configuration with STRICT LIMITS from config.yaml
+            config = load_config()  # Load actual config
+            paper_config_from_file = config.get('paper_trading', {})
             emergency_config = {
                 'paper_trading': {
-                    'initial_balance': 10000.0,
-                    'enabled': True,
-                    'risk_per_trade_pct': 0.10,  # 10% = $1000 per position
-                    'max_position_size_pct': 0.02,
-                    'max_total_exposure_pct': 1.0,
-                    'max_daily_loss_pct': 0.50
+                    'initial_balance': paper_config_from_file.get('initial_balance', 10000.0),
+                    'enabled': paper_config_from_file.get('enabled', True),
+                    'risk_per_trade_pct': paper_config_from_file.get('risk_per_trade_pct', 0.05),
+                    'max_positions': paper_config_from_file.get('max_positions', 15),  # ENFORCE LIMIT
+                    'max_total_exposure_pct': paper_config_from_file.get('max_total_exposure_pct', 0.90),
+                    'pure_3_rule_mode': paper_config_from_file.get('pure_3_rule_mode', True),
+                    'leverage': paper_config_from_file.get('leverage', 10.0)
                 }
             }
             
@@ -112,9 +126,9 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
                 'paper_trading': {
                     'initial_balance': 10000.0,
                     'enabled': True,
-                    'risk_per_trade_pct': 0.10,  # 10% = $1000 per position
+                    'risk_per_trade_pct': 0.05,  # 5% = $500 per position
                     'max_position_size_pct': 0.02,
-                    'max_total_exposure_pct': 1.0,
+                    'max_total_exposure_pct': 0.90,
                     'max_daily_loss_pct': 0.50
                 }
             }
@@ -151,16 +165,30 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
         if not engine.opportunity_manager:
             logger.warning("Opportunity manager not connected - attempting to connect")
             try:
-                # Try to get opportunity manager from main module
-                import src.api.main as main_module
-                opportunity_manager = getattr(main_module, 'opportunity_manager', None)
+                # Try to get opportunity manager from simple_api module (where it's actually initialized)
+                import simple_api
+                opportunity_manager = getattr(simple_api, 'opportunity_manager', None)
                 if opportunity_manager:
                     engine.connect_opportunity_manager(opportunity_manager)
                     logger.info("✅ Connected opportunity manager to paper trading engine")
                 else:
-                    logger.warning("⚠️ No opportunity manager available in main module")
+                    logger.warning("⚠️ No opportunity manager available in simple_api module")
             except Exception as e:
                 logger.error(f"Failed to connect opportunity manager: {e}")
+        
+        # CRITICAL FIX: Ensure profit scraping engine is connected before starting
+        if not engine.profit_scraping_engine:
+            logger.warning("Profit scraping engine not connected - attempting to connect")
+            try:
+                # Try to get profit scraping engine from main or routes modules
+                from src.api.trading_routes.profit_scraping_routes import profit_scraping_engine as routes_profit_engine
+                if routes_profit_engine:
+                    engine.connect_profit_scraping_engine(routes_profit_engine)
+                    logger.info("✅ Connected profit scraping engine to paper trading engine")
+                else:
+                    logger.warning("⚠️ No profit scraping engine available in routes module")
+            except Exception as e:
+                logger.error(f"Failed to connect profit scraping engine: {e}")
         
         if engine.is_running:
             # CRITICAL: Verify monitoring loop is actually running
@@ -312,9 +340,29 @@ async def start_profit_scraping_paper_trading(background_tasks: BackgroundTasks)
         await opportunity_manager.initialize()
         logger.info("✅ Opportunity Manager initialized")
         
-        # Start profit scraping engine with major crypto pairs
-        major_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
-        profit_scraping_started = await profit_scraping_engine.start_scraping(major_symbols)
+        # Start profit scraping engine with ALL available USDT symbols
+        logger.info("🔍 Fetching all Binance futures symbols for profit scraping...")
+        try:
+            all_symbols = await exchange_client.get_all_symbols()
+            if all_symbols:
+                # Filter for USDT perpetual futures (most liquid)
+                usdt_symbols = [s for s in all_symbols if s.endswith('USDT')]
+                logger.info(f"📊 Found {len(usdt_symbols)} USDT perpetual futures symbols")
+                symbols_to_monitor = usdt_symbols
+            else:
+                # Fallback to expanded list if API fails
+                symbols_to_monitor = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT', 
+                                    'DOGEUSDT', 'XRPUSDT', 'LTCUSDT', 'AVAXUSDT', 'DOTUSDT']
+                logger.warning("⚠️ Failed to fetch symbols from API, using expanded fallback list")
+        except Exception as e:
+            logger.error(f"Error fetching symbols: {e}")
+            # Fallback to expanded list on error
+            symbols_to_monitor = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT', 
+                                'DOGEUSDT', 'XRPUSDT', 'LTCUSDT', 'AVAXUSDT', 'DOTUSDT']
+            logger.warning("⚠️ Using expanded fallback symbol list due to error")
+        
+        logger.info(f"🚀 Starting profit scraping with {len(symbols_to_monitor)} symbols (engine will limit to max_symbols internally)")
+        profit_scraping_started = await profit_scraping_engine.start_scraping(symbols_to_monitor)
         
         if profit_scraping_started:
             logger.info("✅ Profit Scraping Engine started successfully")
@@ -785,15 +833,25 @@ async def execute_paper_trade(trade_request: PaperTradeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/positions/{position_id}/close")
-async def close_position(position_id: str, exit_reason: str = "manual"):
+async def close_position(position_id: str, request_body: dict = None):
     """Close a specific position with enhanced error handling and logging"""
     try:
+        # Extract exit_reason from request body
+        exit_reason = "manual_close"
+        if request_body and isinstance(request_body, dict):
+            exit_reason = request_body.get('exit_reason', 'manual_close')
+        
         logger.info(f"🔄 API CLOSE REQUEST: Received request to close position {position_id} (reason: {exit_reason})")
+        logger.info(f"📋 API CLOSE: Request body: {request_body}")
         
         # CRITICAL: Validate position_id format
-        if not position_id or not isinstance(position_id, str):
-            logger.error(f"❌ API CLOSE: Invalid position_id format: {position_id}")
-            raise HTTPException(status_code=400, detail="Invalid position ID format")
+        if not position_id or not isinstance(position_id, str) or len(position_id.strip()) == 0:
+            logger.error(f"❌ API CLOSE: Invalid position_id format: '{position_id}' (type: {type(position_id)})")
+            raise HTTPException(status_code=400, detail=f"Invalid position ID format: '{position_id}'")
+        
+        # Clean position_id
+        position_id = position_id.strip()
+        logger.info(f"🔍 API CLOSE: Cleaned position_id: '{position_id}'")
         
         # Get paper trading engine with detailed logging
         engine = get_paper_engine()
@@ -804,7 +862,7 @@ async def close_position(position_id: str, exit_reason: str = "manual"):
                 detail="Paper trading engine not available - please start paper trading first"
             )
         
-        logger.info(f"✅ API CLOSE: Engine available, attempting to close position {position_id}")
+        logger.info(f"✅ API CLOSE: Engine available (type: {type(engine).__name__})")
         
         # Check if engine is running
         if not engine.is_running:
@@ -814,18 +872,43 @@ async def close_position(position_id: str, exit_reason: str = "manual"):
                 detail="Paper trading engine is not running - please start paper trading first"
             )
         
+        logger.info(f"✅ API CLOSE: Engine is running")
+        
+        # Get current positions for debugging
+        current_positions = list(engine.positions.keys())
+        logger.info(f"📊 API CLOSE: Current active positions: {current_positions}")
+        logger.info(f"📊 API CLOSE: Total active positions: {len(current_positions)}")
+        
         # Check if position exists before attempting to close
         if position_id not in engine.positions:
             logger.error(f"❌ API CLOSE: Position {position_id} not found in active positions")
-            logger.info(f"📊 API CLOSE: Available positions: {list(engine.positions.keys())}")
+            logger.error(f"📊 API CLOSE: Available positions: {current_positions}")
+            
+            # Additional debugging - check position format
+            for pos_id in current_positions:
+                logger.info(f"🔍 API CLOSE: Available position: '{pos_id}' (type: {type(pos_id)}, len: {len(pos_id)})")
+                if pos_id == position_id:
+                    logger.info(f"🔍 API CLOSE: String match found but not in dict - possible encoding issue")
+            
             raise HTTPException(
                 status_code=404, 
-                detail=f"Position {position_id} not found in active positions"
+                detail=f"Position '{position_id}' not found. Available positions: {current_positions}"
             )
         
         # Get position details for logging
         position = engine.positions[position_id]
-        logger.info(f"📋 API CLOSE: Found position {position_id} - {position.symbol} {position.side} @ {position.entry_price:.4f}")
+        logger.info(f"📋 API CLOSE: Found position {position_id}")
+        logger.info(f"📋 API CLOSE: Position details - {position.symbol} {position.side} @ {position.entry_price:.4f}")
+        logger.info(f"📋 API CLOSE: Position PnL: ${getattr(position, 'unrealized_pnl', 0):.2f}")
+        logger.info(f"📋 API CLOSE: Position closed status: {getattr(position, 'closed', False)}")
+        
+        # Check if position is already marked as closed
+        if getattr(position, 'closed', False):
+            logger.warning(f"⚠️ API CLOSE: Position {position_id} already marked as closed")
+            raise HTTPException(
+                status_code=409, 
+                detail=f"Position {position_id} is already closed"
+            )
         
         # Attempt to close the position
         logger.info(f"🔄 API CLOSE: Calling engine.close_position for {position_id}")
@@ -834,10 +917,11 @@ async def close_position(position_id: str, exit_reason: str = "manual"):
         if trade:
             logger.info(f"✅ API CLOSE SUCCESS: Position {position_id} closed successfully")
             logger.info(f"💰 API CLOSE: Trade details - P&L: ${trade.pnl:.2f} ({trade.pnl_pct:.2%}), Duration: {trade.duration_minutes}min")
+            logger.info(f"💰 API CLOSE: New account balance: ${engine.account.balance:.2f}")
             
             return {
                 "status": "success",
-                "message": f"📉 Position closed successfully",
+                "message": f"Position closed successfully",
                 "trade": {
                     "id": trade.id,
                     "symbol": trade.symbol,
@@ -870,7 +954,7 @@ async def close_position(position_id: str, exit_reason: str = "manual"):
             
             raise HTTPException(
                 status_code=500, 
-                detail=f"Failed to close position {position_id} - check server logs for details"
+                detail=f"Failed to close position {position_id} - engine returned None"
             )
         
     except HTTPException as http_error:
@@ -1186,7 +1270,7 @@ async def verify_monitoring_loop_running(engine) -> Dict[str, Any]:
         
         # Additional check: Look for monitoring loop attributes on engine
         has_monitoring_method = hasattr(engine, '_position_monitoring_loop')
-        has_monitoring_task = hasattr(engine, 'monitoring_task') and engine.monitoring_task is not None
+        has_monitoring_task = hasattr(engine, 'monitoring_task') and engine.monitoring_task is not None and not engine.monitoring_task.done()
         
         logger.info(f"🔍 Monitoring loop verification:")
         logger.info(f"   - Engine running: {engine.is_running}")
@@ -1229,18 +1313,27 @@ async def force_restart_monitoring_loops(engine):
             except Exception as e:
                 logger.warning(f"Error canceling existing monitoring task: {e}")
         
-        # Force start the monitoring loop
-        if hasattr(engine, '_position_monitoring_loop'):
-            logger.info("🔧 Starting position monitoring loop...")
+        # Force start the monitoring loop with restart wrapper
+        if hasattr(engine, '_position_monitoring_loop_with_restart'):
+            logger.info("🔧 Starting position monitoring loop with auto-restart...")
+            engine.monitoring_task = asyncio.create_task(engine._position_monitoring_loop_with_restart())
+            logger.info("✅ Position monitoring loop task created with auto-restart")
+        elif hasattr(engine, '_position_monitoring_loop'):
+            logger.info("🔧 Starting position monitoring loop (legacy)...")
             engine.monitoring_task = asyncio.create_task(engine._position_monitoring_loop())
-            logger.info("✅ Position monitoring loop task created")
+            logger.info("✅ Position monitoring loop task created (legacy)")
         
         # Force start signal processing if available
-        if hasattr(engine, '_signal_processing_loop'):
-            logger.info("🔧 Starting signal processing loop...")
+        if hasattr(engine, '_signal_processing_loop_with_restart'):
+            logger.info("🔧 Starting signal processing loop with auto-restart...")
+            if not hasattr(engine, 'signal_task') or engine.signal_task is None:
+                engine.signal_task = asyncio.create_task(engine._signal_processing_loop_with_restart())
+                logger.info("✅ Signal processing loop task created with auto-restart")
+        elif hasattr(engine, '_signal_processing_loop'):
+            logger.info("🔧 Starting signal processing loop (legacy)...")
             if not hasattr(engine, 'signal_task') or engine.signal_task is None:
                 engine.signal_task = asyncio.create_task(engine._signal_processing_loop())
-                logger.info("✅ Signal processing loop task created")
+                logger.info("✅ Signal processing loop task created (legacy)")
         
         # Give loops time to start
         await asyncio.sleep(1.0)
@@ -1328,14 +1421,14 @@ async def force_initialize_paper_engine():
     try:
         logger.info("🔧 Force initializing paper trading engine...")
         
-        # Emergency configuration
+        # Emergency configuration with STRICT LIMITS from config.yaml
         config = {
             'paper_trading': {
                 'initial_balance': 10000.0,
                 'enabled': True,
-                'risk_per_trade_pct': 0.10,  # 10% = $1000 per position
+                'risk_per_trade_pct': 0.05,  # 5% = $500 per position
                 'max_position_size_pct': 0.02,
-                'max_total_exposure_pct': 1.0,
+                'max_total_exposure_pct': 0.90,
                 'max_daily_loss_pct': 0.50
             }
         }
@@ -1379,8 +1472,34 @@ async def debug_engine_status():
         engine = get_paper_engine()
         
         # Get module references for debugging
-        import src.api.main as main_module
-        main_engine = getattr(main_module, 'paper_trading_engine', None)
+        import simple_api
+        simple_api_engine = getattr(simple_api, 'paper_trading_engine', None)
+        
+        # Check profit scraping engine connection
+        profit_scraping_connected = False
+        profit_scraping_active = False
+        profit_scraping_opportunities = 0
+        
+        if engine and hasattr(engine, 'profit_scraping_engine') and engine.profit_scraping_engine:
+            profit_scraping_connected = True
+            profit_scraping_active = getattr(engine.profit_scraping_engine, 'active', False)
+            try:
+                opportunities = engine.profit_scraping_engine.get_opportunities()
+                profit_scraping_opportunities = len(opportunities) if opportunities else 0
+            except:
+                profit_scraping_opportunities = 0
+        
+        # Check opportunity manager connection
+        opportunity_manager_connected = False
+        opportunity_manager_opportunities = 0
+        
+        if engine and hasattr(engine, 'opportunity_manager') and engine.opportunity_manager:
+            opportunity_manager_connected = True
+            try:
+                opportunities = engine.opportunity_manager.get_opportunities()
+                opportunity_manager_opportunities = len(opportunities) if opportunities else 0
+            except:
+                opportunity_manager_opportunities = 0
         
         return {
             "status": "success",
@@ -1391,17 +1510,25 @@ async def debug_engine_status():
                     "is_running": engine.is_running if engine else None,
                     "balance": engine.account.balance if engine and hasattr(engine, 'account') else None
                 },
-                "main_engine": {
-                    "exists": main_engine is not None,
-                    "type": type(main_engine).__name__ if main_engine else None,
-                    "is_running": main_engine.is_running if main_engine else None,
-                    "balance": main_engine.account.balance if main_engine and hasattr(main_engine, 'account') else None
+                "simple_api_engine": {
+                    "exists": simple_api_engine is not None,
+                    "type": type(simple_api_engine).__name__ if simple_api_engine else None,
+                    "is_running": simple_api_engine.is_running if simple_api_engine else None,
+                    "balance": simple_api_engine.account.balance if simple_api_engine and hasattr(simple_api_engine, 'account') else None
                 },
-                "engines_match": engine is main_engine,
+                "engines_match": engine is simple_api_engine,
+                "connections": {
+                    "profit_scraping_connected": profit_scraping_connected,
+                    "profit_scraping_active": profit_scraping_active,
+                    "profit_scraping_opportunities": profit_scraping_opportunities,
+                    "opportunity_manager_connected": opportunity_manager_connected,
+                    "opportunity_manager_opportunities": opportunity_manager_opportunities
+                },
                 "troubleshooting": {
                     "engine_available": engine is not None,
-                    "start_should_work": engine is not None,
-                    "recommended_action": "Force initialize if engine is None" if engine is None else "Start button should work"
+                    "connections_ready": profit_scraping_connected or opportunity_manager_connected,
+                    "signals_available": profit_scraping_opportunities > 0 or opportunity_manager_opportunities > 0,
+                    "recommended_action": "Check connections" if not (profit_scraping_connected or opportunity_manager_connected) else "Connections look good"
                 }
             }
         }

@@ -69,7 +69,7 @@ class ActiveTrade:
         return asdict(self)
 
 class ProfitScrapingEngine:
-    """Main profit scraping engine"""
+    """Main profit scraping engine - RULE COMPLIANT"""
     
     def __init__(self, exchange_client=None, paper_trading_engine=None, real_trading_engine=None):
         self.exchange_client = exchange_client
@@ -93,12 +93,12 @@ class ProfitScrapingEngine:
         self.active_opportunities: Dict[str, List[ScrapingOpportunity]] = {}
         self.active_trades: Dict[str, ActiveTrade] = {}
         
-        # Configuration
-        self.max_symbols = 100  # Increased from 5 to allow more symbols
+        # RULE COMPLIANT Configuration
+        self.max_symbols = 100  # Allow monitoring many symbols
         self.max_trades_per_symbol = 2
-        self.leverage = 10
-        self.account_balance = 10000  # Mock balance
-        self.max_risk_per_trade = 0.02  # 2% risk per trade
+        self.leverage = 10                    # RULE COMPLIANT: 10x leverage
+        self.account_balance = 10000          # RULE COMPLIANT: $10,000 virtual balance
+        self.max_risk_per_trade = 0.05       # RULE COMPLIANT: 5% risk per trade = $500
         
         # Performance tracking
         self.total_trades = 0
@@ -106,6 +106,11 @@ class ProfitScrapingEngine:
         self.total_profit = 0.0
         self.start_time = None
         
+        # RULE COMPLIANCE: Log initialization
+        logger.info("🎯 RULE COMPLIANT: Profit Scraping Engine initialized")
+        logger.info(f"🎯 RULE COMPLIANT: Leverage {self.leverage}x, Risk {self.max_risk_per_trade*100}% per trade")
+        logger.info(f"🎯 RULE COMPLIANT: Target ${self.account_balance * self.max_risk_per_trade:.0f} per position")
+    
     async def start_scraping(self, symbols: List[str]) -> bool:
         """Start profit scraping for specified symbols"""
         try:
@@ -158,27 +163,61 @@ class ProfitScrapingEngine:
             return False
     
     async def _monitoring_loop(self):
-        """Main monitoring loop"""
-        try:
-            while self.active:
-                # Update opportunities for all symbols
-                for symbol in self.monitored_symbols:
-                    await self._update_opportunities(symbol)
-                    await self._check_entry_conditions(symbol)
+        """Main monitoring loop with enhanced error handling"""
+        restart_count = 0
+        max_restarts = 3
+        
+        while self.active and restart_count < max_restarts:
+            try:
+                logger.info(f"🔍 Starting profit scraping monitoring loop (attempt {restart_count + 1})")
                 
-                # Monitor active trades
-                await self._monitor_active_trades()
+                while self.active:
+                    try:
+                        # Update opportunities for all symbols (with individual error handling)
+                        for symbol in self.monitored_symbols:
+                            try:
+                                await self._update_opportunities(symbol)
+                                await self._check_entry_conditions(symbol)
+                            except Exception as symbol_error:
+                                logger.warning(f"⚠️ Error processing {symbol}: {symbol_error}")
+                                continue  # Skip this symbol, continue with others
+                        
+                        # Monitor active trades
+                        try:
+                            await self._monitor_active_trades()
+                        except Exception as trade_error:
+                            logger.warning(f"⚠️ Error monitoring trades: {trade_error}")
+                        
+                        # Re-analyze levels periodically (every 10 minutes)
+                        if datetime.now().minute % 10 == 0:
+                            for symbol in self.monitored_symbols:
+                                try:
+                                    await self._analyze_symbol(symbol)
+                                except Exception as analyze_error:
+                                    logger.warning(f"⚠️ Error analyzing {symbol}: {analyze_error}")
+                                    continue
+                        
+                        # Wait before next iteration
+                        await asyncio.sleep(5)  # 5-second monitoring cycle
+                        
+                    except Exception as cycle_error:
+                        logger.error(f"❌ Error in monitoring cycle: {cycle_error}")
+                        # Don't break the loop for individual cycle errors
+                        await asyncio.sleep(10)  # Wait a bit longer on cycle errors
+                        continue
+                        
+            except Exception as e:
+                restart_count += 1
+                logger.error(f"❌ Profit scraping monitoring loop crashed (attempt {restart_count}/{max_restarts}): {e}")
                 
-                # Re-analyze levels periodically (every 10 minutes)
-                if datetime.now().minute % 10 == 0:
-                    for symbol in self.monitored_symbols:
-                        await self._analyze_symbol(symbol)
-                
-                # Wait before next iteration
-                await asyncio.sleep(5)  # 5-second monitoring cycle
-                
-        except Exception as e:
-            logger.error(f"Error in monitoring loop: {e}")
+                if restart_count < max_restarts:
+                    logger.info(f"🔄 Restarting profit scraping monitoring loop in 15 seconds...")
+                    await asyncio.sleep(15)
+                else:
+                    logger.error("🚨 Profit scraping monitoring loop exceeded max restarts, stopping")
+                    break
+        
+        logger.warning("🛑 Profit scraping monitoring loop stopped")
     
     async def _analyze_symbol(self, symbol: str):
         """Analyze a symbol to identify price levels and magnets"""
@@ -284,8 +323,10 @@ class ProfitScrapingEngine:
                 if distance_to_level <= 0.005:  # Within 0.5%
                     # Additional entry validation
                     if await self._validate_entry_conditions(opportunity, current_price):
-                        await self._execute_trade(opportunity, current_price)
-                        break  # Only one trade per check
+                        # DISABLED: Don't execute trades directly - provide signals to paper trading engine instead
+                        logger.info(f"🎯 PROFIT SCRAPING: Entry conditions met for {opportunity.symbol} - signal will be provided to paper trading engine")
+                        # await self._execute_trade(opportunity, current_price)  # Disabled direct execution
+                    break  # Only one trade per check
             
         except Exception as e:
             logger.error(f"Error checking entry conditions for {symbol}: {e}")
@@ -667,6 +708,63 @@ class ProfitScrapingEngine:
         except Exception as e:
             logger.error(f"Error getting opportunities: {e}")
             return {}
+    
+    async def get_ready_to_trade_signals(self) -> List[Dict[str, Any]]:
+        """Get signals that are ready to trade (meet entry conditions) for paper trading engine"""
+        try:
+            ready_signals = []
+            
+            for symbol in self.monitored_symbols:
+                try:
+                    opportunities = self.active_opportunities.get(symbol, [])
+                    if not opportunities:
+                        continue
+                    
+                    current_price = await self._get_current_price(symbol)
+                    if not current_price:
+                        continue
+                    
+                    for opportunity in opportunities:
+                        # Check if price is near the level (within 0.5%)
+                        distance_to_level = abs(current_price - opportunity.level.price) / opportunity.level.price
+                        
+                        if distance_to_level <= 0.005:  # Within 0.5%
+                            # Additional entry validation
+                            if await self._validate_entry_conditions(opportunity, current_price):
+                                # Create trading signal
+                                side = 'LONG' if opportunity.level.level_type == 'support' else 'SHORT'
+                                
+                                signal = {
+                                    'symbol': opportunity.symbol,
+                                    'side': side,
+                                    'confidence': opportunity.targets.confidence_score / 100.0,
+                                    'strategy_type': 'profit_scraping',
+                                    'signal_source': 'profit_scraping_engine',
+                                    'ml_score': opportunity.targets.confidence_score / 100.0,
+                                    'entry_reason': f"profit_scraping_{opportunity.level.level_type}",
+                                    'market_regime': 'level_based',
+                                    'volatility_regime': 'medium',
+                                    'entry_price': current_price,
+                                    'profit_target': opportunity.targets.profit_target,
+                                    'stop_loss': opportunity.targets.stop_loss,
+                                    'opportunity_score': opportunity.opportunity_score
+                                }
+                                
+                                ready_signals.append(signal)
+                                logger.info(f"🎯 PROFIT SCRAPING SIGNAL: {symbol} {side} @ ${current_price:.4f} (distance: {distance_to_level:.3f}%)")
+                                
+                except Exception as symbol_error:
+                    logger.warning(f"⚠️ Error checking ready signals for {symbol}: {symbol_error}")
+                    continue
+            
+            if ready_signals:
+                logger.info(f"📊 PROFIT SCRAPING: {len(ready_signals)} ready-to-trade signals available")
+            
+            return ready_signals
+            
+        except Exception as e:
+            logger.error(f"Error getting ready to trade signals: {e}")
+            return []
     
     def get_active_trades(self) -> List[Dict]:
         """Get all active trades"""

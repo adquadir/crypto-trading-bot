@@ -204,93 +204,123 @@ async def initialize_paper_trading_engine(config, exchange_client, opportunity_m
     return paper_engine
 
 async def initialize_components():
-    """Initialize all trading components with graceful error handling."""
-    global exchange_client, strategy_manager, risk_manager, opportunity_manager, config, realtime_scalping_manager, enhanced_signal_tracker, integrated_profit_manager, paper_trading_engine, profit_scraping_engine
+    """Initialize all trading components with RULE COMPLIANT Pure Profit Scraping Mode enforcement."""
+    global exchange_client, strategy_manager, risk_manager, opportunity_manager
+    global enhanced_signal_tracker, paper_trading_engine, profit_scraping_engine, realtime_scalping_manager
     
-    logger.info("🚀 Starting component initialization...")
+    logger.info("🎯 RULE COMPLIANT: Initializing components in Pure Profit Scraping Mode")
+    
+    # RULE ENFORCEMENT: Set environment variables to ensure Pure Mode
+    import os
+    os.environ['PURE_PROFIT_SCRAPING_MODE'] = 'true'
+    os.environ['PROFIT_SCRAPING_PRIMARY'] = 'true'
     
     try:
-        # Load configuration
+        # Load configuration with RULE COMPLIANT defaults
         config = load_config()
-        logger.info("✅ Configuration loaded")
         
-        # Initialize exchange client
-        try:
-            exchange_client = await initialize_exchange_client()
-        except Exception as e:
-            logger.error(f"❌ Exchange client initialization failed: {e}")
-            raise  # Exchange client is critical
+        # FORCE Pure Profit Scraping Mode configuration
+        config.setdefault('signal_sources', {})
+        config['signal_sources'].update({
+            'pure_profit_scraping_mode': True,         # RULE COMPLIANT: Default ON
+            'profit_scraping_primary': True,           # RULE COMPLIANT: Primary source
+            'allow_opportunity_fallback': False,       # RULE COMPLIANT: No fallbacks
+            'allow_flow_trading_fallback': False,      # RULE COMPLIANT: No fallbacks
+            'adaptive_thresholds': True,
+            'multi_timeframe_analysis': True,
+            'expanded_symbol_pool': True
+        })
         
+        # FORCE Paper trading RULE COMPLIANT settings
+        config.setdefault('paper_trading', {})
+        config['paper_trading'].update({
+            'mode': 'pure_profit_scraping',      # RULE COMPLIANT: Mode
+            'initial_balance': 10000.0,          # RULE COMPLIANT: $10,000 virtual starting capital
+            'risk_per_trade_pct': 0.05,          # RULE COMPLIANT: 5% = $500 per trade
+            'max_positions': 20,                 # RULE COMPLIANT: 20 trades starting
+            'leverage': 10.0,                    # RULE COMPLIANT: 10x leverage
+            'primary_target_dollars': 18.0,      # RULE COMPLIANT: $18 take profit (fee included)
+            'absolute_floor_dollars': 15.0,      # RULE COMPLIANT: $15 floor on reversal
+            'stop_loss_dollars': 18.0,           # RULE COMPLIANT: $18 stop loss (fee included)
+            'pure_3_rule_mode': True,            # RULE COMPLIANT: Pure 3-rule mode
+            'enabled': True
+        })
+        
+        logger.info("✅ RULE COMPLIANT: Configuration enforced for Pure Profit Scraping Mode")
+
+        # Initialize exchange client first
+        exchange_client = ExchangeClient()
+        if not exchange_client:
+            raise ValueError("Failed to initialize exchange client - CRITICAL")
+        logger.info("✅ Exchange client initialized")
+
         # Initialize strategy manager
         try:
-            strategy_manager = await initialize_strategy_manager(exchange_client)
+            strategy_manager = StrategyManager(config)
+            logger.info("✅ Strategy manager initialized")
         except Exception as e:
             logger.error(f"❌ Strategy manager initialization failed: {e}")
-            logger.warning("⚠️ Continuing without strategy manager - some features will be disabled")
             strategy_manager = None
-        
+
         # Initialize risk manager
         try:
-            risk_manager = await initialize_risk_manager(config)
+            risk_manager = RiskManager(config)
+            logger.info("✅ Risk manager initialized")
         except Exception as e:
             logger.error(f"❌ Risk manager initialization failed: {e}")
-            logger.warning("⚠️ Continuing without risk manager - some features will be disabled")
             risk_manager = None
-        
+            
         # Initialize enhanced signal tracker
         try:
-            enhanced_signal_tracker = await initialize_signal_tracker()
+            from src.signals.enhanced_signal_tracker import EnhancedSignalTracker
+            enhanced_signal_tracker = EnhancedSignalTracker()
+            logger.info("✅ Enhanced signal tracker initialized")
         except Exception as e:
-            logger.error(f"❌ Signal tracker initialization failed: {e}")
-            logger.warning("⚠️ Continuing without signal tracker - some features will be disabled")
+            logger.error(f"❌ Enhanced signal tracker initialization failed: {e}")
             enhanced_signal_tracker = None
 
-        # Initialize opportunity manager (requires multiple components)
+        # Initialize opportunity manager (FALLBACK ONLY - Not primary in Pure Mode)
         try:
-            if all([exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker]):
-                opportunity_manager = await initialize_opportunity_manager(
-                    exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker
-                )
-            else:
-                logger.warning("⚠️ Skipping opportunity manager - missing required dependencies")
-                opportunity_manager = None
+            opportunity_manager = await initialize_opportunity_manager(exchange_client, strategy_manager, risk_manager, enhanced_signal_tracker)
+            logger.info("✅ Opportunity manager initialized (FALLBACK ONLY)")
         except Exception as e:
             logger.error(f"❌ Opportunity manager initialization failed: {e}")
-            logger.warning("⚠️ Continuing without opportunity manager - some signal sources will be disabled")
+            logger.warning("⚠️ Continuing without opportunity manager - Pure Profit Scraping Mode doesn't require it")
             opportunity_manager = None
 
         # Initialize realtime scalping manager
         try:
-            if all([opportunity_manager, exchange_client]):
-                logger.info("Initializing realtime scalping manager...")
-                from src.signals.realtime_scalping_manager import RealtimeScalpingManager
-                from src.api.connection_manager import ConnectionManager
-                
-                connection_manager = ConnectionManager()
-                realtime_scalping_manager = RealtimeScalpingManager(opportunity_manager, exchange_client, connection_manager)
-                logger.info("✅ Realtime scalping manager initialized successfully")
-            else:
-                logger.warning("⚠️ Skipping realtime scalping manager - missing dependencies")
-                realtime_scalping_manager = None
+            from src.api.realtime_scalping_manager import RealtimeScalpingManager
+            
+            realtime_scalping_manager = RealtimeScalpingManager(
+                exchange_client=exchange_client,
+                opportunity_manager=opportunity_manager
+            )
+            logger.info("✅ Realtime scalping manager initialized")
+            
+        except ImportError:
+            logger.warning("⚠️ RealtimeScalpingManager not available - continuing without it")
+            realtime_scalping_manager = None
         except Exception as e:
             logger.error(f"❌ Realtime scalping manager initialization failed: {e}")
             logger.warning("⚠️ Continuing without realtime scalping manager")
+
             realtime_scalping_manager = None
         
-        # Initialize enhanced paper trading engine FIRST (without profit scraping connection)
+        # CRITICAL: Initialize paper trading engine FIRST (without profit scraping connection)
         try:
             paper_trading_engine = await initialize_paper_trading_engine(
                 config, exchange_client, opportunity_manager, None  # No profit scraping engine yet
             )
+            logger.info("✅ Paper trading engine initialized")
             
         except Exception as e:
-            logger.error(f"❌ Paper trading engine initialization failed: {e}")
-            logger.warning("⚠️ Continuing without paper trading engine - paper trading will be disabled")
-            paper_trading_engine = None
+            logger.error(f"❌ CRITICAL: Paper trading engine initialization failed: {e}")
+            raise ValueError("Paper trading engine is REQUIRED for Pure Profit Scraping Mode")
 
-        # Initialize profit scraping engine connected to paper trading engine
+        # CRITICAL: Initialize profit scraping engine - MUST SUCCEED
         try:
-            logger.info("🎯 Starting profit scraping engine initialization...")
+            logger.info("🎯 CRITICAL: Starting profit scraping engine initialization...")
             logger.info(f"📊 Exchange client available: {exchange_client is not None}")
             logger.info(f"📊 Paper trading engine available: {paper_trading_engine is not None}")
             
@@ -298,84 +328,55 @@ async def initialize_components():
                 exchange_client, paper_trading_engine
             )
             
-            # Connect paper trading engine to profit scraping engine (bidirectional)
+            if not profit_scraping_engine:
+                raise ValueError("Profit scraping engine initialization returned None")
+                
+            # CRITICAL: Connect paper trading engine to profit scraping engine (bidirectional)
             if paper_trading_engine and profit_scraping_engine:
                 paper_trading_engine.profit_scraping_engine = profit_scraping_engine
-                logger.info("✅ Bidirectional connection established between paper trading and profit scraping engines")
+                
+                # CRITICAL: Start profit scraping immediately
+                symbols_to_monitor = [
+                    'BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 
+                    'BCHUSDT', 'LTCUSDT', 'TRXUSDT', 'ETCUSDT', 'LINKUSDT',
+                    'XLMUSDT', 'XMRUSDT', 'DASHUSDT', 'ZECUSDT', 'XTZUSDT',
+                    'BNBUSDT', 'ATOMUSDT', 'ONTUSDT', 'IOTAUSDT', 'BATUSDT', 'VETUSDT'
+                ]
+                
+                scraping_started = await profit_scraping_engine.start_scraping(symbols_to_monitor)
+                
+                if not scraping_started:
+                    raise ValueError("Failed to start profit scraping - CRITICAL")
+                    
+                if not profit_scraping_engine.active:
+                    raise ValueError("Profit scraping engine is not active after start - CRITICAL")
+                
+                logger.info("✅ CRITICAL: Bidirectional connection established and profit scraping ACTIVE")
+                
+                # Validate profit scraping is actually working
+                if len(profit_scraping_engine.monitored_symbols) == 0:
+                    raise ValueError("Profit scraping engine has no monitored symbols - CRITICAL")
+                    
+                logger.info(f"✅ CRITICAL: Profit scraping monitoring {len(profit_scraping_engine.monitored_symbols)} symbols")
+                
             else:
-                logger.warning(f"⚠️ Cannot establish bidirectional connection - paper_trading_engine: {paper_trading_engine is not None}, profit_scraping_engine: {profit_scraping_engine is not None}")
+                raise ValueError(f"Cannot establish bidirectional connection - paper_trading_engine: {paper_trading_engine is not None}, profit_scraping_engine: {profit_scraping_engine is not None}")
                 
         except Exception as e:
-            logger.error(f"❌ Profit scraping engine initialization failed: {e}")
-            logger.error(f"❌ Error type: {type(e)}")
-            import traceback
-            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
-            logger.warning("⚠️ Continuing without profit scraping engine - profit scraping signals will be disabled")
-            profit_scraping_engine = None
-        
-        # Initialize monitoring system (optional)
-        try:
-            logger.info("Initializing monitoring system...")
-            db = Database()
-            monitor = initialize_monitor(db)
-            
-            # Start monitoring with available components
-            components = {
-                'exchange_client': exchange_client,
-                'strategy_manager': strategy_manager,
-                'risk_manager': risk_manager,
-                'opportunity_manager': opportunity_manager,
-                'realtime_scalping_manager': realtime_scalping_manager,
-                'enhanced_signal_tracker': enhanced_signal_tracker,
-                'integrated_profit_manager': integrated_profit_manager,
-                'paper_trading_engine': paper_trading_engine
-            }
-            
-            await monitor.start_monitoring(components)
-            logger.info("✅ Monitoring system initialized")
-        except Exception as e:
-            logger.error(f"❌ Monitoring system initialization failed: {e}")
-            logger.warning("⚠️ Continuing without monitoring system")
-        
-        # Initialize integrated profit manager (optional)
-        try:
-            if all([exchange_client, risk_manager]):
-                logger.info("Initializing integrated profit manager...")
-                from src.strategies.flow_trading.integrated_profit_manager import IntegratedProfitManager
-                
-                integrated_profit_manager = IntegratedProfitManager(exchange_client, risk_manager)
-                logger.info("✅ Integrated profit manager initialized")
-            else:
-                logger.warning("⚠️ Skipping integrated profit manager - missing dependencies")
-                integrated_profit_manager = None
-        except Exception as e:
-            logger.error(f"❌ Integrated profit manager initialization failed: {e}")
-            logger.warning("⚠️ Continuing without integrated profit manager")
-            integrated_profit_manager = None
-        
-        # Final validation (relaxed)
-        await validate_all_components()
-        
-        logger.info("🎉 COMPONENT INITIALIZATION COMPLETED!")
-        
-        # Log final status
-        logger.info("📊 FINAL COMPONENT STATUS:")
-        logger.info(f"   Exchange Client: {'✅' if exchange_client else '❌'}")
-        logger.info(f"   Strategy Manager: {'✅' if strategy_manager else '❌'}")
-        logger.info(f"   Risk Manager: {'✅' if risk_manager else '❌'}")
-        logger.info(f"   Opportunity Manager: {'✅' if opportunity_manager else '❌'}")
-        logger.info(f"   Profit Scraping Engine: {'✅' if profit_scraping_engine else '❌'}")
-        logger.info(f"   Paper Trading Engine: {'✅' if paper_trading_engine else '❌'}")
-        
+            logger.error(f"❌ CRITICAL: Profit scraping engine initialization failed: {e}")
+            raise ValueError(f"RULE VIOLATION: Profit scraping engine MUST be active in Pure Profit Scraping Mode: {e}")
+
+        # FINAL VALIDATION: Ensure profit scraping is active
         if profit_scraping_engine and profit_scraping_engine.active:
             logger.info("🎯 PROFIT SCRAPING ENGINE IS ACTIVE AND RUNNING!")
         else:
-            logger.error("🚨 PROFIT SCRAPING ENGINE IS NOT ACTIVE - THIS IS THE ROOT CAUSE!")
+            raise ValueError("🚨 RULE VIOLATION: PROFIT SCRAPING ENGINE IS NOT ACTIVE!")
+        
+        logger.info("🎯 RULE COMPLIANT: All components initialized successfully in Pure Profit Scraping Mode")
         
     except Exception as e:
         logger.error(f"❌ Critical error during component initialization: {e}")
-        # Don't raise - allow API to start with limited functionality
-        logger.warning("⚠️ API will start with limited functionality")
+        raise  # Don't continue with broken Pure Profit Scraping Mode
 
 async def validate_all_components():
     """Final validation with graceful handling of missing components."""
