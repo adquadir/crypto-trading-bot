@@ -534,7 +534,8 @@ class ProfitScrapingEngine:
                     'confidence': signal['confidence'],
                     'signal_id': f"profit_scraping_{opportunity.symbol}_{int(datetime.now().timestamp())}",  # Generate unique signal ID
                     'stop_loss': opportunity.targets.stop_loss,  # Add stop loss
-                    'take_profit': opportunity.targets.profit_target  # Add take profit
+                    'take_profit': opportunity.targets.profit_target,  # Add take profit
+                    'optimal_leverage': self.leverage  # Add leverage (10x)
                 }
                 
                 position_id = await self.paper_trading_engine.execute_virtual_trade(
