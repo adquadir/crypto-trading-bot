@@ -176,7 +176,8 @@ class PaperTradingEngine:
             
             # Calculate fees
             fee_rate = self.fees.get('rate', 0.0004)  # 0.04%
-            fees = position_size_usd * fee_rate
+            notional_value = position_size_usd * leverage
+            fees = notional_value * fee_rate  # Fee on full notional value
             
             # Check if we have enough balance
             required_margin = position_size_usd / leverage
@@ -252,7 +253,8 @@ class PaperTradingEngine:
             
             # Calculate fees for closing
             close_fee_rate = self.fees.get('close_rate', 0.0004)
-            close_fees = (executed_price * position.size) * close_fee_rate
+            position_notional_value = position.size * position.entry_price * position.leverage
+            close_fees = position_notional_value * close_fee_rate  # Fee on full notional value
             
             # Net PnL after fees
             net_pnl = pnl_usdt - close_fees
