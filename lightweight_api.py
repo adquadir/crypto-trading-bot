@@ -370,7 +370,8 @@ async def initialize_components_background():
         components['profit_scraping_engine'] = ProfitScrapingEngine(
             exchange_client=components['exchange_client'],
             paper_trading_engine=components['paper_trading_engine'],
-            real_trading_engine=None
+            real_trading_engine=None,
+            config=config  # Pass the config for rule-based targets
         )
         
         # Profit scraping engine is already connected via constructor

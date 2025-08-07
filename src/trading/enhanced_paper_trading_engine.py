@@ -34,6 +34,10 @@ class VirtualPosition:
     strategy: str = "unknown"
     signal_id: Optional[str] = None
     status: str = "active"  # active, closed, liquidated
+    # Floor protection fields
+    absolute_floor_profit: float = 7.0  # $7 net floor
+    highest_profit_ever: float = 0.0
+    profit_floor_activated: bool = False
 
 @dataclass
 class VirtualTrade:
@@ -186,6 +190,15 @@ class EnhancedPaperTradingEngine:
             
             # Create virtual position
             position_id = f"paper_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            
+            # Get floor configuration from config
+            paper_config = self.config.get('paper_trading', {})
+            absolute_floor_dollars = float(paper_config.get('absolute_floor_dollars', 15.0))
+            # Convert gross floor to net floor (subtract fees)
+            fee_rate = self.fees.get('rate', 0.0004)
+            total_fees = position_size_usd * fee_rate * 2  # Entry + exit fees
+            net_floor = absolute_floor_dollars - total_fees
+            
             position = VirtualPosition(
                 position_id=position_id,
                 symbol=symbol,
@@ -199,7 +212,10 @@ class EnhancedPaperTradingEngine:
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 strategy=strategy,
-                signal_id=signal_id
+                signal_id=signal_id,
+                absolute_floor_profit=net_floor,  # Set net floor value
+                highest_profit_ever=0.0,
+                profit_floor_activated=False
             )
             
             # Update balance
@@ -377,18 +393,40 @@ class EnhancedPaperTradingEngine:
                     
                     position.unrealized_pnl = pnl
                     
+                    # Update highest profit ever for floor protection
+                    position.highest_profit_ever = max(position.highest_profit_ever, pnl)
+                    
                     # Check for TP/SL hits
                     close_reason = None
                     
-                    if position.take_profit:
-                        if ((position.side == "LONG" and current_price >= position.take_profit) or
-                            (position.side == "SHORT" and current_price <= position.take_profit)):
-                            close_reason = "tp_hit"
+                    # RULE 1: PRIMARY TARGET ($18 gross = $17.60 net profit)
+                    if pnl >= 17.60:  # $18 gross profit target
+                        close_reason = "tp_hit"
                     
-                    if position.stop_loss:
-                        if ((position.side == "LONG" and current_price <= position.stop_loss) or
-                            (position.side == "SHORT" and current_price >= position.stop_loss)):
-                            close_reason = "sl_hit"
+                    # RULE 2: FLOOR PROTECTION ($15 gross = $14.60 net floor)
+                    elif position.highest_profit_ever >= 14.60:  # $15 gross floor
+                        if not position.profit_floor_activated:
+                            position.profit_floor_activated = True
+                            logger.info(f"🛡️ FLOOR ACTIVATED: {position.symbol} reached ${position.highest_profit_ever:.2f}")
+                        
+                        if pnl < 14.60:  # $15 gross floor
+                            close_reason = "absolute_floor_15_dollars"
+                    
+                    # RULE 3: STOP LOSS ($18 gross = $17.60 net loss)
+                    elif pnl <= -17.60:  # $18 gross loss
+                        close_reason = "sl_hit"
+                    
+                    # Legacy TP/SL checks (fallback)
+                    if not close_reason:
+                        if position.take_profit:
+                            if ((position.side == "LONG" and current_price >= position.take_profit) or
+                                (position.side == "SHORT" and current_price <= position.take_profit)):
+                                close_reason = "tp_hit"
+                        
+                        if position.stop_loss:
+                            if ((position.side == "LONG" and current_price <= position.stop_loss) or
+                                (position.side == "SHORT" and current_price >= position.stop_loss)):
+                                close_reason = "sl_hit"
                     
                     # Check for liquidation (simplified)
                     liquidation_price = self._calculate_liquidation_price(position)

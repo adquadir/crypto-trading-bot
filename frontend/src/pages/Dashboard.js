@@ -130,7 +130,9 @@ const Dashboard = () => {
       ]);
 
       setStats(statsResponse.data.stats || stats);
-      setPositions(positionsResponse.data.positions || []);
+      // API returns direct array of positions
+      const positionsArray = positionsResponse.data;
+      setPositions(Array.isArray(positionsArray) ? positionsArray : []);
       setError(null);
       setRetryCount(0);
       setLastUpdated(new Date());

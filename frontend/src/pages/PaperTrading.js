@@ -191,20 +191,20 @@ const PaperTrading = () => {
       if (statusRes.ok) {
         const statusData = await statusRes.json();
         console.log("✅ Status data:", statusData);
-        if (statusData.data) {
-          // Fix for virtual_balance showing 0 due to initialization issue
-          const virtualBalance = statusData.data.virtual_balance === 0.0 && statusData.data.initial_balance > 0
-            ? statusData.data.initial_balance 
-            : statusData.data.virtual_balance;
-          
-          setStatus({
-            ...statusData.data,
-            virtual_balance: virtualBalance
-          });
-          
-          // Set running state from backend, not local state
-          setIsRunning(statusData.data.enabled || false);
-        }
+        
+        // API returns data directly, not wrapped in statusData.data
+        // Fix for virtual_balance showing 0 due to initialization issue
+        const virtualBalance = statusData.balance === 0.0 && statusData.initial_balance > 0
+          ? statusData.initial_balance 
+          : statusData.balance;
+        
+        setStatus({
+          ...statusData,
+          virtual_balance: virtualBalance
+        });
+        
+        // Set running state from backend - use is_running field
+        setIsRunning(statusData.is_running || false);
       } else {
         console.error("❌ Status request failed:", statusRes.status, statusRes.statusText);
       }
@@ -212,21 +212,42 @@ const PaperTrading = () => {
       if (positionsRes.ok) {
         const positionsData = await positionsRes.json();
         console.log("📊 Positions data:", positionsData);
-        console.log("📊 Positions array:", positionsData.data);
-        console.log("📊 Number of positions:", positionsData.data?.length || 0);
-        setPositions(positionsData.data || []);
+        console.log("📊 Positions array length:", Array.isArray(positionsData) ? positionsData.length : 0);
+        // API returns direct array of positions
+        const positionsArray = Array.isArray(positionsData) ? positionsData : [];
+        
+        // Calculate age for each position
+        const positionsWithAge = positionsArray.map(position => {
+          const entryTime = new Date(position.entry_time);
+          const now = new Date();
+          const ageMinutes = Math.floor((now - entryTime) / (1000 * 60));
+          
+          return {
+            ...position,
+            age_minutes: ageMinutes
+          };
+        });
+        
+        setPositions(positionsWithAge);
       } else {
         console.error("❌ Positions request failed:", positionsRes.status, positionsRes.statusText);
       }
 
       if (completedTradesRes.ok) {
         const completedTradesData = await completedTradesRes.json();
-        setCompletedTrades(completedTradesData.trades || []);
+        // API returns direct array, not wrapped in trades object
+        const tradesArray = Array.isArray(completedTradesData) ? completedTradesData : [];
+        setCompletedTrades(tradesArray);
+      } else {
+        console.error("❌ Completed trades request failed:", completedTradesRes.status, completedTradesRes.statusText);
       }
 
       if (performanceRes.ok) {
         const performanceData = await performanceRes.json();
-        setPerformance(performanceData.data || {});
+        // API returns performance data directly, not wrapped in data object
+        setPerformance(performanceData || {});
+      } else {
+        console.error("❌ Performance request failed:", performanceRes.status, performanceRes.statusText);
       }
 
       if (strategiesRes.ok) {
@@ -1107,11 +1128,11 @@ const PaperTrading = () => {
                                 </TableCell>
                                 <TableCell>
                                   <Chip
-                                    label={getSignalSourceDisplay(position.signal_source)}
-                                    color={getSignalSourceColor(position.signal_source)}
+                                    label={getSignalSourceDisplay(position.strategy)}
+                                    color={getSignalSourceColor(position.strategy)}
                                     size="small"
                                     variant="outlined"
-                                    title={`${getSignalSourceDisplay(position.signal_source)} - ${position.entry_reason || 'No details available'}`}
+                                    title={`${getSignalSourceDisplay(position.strategy)} - ${position.entry_reason || 'No details available'}`}
                                   />
                                 </TableCell>
                                 <TableCell align="right">
@@ -1207,8 +1228,16 @@ const PaperTrading = () => {
                         </TableHead>
                         <TableBody>
                           {completedTrades.map((trade, index) => {
-                            const isWin = trade.pnl > 0;
+                            const isWin = trade.pnl_usdt > 0;  // Use pnl_usdt instead of pnl
                             const pnlColor = isWin ? 'success.main' : 'error.main';
+                            
+                            // Calculate duration from entry and exit times
+                            let durationMinutes = null;
+                            if (trade.entry_time && trade.exit_time) {
+                              const entryTime = new Date(trade.entry_time);
+                              const exitTime = new Date(trade.exit_time);
+                              durationMinutes = Math.floor((exitTime - entryTime) / (1000 * 60));
+                            }
                             
                             return (
                               <TableRow key={index}>
@@ -1226,11 +1255,11 @@ const PaperTrading = () => {
                                 </TableCell>
                                 <TableCell>
                                   <Chip
-                                    label={getSignalSourceDisplay(trade.signal_source)}
-                                    color={getSignalSourceColor(trade.signal_source)}
+                                    label={getSignalSourceDisplay(trade.strategy)}  // Use strategy instead of signal_source
+                                    color={getSignalSourceColor(trade.strategy)}
                                     size="small"
                                     variant="outlined"
-                                    title={`${getSignalSourceDisplay(trade.signal_source)} - ${trade.entry_reason || 'No details available'}`}
+                                    title={`${getSignalSourceDisplay(trade.strategy)} - ${trade.exit_reason || 'No details available'}`}
                                   />
                                 </TableCell>
                                 <TableCell align="right">
@@ -1249,7 +1278,7 @@ const PaperTrading = () => {
                                     color={pnlColor}
                                     fontWeight="bold"
                                   >
-                                    ${trade.pnl?.toFixed(2) || '0.00'}
+                                    ${trade.pnl_usdt?.toFixed(2) || '0.00'}  {/* Use pnl_usdt */}
                                     <br />
                                     <Typography variant="caption" component="span">
                                       ({trade.pnl_pct?.toFixed(1)}%)
@@ -1258,12 +1287,12 @@ const PaperTrading = () => {
                                 </TableCell>
                                 <TableCell align="right">
                                   <Typography variant="body2" color="text.secondary">
-                                    ${trade.fees?.toFixed(2) || '0.00'}
+                                    ${trade.fees_total?.toFixed(2) || '0.00'}  {/* Use fees_total */}
                                   </Typography>
                                 </TableCell>
                                 <TableCell align="right">
                                   <Typography variant="caption">
-                                    {trade.duration_minutes ? formatDuration(trade.duration_minutes) : 'N/A'}
+                                    {durationMinutes ? formatDuration(durationMinutes) : 'N/A'}
                                   </Typography>
                                 </TableCell>
                                 <TableCell align="center">

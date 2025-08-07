@@ -80,22 +80,32 @@ const Positions = () => {
       setLoading(true);
       
       // Fetch positions
-      const positionsResponse = await axios.get(`${config.API_BASE_URL}/api/v1/positions`, {
+      const positionsResponse = await axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/positions`, {
         timeout: 5000
       });
       
       // Fetch trading status
-      const statusResponse = await axios.get(`${config.API_BASE_URL}/api/v1/status`, {
+      const statusResponse = await axios.get(`${config.API_BASE_URL}/api/v1/paper-trading/status`, {
         timeout: 5000
       });
       
-      if (positionsResponse.data.status === 'success') {
-        setPositions(positionsResponse.data.data || []);
-        setPositionsSummary(positionsResponse.data.summary);
+      if (positionsResponse.status === 200) {
+        // API returns direct array of positions
+        const positionsArray = positionsResponse.data;
+        setPositions(Array.isArray(positionsArray) ? positionsArray : []);
+        // Calculate summary from positions
+        if (Array.isArray(positionsArray)) {
+          const summary = {
+            total_positions: positionsArray.length,
+            total_unrealized_pnl: positionsArray.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0)
+          };
+          setPositionsSummary(summary);
+        }
       }
       
-      if (statusResponse.data.status === 'success') {
-        setTradingStatus(statusResponse.data.data);
+      if (statusResponse.status === 200) {
+        // API returns direct status object
+        setTradingStatus(statusResponse.data);
       }
       
       setError(null);

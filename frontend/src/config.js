@@ -31,7 +31,7 @@ const config = {
     WS_BASE_URL: getWsBaseUrl(),
     ENDPOINTS: {
         STATS: '/api/v1/stats',
-        POSITIONS: '/api/v1/positions',
+        POSITIONS: '/api/v1/paper-trading/positions',
         STRATEGIES: '/api/v1/strategies',
         SETTINGS: '/api/v1/settings',
         SIGNALS: '/api/v1/opportunities',  // Use opportunities as signals
