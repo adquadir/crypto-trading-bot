@@ -118,10 +118,10 @@ class ProfitScrapingEngine:
             leverage = self.leverage
             notional_value = position_size_usd * leverage
             
-            # Calculate fees (0.04% per side)
+            # Calculate fees (0.04% per side on notional value)
             fee_rate = 0.0004
-            entry_fee = position_size_usd * fee_rate
-            exit_fee = position_size_usd * fee_rate
+            entry_fee = notional_value * fee_rate  # Fee on full notional value
+            exit_fee = notional_value * fee_rate   # Fee on full notional value
             total_fees = entry_fee + exit_fee
             
             # RULE-BASED TARGET CALCULATIONS

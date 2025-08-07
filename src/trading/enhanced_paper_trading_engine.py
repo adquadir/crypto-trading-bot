@@ -180,7 +180,8 @@ class EnhancedPaperTradingEngine:
             
             # Calculate fees
             fee_rate = self.fees.get('rate', 0.0004)  # 0.04%
-            fees = position_size_usd * fee_rate
+            notional_value = position_size_usd * leverage
+            fees = notional_value * fee_rate  # Fee on full notional value
             
             # Check if we have enough balance
             required_margin = position_size_usd / leverage
@@ -194,9 +195,10 @@ class EnhancedPaperTradingEngine:
             # Get floor configuration from config
             paper_config = self.config.get('paper_trading', {})
             absolute_floor_dollars = float(paper_config.get('absolute_floor_dollars', 15.0))
-            # Convert gross floor to net floor (subtract fees)
+            # Convert gross floor to net floor (subtract fees on notional value)
             fee_rate = self.fees.get('rate', 0.0004)
-            total_fees = position_size_usd * fee_rate * 2  # Entry + exit fees
+            notional_value = position_size_usd * leverage
+            total_fees = notional_value * fee_rate * 2  # Entry + exit fees on notional value
             net_floor = absolute_floor_dollars - total_fees
             
             position = VirtualPosition(
@@ -268,7 +270,8 @@ class EnhancedPaperTradingEngine:
             
             # Calculate fees for closing
             close_fee_rate = self.fees.get('close_rate', 0.0004)
-            close_fees = (executed_price * position.size) * close_fee_rate
+            notional_value = position_size_usd * position.leverage
+            close_fees = notional_value * close_fee_rate  # Fee on full notional value
             
             # Net PnL after fees
             net_pnl = pnl_usdt - close_fees
