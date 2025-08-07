@@ -270,7 +270,8 @@ class EnhancedPaperTradingEngine:
             
             # Calculate fees for closing
             close_fee_rate = self.fees.get('close_rate', 0.0004)
-            notional_value = position_size_usd * position.leverage
+            position_value = executed_price * position.size
+            notional_value = position_value * position.leverage
             close_fees = notional_value * close_fee_rate  # Fee on full notional value
             
             # Net PnL after fees
@@ -399,37 +400,40 @@ class EnhancedPaperTradingEngine:
                     # Update highest profit ever for floor protection
                     position.highest_profit_ever = max(position.highest_profit_ever, pnl)
                     
-                    # Check for TP/SL hits
+                    # Calculate exit fees for this position
+                    exit_fee_rate = self.fees.get('close_rate', 0.0004)
+                    position_notional_value = position.size * current_price * position.leverage
+                    exit_fees = position_notional_value * exit_fee_rate
+                    
+                    # Calculate net PnL after all fees (entry + exit)
+                    total_fees = position.fees_paid + exit_fees
+                    net_pnl = pnl - total_fees
+                    
+                    # Use per-position rule-based targets (calculated by profit scraping engine)
+                    # These targets already account for fees and are specific to this position
+                    net_target = position.take_profit if position.take_profit else 0
+                    net_floor = position.absolute_floor_profit
+                    net_stop_loss = -(position.stop_loss) if position.stop_loss else 0  # Negative for stop loss
+                    
+                    # Check for TP/SL hits using per-position rule-based thresholds
                     close_reason = None
                     
-                    # RULE 1: PRIMARY TARGET ($18 gross = $17.60 net profit)
-                    if pnl >= 17.60:  # $18 gross profit target
+                    # RULE 1: PRIMARY TARGET (per-position take profit)
+                    if net_pnl >= net_target and net_target > 0:
                         close_reason = "tp_hit"
                     
-                    # RULE 2: FLOOR PROTECTION ($15 gross = $14.60 net floor)
-                    elif position.highest_profit_ever >= 14.60:  # $15 gross floor
+                    # RULE 2: FLOOR PROTECTION (per-position floor)
+                    elif position.highest_profit_ever >= net_floor and net_floor > 0:
                         if not position.profit_floor_activated:
                             position.profit_floor_activated = True
                             logger.info(f"🛡️ FLOOR ACTIVATED: {position.symbol} reached ${position.highest_profit_ever:.2f}")
                         
-                        if pnl < 14.60:  # $15 gross floor
+                        if net_pnl < net_floor:
                             close_reason = "absolute_floor_15_dollars"
                     
-                    # RULE 3: STOP LOSS ($18 gross = $17.60 net loss)
-                    elif pnl <= -17.60:  # $18 gross loss
+                    # RULE 3: STOP LOSS (per-position stop loss)
+                    elif net_pnl <= net_stop_loss and net_stop_loss < 0:
                         close_reason = "sl_hit"
-                    
-                    # Legacy TP/SL checks (fallback)
-                    if not close_reason:
-                        if position.take_profit:
-                            if ((position.side == "LONG" and current_price >= position.take_profit) or
-                                (position.side == "SHORT" and current_price <= position.take_profit)):
-                                close_reason = "tp_hit"
-                        
-                        if position.stop_loss:
-                            if ((position.side == "LONG" and current_price <= position.stop_loss) or
-                                (position.side == "SHORT" and current_price >= position.stop_loss)):
-                                close_reason = "sl_hit"
                     
                     # Check for liquidation (simplified)
                     liquidation_price = self._calculate_liquidation_price(position)
