@@ -874,11 +874,37 @@ class EnhancedPaperTradingEngine:
                 if self.opportunity_manager:
                     try:
                         opportunities = self.opportunity_manager.get_opportunities()
-                        for symbol, opp_list in opportunities.items():
-                            for opp in opp_list:
+                        if isinstance(opportunities, dict):
+                            # Legacy/dict shape: { symbol: [opportunities...] }
+                            for symbol, opp_list in opportunities.items():
+                                for opp in opp_list:
+                                    if not opp.get('tradable', True):
+                                        continue
+                                    direction = opp.get('direction') or ('LONG' if opp.get('entry', 0) <= opp.get('take_profit', 0) else 'SHORT')
+                                    unified = {
+                                        'symbol': symbol,
+                                        'direction': direction,
+                                        'entry_price': opp.get('entry') or opp.get('entry_price'),
+                                        'take_profit': opp.get('take_profit'),
+                                        'stop_loss': opp.get('stop_loss'),
+                                        'confidence': opp.get('confidence', opp.get('confidence_score', 0.6)),
+                                        'strategy': opp.get('strategy', 'opportunity_manager'),
+                                        'signal_source': 'opportunity_manager',
+                                        'signal_id': f"oppmgr_{symbol}_{int(time.time())}",
+                                        'tp_net_usd': opp.get('tp_net_usd', 0.0),
+                                        'sl_net_usd': opp.get('sl_net_usd', 0.0),
+                                        'floor_net_usd': opp.get('floor_net_usd', 0.0),
+                                        'optimal_leverage': float(self.config.get('leverage', 10.0))
+                                    }
+                                    opp_signals.append(unified)
+                        elif isinstance(opportunities, list):
+                            # New/list shape: [opportunity, ...]
+                            for opp in opportunities:
                                 if not opp.get('tradable', True):
                                     continue
-                                # Build unified signal from opportunity
+                                symbol = opp.get('symbol')
+                                if not symbol:
+                                    continue
                                 direction = opp.get('direction') or ('LONG' if opp.get('entry', 0) <= opp.get('take_profit', 0) else 'SHORT')
                                 unified = {
                                     'symbol': symbol,
@@ -890,13 +916,14 @@ class EnhancedPaperTradingEngine:
                                     'strategy': opp.get('strategy', 'opportunity_manager'),
                                     'signal_source': 'opportunity_manager',
                                     'signal_id': f"oppmgr_{symbol}_{int(time.time())}",
-                                    # Net-dollar targets if present (fallback 0)
                                     'tp_net_usd': opp.get('tp_net_usd', 0.0),
                                     'sl_net_usd': opp.get('sl_net_usd', 0.0),
                                     'floor_net_usd': opp.get('floor_net_usd', 0.0),
                                     'optimal_leverage': float(self.config.get('leverage', 10.0))
                                 }
                                 opp_signals.append(unified)
+                        else:
+                            logger.warning("OpportunityManager.get_opportunities() returned unsupported type")
                     except Exception as e:
                         logger.warning(f"Error fetching opportunities: {e}")
 
