@@ -126,6 +126,11 @@ class ProfitScrapingEngine:
             
             # RULE-BASED TARGET CALCULATIONS
             
+            # Define gross targets for price calculations
+            gross_target = self.primary_target_dollars
+            gross_stop = self.stop_loss_dollars
+            gross_floor = self.absolute_floor_dollars
+            
             # Set net-dollar targets to match required rules (paper trading engine will handle fee calculation)
             net_target = 17.60  # Required net take profit
             net_stop = 17.60    # Required net stop loss  
