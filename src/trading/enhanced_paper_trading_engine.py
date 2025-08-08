@@ -125,21 +125,17 @@ class EnhancedPaperTradingEngine:
         logger.info(f"📊 Paper Trading Engine initialized - Virtual Balance: ${self.virtual_balance:,.2f}")
 
     async def start(self):
-        """Start the paper trading engine."""
+        """Start the paper trading engine and background loops."""
         if self.running:
-            logger.warning("Paper trading engine already running")
             return
-            
         self.running = True
-        self.start_time = datetime.now()  # Set start time
-        logger.info("🚀 Starting Live Paper Trading Engine - ML Learning Mode")
-        
-        # Start background tasks
-        asyncio.create_task(self._position_monitoring_loop())
+        self.start_time = datetime.now()
+        # Start monitoring and performance loops
+        asyncio.create_task(self._monitor_active_trades())
         asyncio.create_task(self._performance_tracking_loop())
         asyncio.create_task(self._learning_data_collection_loop())
-        
-        logger.info("✅ Paper Trading Engine started - Ready for ML learning!")
+        # NEW: start unified signal collection loop
+        asyncio.create_task(self._signal_collection_loop())
 
     async def stop(self):
         """Stop the paper trading engine."""
@@ -852,3 +848,77 @@ class EnhancedPaperTradingEngine:
         
         winning_trades = sum(1 for trade in self.completed_trades if trade.pnl_usdt > 0)
         return winning_trades / len(self.completed_trades) * 100 
+
+    async def _signal_collection_loop(self):
+        """Collect signals from profit scraping and opportunity manager and execute trades."""
+        logger.info("🔄 Starting unified signal collection loop")
+        poll_interval_sec = 5
+        while self.running:
+            try:
+                # Respect max open positions
+                max_positions = int(self.config.get('max_positions', 20))
+                if len(self.virtual_positions) >= max_positions:
+                    await asyncio.sleep(poll_interval_sec)
+                    continue
+
+                # Collect from profit scraping engine if available
+                profit_signals: List[Dict[str, Any]] = []
+                if hasattr(self, 'profit_scraping_engine') and self.profit_scraping_engine:
+                    try:
+                        profit_signals = await self.profit_scraping_engine.get_ready_to_trade_signals()
+                    except Exception as e:
+                        logger.warning(f"Error fetching profit scraping signals: {e}")
+
+                # Collect from opportunity manager if available
+                opp_signals: List[Dict[str, Any]] = []
+                if self.opportunity_manager:
+                    try:
+                        opportunities = self.opportunity_manager.get_opportunities()
+                        for symbol, opp_list in opportunities.items():
+                            for opp in opp_list:
+                                if not opp.get('tradable', True):
+                                    continue
+                                # Build unified signal from opportunity
+                                direction = opp.get('direction') or ('LONG' if opp.get('entry', 0) <= opp.get('take_profit', 0) else 'SHORT')
+                                unified = {
+                                    'symbol': symbol,
+                                    'direction': direction,
+                                    'entry_price': opp.get('entry') or opp.get('entry_price'),
+                                    'take_profit': opp.get('take_profit'),
+                                    'stop_loss': opp.get('stop_loss'),
+                                    'confidence': opp.get('confidence', opp.get('confidence_score', 0.6)),
+                                    'strategy': opp.get('strategy', 'opportunity_manager'),
+                                    'signal_source': 'opportunity_manager',
+                                    'signal_id': f"oppmgr_{symbol}_{int(time.time())}",
+                                    # Net-dollar targets if present (fallback 0)
+                                    'tp_net_usd': opp.get('tp_net_usd', 0.0),
+                                    'sl_net_usd': opp.get('sl_net_usd', 0.0),
+                                    'floor_net_usd': opp.get('floor_net_usd', 0.0),
+                                    'optimal_leverage': float(self.config.get('leverage', 10.0))
+                                }
+                                opp_signals.append(unified)
+                    except Exception as e:
+                        logger.warning(f"Error fetching opportunities: {e}")
+
+                # Merge and execute, respecting limits
+                for signal in (*profit_signals, *opp_signals):
+                    if len(self.virtual_positions) >= max_positions:
+                        break
+                    try:
+                        # Normalize profit scraper signal shape
+                        if 'side' in signal and 'direction' not in signal:
+                            signal['direction'] = signal.pop('side')
+                        if 'strategy' not in signal:
+                            signal['strategy'] = signal.get('signal_source', 'unknown')
+                        if 'optimal_leverage' not in signal:
+                            signal['optimal_leverage'] = float(self.config.get('leverage', 10.0))
+                        # Execute trade with $500 stake (from config)
+                        stake_amount = float(self.config.get('stake_amount', 500.0))
+                        await self.execute_virtual_trade(signal, stake_amount)
+                    except Exception as e:
+                        logger.warning(f"Error executing unified signal: {e}")
+
+                await asyncio.sleep(poll_interval_sec)
+            except Exception as e:
+                logger.error(f"Error in signal collection loop: {e}")
+                await asyncio.sleep(5) 

@@ -1518,7 +1518,8 @@ class OpportunityManager:
                 'expected_profit': investment_calcs['expected_profit'],
                 'expected_return': investment_calcs['expected_return'],
                 
-                'strategy': 'real_analysis',
+                'signal_source': 'opportunity_manager',
+                'strategy': 'opportunity_manager',
                 'strategy_type': 'real_analysis',
                 'market_regime': self._determine_market_regime_simple(closes, volumes),
                 'regime': self._determine_market_regime_simple(closes, volumes).upper(),

@@ -36,6 +36,7 @@ class SignalRecord:
     volume_24h: Optional[float]
     trading_mode: str
     timestamp: datetime
+    source_system: str = 'opportunity_manager'
 
 class RealSignalTracker:
     """
@@ -201,7 +202,8 @@ class RealSignalTracker:
                 open_interest=int(float(market_context.get('open_interest'))) if market_context.get('open_interest') is not None else None,
                 volume_24h=float(market_context.get('volume_24h')) if market_context.get('volume_24h') is not None else None,
                 trading_mode=trading_mode,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
+                source_system=str(signal.get('signal_source', 'opportunity_manager'))
             )
             
             # Insert into database
@@ -232,7 +234,7 @@ class RealSignalTracker:
                 record.signal_id, record.symbol, record.strategy, record.direction, record.signal_type,
                 record.entry_price, record.stop_loss, record.take_profit, record.confidence, record.risk_reward_ratio,
                 record.market_regime, record.funding_rate, record.open_interest, record.volume_24h,
-                record.trading_mode, "opportunity_manager", record.timestamp
+                record.trading_mode, record.source_system, record.timestamp
             )
     
     async def update_signal_outcome(

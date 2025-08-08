@@ -95,7 +95,7 @@ class ProfitScrapingEngine:
         self.active_trades: Dict[str, ActiveTrade] = {}
         
         # RULE COMPLIANT Configuration
-        self.max_symbols = 100  # Allow monitoring many symbols
+        self.max_symbols = None  # No enforced limit; monitor all passed symbols
         self.max_trades_per_symbol = 2
         self.leverage = 10                    # RULE COMPLIANT: 10x leverage
         self.account_balance = 10000          # RULE COMPLIANT: $10,000 virtual balance
@@ -181,7 +181,7 @@ class ProfitScrapingEngine:
         try:
             logger.info(f"🚀 Starting profit scraping for {len(symbols)} symbols")
             
-            if len(symbols) > self.max_symbols:
+            if self.max_symbols is not None and len(symbols) > self.max_symbols:
                 symbols = symbols[:self.max_symbols]
                 logger.warning(f"Limited to {self.max_symbols} symbols")
             
