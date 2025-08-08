@@ -92,7 +92,8 @@ def get_paper_engine():
             }
             
             # Create emergency engine
-            paper_engine = EnhancedPaperTradingEngine(emergency_config)
+            from src.market_data.exchange_client import ExchangeClient
+            paper_engine = EnhancedPaperTradingEngine(emergency_config, exchange_client=ExchangeClient())
             
             # Try to connect opportunity manager if available
             try:
@@ -135,9 +136,11 @@ async def start_paper_trading(background_tasks: BackgroundTasks):
             
             # Try to initialize the enhanced paper trading engine
             try:
-                paper_engine = await initialize_paper_trading_engine(
-                    config, 
-                    exchange_client=None,  # Can work without exchange client
+                from src.trading.enhanced_paper_trading_engine import EnhancedPaperTradingEngine
+                from src.market_data.exchange_client import ExchangeClient
+                paper_engine = EnhancedPaperTradingEngine(
+                    config=config,
+                    exchange_client=ExchangeClient(),
                     flow_trading_strategy='adaptive'
                 )
                 

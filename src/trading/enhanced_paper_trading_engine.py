@@ -79,9 +79,11 @@ class EnhancedPaperTradingEngine:
     
     def __init__(self, config: Dict[str, Any], exchange_client, opportunity_manager: Optional[Any] = None):
         """Initialize paper trading engine with virtual balance and ML learning capabilities."""
+        if exchange_client is None:
+            raise ValueError("EnhancedPaperTradingEngine requires an exchange_client")
         self.config = config.get('paper_trading', {})
-        self.exchange_client = exchange_client  # Can be None
-        self.opportunity_manager = opportunity_manager  # Can be None
+        self.exchange_client = exchange_client
+        self.opportunity_manager = opportunity_manager
         
         # Core configuration with defaults
         self.initial_balance = float(self.config.get('initial_balance', 10000.0))
