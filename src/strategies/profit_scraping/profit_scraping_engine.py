@@ -362,22 +362,22 @@ class ProfitScrapingEngine:
                 targets = self._calculate_rule_based_targets(level, current_price, symbol)
                 
                 if targets:
-                    # Calculate opportunity score
-                    opportunity_score = self._calculate_opportunity_score(
-                        level, targets, distance, matching_magnet
-                    )
-                    
-                    opportunity = ScrapingOpportunity(
-                        symbol=symbol,
-                        level=level,
-                        magnet_level=matching_magnet,
-                        targets=targets,
-                        current_price=current_price,
-                        distance_to_level=distance,
-                        opportunity_score=opportunity_score,
-                        created_at=datetime.now()
-                    )
-                    opportunities.append(opportunity)
+                        # Calculate opportunity score
+                        opportunity_score = self._calculate_opportunity_score(
+                            level, targets, distance, matching_magnet
+                        )
+                        
+                        opportunity = ScrapingOpportunity(
+                            symbol=symbol,
+                            level=level,
+                            magnet_level=matching_magnet,
+                            targets=targets,
+                            current_price=current_price,
+                            distance_to_level=distance,
+                            opportunity_score=opportunity_score,
+                            created_at=datetime.now()
+                        )
+                        opportunities.append(opportunity)
             
             # Sort by opportunity score and keep top opportunities
             opportunities.sort(key=lambda x: x.opportunity_score, reverse=True)

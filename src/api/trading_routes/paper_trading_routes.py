@@ -530,31 +530,25 @@ async def get_paper_trading_status():
         
         # Get active positions with signal sources
         active_positions_with_sources = []
-        for position in paper_engine.positions.values():
+        for position in paper_engine.virtual_positions.values():
             # Determine signal source from entry_reason
-            signal_source = 'unknown'
-            if hasattr(position, 'entry_reason') and position.entry_reason:
-                if 'profit_scraping' in position.entry_reason.lower():
-                    signal_source = 'profit_scraping_engine'
-                elif 'opportunity' in position.entry_reason.lower():
-                    signal_source = 'opportunity_manager'
-                elif 'flow' in position.entry_reason.lower():
-                    signal_source = 'flow_trading_engine'
-                elif 'auto_signal' in position.entry_reason.lower():
-                    signal_source = 'auto_signal_generator'
-                else:
-                    signal_source = 'other'
-            
+            signal_source = getattr(position, 'strategy', None) or 'unknown'
+
+            # Add to positions list with enhanced details
             active_positions_with_sources.append({
+                'position_id': position.position_id,
                 'symbol': position.symbol,
                 'side': position.side,
+                'strategy_type': getattr(position, 'strategy', 'unknown'),
+                'leverage': position.leverage,
                 'entry_price': position.entry_price,
                 'current_price': position.current_price,
                 'unrealized_pnl': position.unrealized_pnl,
-                'signal_source': signal_source,
-                'strategy_type': position.strategy_type,
-                'entry_reason': position.entry_reason,
-                'entry_time': position.entry_time.isoformat()
+                'stop_loss': position.stop_loss,
+                'take_profit': position.take_profit,
+                'signal_id': getattr(position, 'signal_id', None),
+                'entry_time': position.entry_time.isoformat(),
+                'signal_source': signal_source
             })
         
         response_data = {
@@ -564,7 +558,7 @@ async def get_paper_trading_status():
             'total_return_pct': ((paper_engine.account.balance - paper_engine.config.get('initial_balance', 10000.0)) / paper_engine.config.get('initial_balance', 10000.0)) * 100,
             'win_rate_pct': paper_engine.account.win_rate * 100,
             'completed_trades': paper_engine.account.total_trades,
-            'active_positions': len(paper_engine.positions),
+            'active_positions': len(paper_engine.virtual_positions),
             'active_positions_detail': active_positions_with_sources,
             'leverage': paper_engine.leverage,
             'capital_per_position': paper_engine.config.get('capital_per_position', 1000.0),
@@ -875,12 +869,12 @@ async def close_position(position_id: str, request_body: dict = None):
         logger.info(f"✅ API CLOSE: Engine is running")
         
         # Get current positions for debugging
-        current_positions = list(engine.positions.keys())
+        current_positions = list(engine.virtual_positions.keys())
         logger.info(f"📊 API CLOSE: Current active positions: {current_positions}")
         logger.info(f"📊 API CLOSE: Total active positions: {len(current_positions)}")
         
         # Check if position exists before attempting to close
-        if position_id not in engine.positions:
+        if position_id not in engine.virtual_positions:
             logger.error(f"❌ API CLOSE: Position {position_id} not found in active positions")
             logger.error(f"📊 API CLOSE: Available positions: {current_positions}")
             
@@ -896,7 +890,7 @@ async def close_position(position_id: str, request_body: dict = None):
             )
         
         # Get position details for logging
-        position = engine.positions[position_id]
+        position = engine.virtual_positions[position_id]
         logger.info(f"📋 API CLOSE: Found position {position_id}")
         logger.info(f"📋 API CLOSE: Position details - {position.symbol} {position.side} @ {position.entry_price:.4f}")
         logger.info(f"📋 API CLOSE: Position PnL: ${getattr(position, 'unrealized_pnl', 0):.2f}")
@@ -946,8 +940,8 @@ async def close_position(position_id: str, request_body: dict = None):
             logger.error(f"❌ API CLOSE FAILED: engine.close_position returned None for {position_id}")
             
             # Additional debugging - check if position still exists
-            if position_id in engine.positions:
-                position_status = engine.positions[position_id]
+            if position_id in engine.virtual_positions:
+                position_status = engine.virtual_positions[position_id]
                 logger.error(f"🔍 API CLOSE DEBUG: Position still exists - closed: {getattr(position_status, 'closed', 'unknown')}")
             else:
                 logger.error(f"🔍 API CLOSE DEBUG: Position no longer in active positions")
@@ -1140,7 +1134,7 @@ async def simulate_trading_signals(
             "executed_trades": executed_trades,
             "failed_trades": failed_trades,
             "success_rate": f"{len(executed_trades)}/{count} ({len(executed_trades)/count*100:.1f}%)",
-            "total_positions": len(engine.positions),
+            "total_positions": len(engine.virtual_positions),
             "account_balance": account_status['account']['balance'],
             "account_equity": account_status['account']['equity'],
             "unrealized_pnl": account_status['account']['unrealized_pnl'],
@@ -1734,7 +1728,7 @@ async def get_rule_mode_status():
                 "description": "Clean hierarchy: $10 TP → $7 Floor → 0.5% SL" if pure_mode else "All exit conditions active",
                 "engine_available": True,
                 "engine_running": engine.is_running,
-                "active_positions": len(engine.positions),
+                "active_positions": len(engine.virtual_positions),
                 "rules_active": {
                     "primary_target": "$10 Take Profit",
                     "absolute_floor": "$7 Floor Protection", 
@@ -1790,7 +1784,7 @@ async def set_rule_mode(pure_3_rule_mode: bool):
                 "new_mode": mode_name,
                 "pure_3_rule_mode": pure_3_rule_mode,
                 "engine_running": engine.is_running,
-                "active_positions": len(engine.positions),
+                "active_positions": len(engine.virtual_positions),
                 "change_applied": "immediately",
                 "rules_description": "Clean hierarchy: $10 TP → $7 Floor → 0.5% SL" if pure_3_rule_mode else "All exit conditions active",
                 "timestamp": datetime.utcnow().isoformat()
@@ -1824,8 +1818,8 @@ async def get_rule_configuration():
         # Extract current configuration from engine
         # Look for position examples to get current rules
         sample_position = None
-        if engine.positions:
-            sample_position = list(engine.positions.values())[0]
+        if engine.virtual_positions:
+            sample_position = list(engine.virtual_positions.values())[0]
         
         # Get configuration from position or defaults
         if sample_position:
@@ -1846,7 +1840,7 @@ async def get_rule_configuration():
                 "stop_loss_percent": stop_loss_percent,
                 "engine_available": True,
                 "engine_running": engine.is_running,
-                "active_positions": len(engine.positions),
+                "active_positions": len(engine.virtual_positions),
                 "configuration_source": "engine_current" if sample_position else "engine_defaults",
                 "leverage_info": {
                     "current_leverage": getattr(engine, 'leverage', 10.0),
@@ -1911,7 +1905,7 @@ async def update_rule_configuration(config: RuleConfigUpdate):
                 "absolute_floor_dollars": config.absolute_floor_dollars,
                 "stop_loss_percent": config.stop_loss_percent,
                 "applies_to": "new_positions_only",
-                "existing_positions": len(engine.positions),
+                "existing_positions": len(engine.virtual_positions),
                 "engine_running": engine.is_running,
                 "updated_at": datetime.utcnow().isoformat(),
                 "validation": {
@@ -2057,7 +2051,7 @@ async def update_signal_configuration(config: SignalConfigUpdate):
                 "new_config": engine.signal_config,
                 "mode_description": mode_description,
                 "engine_running": engine.is_running,
-                "active_positions": len(engine.positions),
+                "active_positions": len(engine.virtual_positions),
                 "change_applied": "immediately",
                 "fallback_summary": {
                     "profit_scraping": "primary" if config.profit_scraping_primary else "disabled",

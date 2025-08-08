@@ -373,6 +373,8 @@ async def initialize_components_background():
             real_trading_engine=None,
             config=config  # Pass the config for rule-based targets
         )
+        # Attach reference for unified signal collection
+        components['paper_trading_engine'].attach_profit_scraping_engine(components['profit_scraping_engine'])
         
         # Profit scraping engine is already connected via constructor
         # No need to connect separately
@@ -382,7 +384,7 @@ async def initialize_components_background():
         try:
             all_symbols = await components['exchange_client'].get_all_symbols()
             if all_symbols:
-                usdt_symbols = [s for s in all_symbols if s.endswith('USDT')][:50]  # Limit to 50 symbols
+                usdt_symbols = [s for s in all_symbols if s.endswith('USDT')]  # Monitor all USDT symbols
             else:
                 usdt_symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT']
             

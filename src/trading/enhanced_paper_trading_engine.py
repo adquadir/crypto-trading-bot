@@ -77,7 +77,7 @@ class EnhancedPaperTradingEngine:
     - No real money at risk
     """
     
-    def __init__(self, config: Dict[str, Any], exchange_client, opportunity_manager):
+    def __init__(self, config: Dict[str, Any], exchange_client, opportunity_manager: Optional[Any] = None):
         """Initialize paper trading engine with virtual balance and ML learning capabilities."""
         self.config = config.get('paper_trading', {})
         self.exchange_client = exchange_client  # Can be None
@@ -922,3 +922,11 @@ class EnhancedPaperTradingEngine:
             except Exception as e:
                 logger.error(f"Error in signal collection loop: {e}")
                 await asyncio.sleep(5) 
+
+    def connect_opportunity_manager(self, manager: Any) -> None:
+        """Attach/replace the opportunity manager after construction."""
+        self.opportunity_manager = manager
+
+    def connect_profit_scraping_engine(self, engine: Any) -> None:
+        """Attach/replace the profit scraping engine after construction."""
+        self.profit_scraping_engine = engine 
