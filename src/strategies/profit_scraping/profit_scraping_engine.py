@@ -164,7 +164,10 @@ class ProfitScrapingEngine:
                 profit_probability=0.75,  # Conservative estimate for rule-based
                 risk_reward_ratio=1.0,  # 1:1 risk/reward for rule-based
                 expected_duration_minutes=30,  # Conservative estimate
-                confidence_score=80  # High confidence for rule-based
+                confidence_score=80,  # High confidence for rule-based
+                take_profit_net_usd=net_target,  # Net USD take profit
+                stop_loss_net_usd=net_stop,      # Net USD stop loss
+                floor_net_usd=net_floor          # Net USD floor
             )
             
             logger.info(f"🎯 RULE-BASED TARGETS for {symbol} {level.level_type}:")
@@ -535,7 +538,10 @@ class ProfitScrapingEngine:
                     'signal_id': f"profit_scraping_{opportunity.symbol}_{int(datetime.now().timestamp())}",  # Generate unique signal ID
                     'stop_loss': opportunity.targets.stop_loss,  # Add stop loss
                     'take_profit': opportunity.targets.profit_target,  # Add take profit
-                    'optimal_leverage': self.leverage  # Add leverage (10x)
+                    'optimal_leverage': self.leverage,  # Add leverage (10x)
+                    'tp_net_usd': opportunity.targets.take_profit_net_usd,  # Net USD take profit
+                    'sl_net_usd': opportunity.targets.stop_loss_net_usd,     # Net USD stop loss
+                    'floor_net_usd': opportunity.targets.floor_net_usd       # Net USD floor
                 }
                 
                 position_id = await self.paper_trading_engine.execute_virtual_trade(

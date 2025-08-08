@@ -38,6 +38,10 @@ class VirtualPosition:
     absolute_floor_profit: float = 7.0  # $7 net floor
     highest_profit_ever: float = 0.0
     profit_floor_activated: bool = False
+    # Net-dollar targets (after fees)
+    tp_net_usd: float = 0.0  # Net USD take profit target
+    sl_net_usd: float = 0.0  # Net USD stop loss target
+    floor_net_usd: float = 0.0  # Net USD floor target
 
 @dataclass
 class VirtualTrade:
@@ -157,6 +161,10 @@ class EnhancedPaperTradingEngine:
             take_profit = signal.get('take_profit')
             strategy = signal.get('strategy', 'unknown')
             signal_id = signal.get('signal_id')
+            # Net-dollar targets
+            tp_net_usd = signal.get('tp_net_usd', 0.0)
+            sl_net_usd = signal.get('sl_net_usd', 0.0)
+            floor_net_usd = signal.get('floor_net_usd', 0.0)
             
             if not all([symbol, entry_price, position_size_usd > 0]):
                 logger.error(f"❌ Invalid trade parameters: {signal}")
@@ -217,7 +225,10 @@ class EnhancedPaperTradingEngine:
                 signal_id=signal_id,
                 absolute_floor_profit=net_floor,  # Set net floor value
                 highest_profit_ever=0.0,
-                profit_floor_activated=False
+                profit_floor_activated=False,
+                tp_net_usd=tp_net_usd,
+                sl_net_usd=sl_net_usd,
+                floor_net_usd=floor_net_usd
             )
             
             # Update balance
@@ -411,9 +422,9 @@ class EnhancedPaperTradingEngine:
                     
                     # Use per-position rule-based targets (calculated by profit scraping engine)
                     # These targets already account for fees and are specific to this position
-                    net_target = position.take_profit if position.take_profit else 0
-                    net_floor = position.absolute_floor_profit
-                    net_stop_loss = -(position.stop_loss) if position.stop_loss else 0  # Negative for stop loss
+                    net_target = position.tp_net_usd if position.tp_net_usd > 0 else 0
+                    net_floor = position.floor_net_usd if position.floor_net_usd > 0 else position.absolute_floor_profit
+                    net_stop_loss = -position.sl_net_usd if position.sl_net_usd > 0 else 0  # Negative for stop loss
                     
                     # Check for TP/SL hits using per-position rule-based thresholds
                     close_reason = None
@@ -538,7 +549,10 @@ class EnhancedPaperTradingEngine:
                     'take_profit': selected_opp.get('take_profit'),
                     'strategy': 'auto_demo',
                     'signal_id': f"demo_{int(time.time())}",
-                    'optimal_leverage': 2.0
+                    'optimal_leverage': 2.0,
+                    'tp_net_usd': 0.0, # No specific target for demo
+                    'sl_net_usd': 0.0, # No specific target for demo
+                    'floor_net_usd': 0.0 # No specific target for demo
                 }
                 
                 # Execute virtual trade with small position size

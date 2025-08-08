@@ -26,6 +26,10 @@ class TradingTargets:
     risk_reward_ratio: float
     expected_duration_minutes: int
     confidence_score: int  # 0-100 overall confidence
+    # Net-dollar targets (after fees)
+    take_profit_net_usd: float = 0.0  # Net USD take profit target
+    stop_loss_net_usd: float = 0.0    # Net USD stop loss target
+    floor_net_usd: float = 0.0        # Net USD floor target
     
     def to_dict(self) -> Dict:
         return {
@@ -35,7 +39,10 @@ class TradingTargets:
             'profit_probability': self.profit_probability,
             'risk_reward_ratio': self.risk_reward_ratio,
             'expected_duration_minutes': self.expected_duration_minutes,
-            'confidence_score': self.confidence_score
+            'confidence_score': self.confidence_score,
+            'take_profit_net_usd': self.take_profit_net_usd,
+            'stop_loss_net_usd': self.stop_loss_net_usd,
+            'floor_net_usd': self.floor_net_usd
         }
 
 class StatisticalCalculator:
