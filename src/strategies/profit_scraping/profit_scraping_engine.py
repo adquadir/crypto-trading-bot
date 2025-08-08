@@ -126,9 +126,10 @@ class ProfitScrapingEngine:
             
             # RULE-BASED TARGET CALCULATIONS
             
-            # 1. PRIMARY TARGET ($18 gross = $10 net after fees)
-            gross_target = self.primary_target_dollars
-            net_target = gross_target - total_fees
+            # Set net-dollar targets to match required rules (paper trading engine will handle fee calculation)
+            net_target = 17.60  # Required net take profit
+            net_stop = 17.60    # Required net stop loss  
+            net_floor = 14.60   # Required net floor
             
             # Calculate price movement needed for $18 gross profit
             if level.level_type == 'support':  # LONG
@@ -136,19 +137,11 @@ class ProfitScrapingEngine:
             else:  # SHORT - resistance
                 profit_target = level.price - (gross_target / notional_value) * level.price
             
-            # 2. STOP LOSS ($18 gross = $10 net after fees)
-            gross_stop = self.stop_loss_dollars
-            net_stop = gross_stop - total_fees
-            
             # Calculate price movement needed for $18 gross loss
             if level.level_type == 'support':  # LONG
                 stop_loss = level.price - (gross_stop / notional_value) * level.price
             else:  # SHORT - resistance
                 stop_loss = level.price + (gross_stop / notional_value) * level.price
-            
-            # 3. FLOOR ($15 gross = $7 net after fees)
-            gross_floor = self.absolute_floor_dollars
-            net_floor = gross_floor - total_fees
             
             # Calculate price movement needed for $15 gross profit (for floor activation)
             if level.level_type == 'support':  # LONG

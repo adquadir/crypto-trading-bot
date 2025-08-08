@@ -44,6 +44,9 @@ paper_trading:
   stop_loss_dollars: 18.0
   pure_3_rule_mode: true
   mode: pure_profit_scraping
+  fees:
+    rate: 0.0004  # 0.04% entry fee
+    close_rate: 0.0004  # 0.04% exit fee
 
 signal_sources:
   pure_profit_scraping_mode: true

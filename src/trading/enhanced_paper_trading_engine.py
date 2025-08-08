@@ -285,8 +285,8 @@ class EnhancedPaperTradingEngine:
             notional_value = position_value * position.leverage
             close_fees = notional_value * close_fee_rate  # Fee on full notional value
             
-            # Net PnL after fees
-            net_pnl = pnl_usdt - close_fees
+            # Net PnL after fees (entry + exit)
+            net_pnl = pnl_usdt - position.fees_paid - close_fees
             pnl_pct = net_pnl / (position.entry_price * position.size) * 100
             
             # Update balance
@@ -439,7 +439,7 @@ class EnhancedPaperTradingEngine:
                             position.profit_floor_activated = True
                             logger.info(f"🛡️ FLOOR ACTIVATED: {position.symbol} reached ${position.highest_profit_ever:.2f}")
                         
-                        if net_pnl < net_floor:
+                        if net_pnl <= net_floor:  # Close as soon as PnL touches the floor
                             close_reason = "absolute_floor_15_dollars"
                     
                     # RULE 3: STOP LOSS (per-position stop loss)
