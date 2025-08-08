@@ -374,7 +374,7 @@ async def initialize_components_background():
             config=config  # Pass the config for rule-based targets
         )
         # Attach reference for unified signal collection
-        components['paper_trading_engine'].attach_profit_scraping_engine(components['profit_scraping_engine'])
+        components['paper_trading_engine'].connect_profit_scraping_engine(components['profit_scraping_engine'])
         
         # Profit scraping engine is already connected via constructor
         # No need to connect separately

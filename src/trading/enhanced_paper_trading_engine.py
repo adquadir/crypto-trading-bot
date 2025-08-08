@@ -930,3 +930,7 @@ class EnhancedPaperTradingEngine:
     def connect_profit_scraping_engine(self, engine: Any) -> None:
         """Attach/replace the profit scraping engine after construction."""
         self.profit_scraping_engine = engine 
+
+    @property
+    def is_running(self) -> bool:
+        return self.running 
