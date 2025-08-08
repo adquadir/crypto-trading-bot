@@ -118,37 +118,33 @@ class ProfitScrapingEngine:
             leverage = self.leverage
             notional_value = position_size_usd * leverage
             
-            # Calculate fees (0.04% per side on notional value)
+            # Fee basis: stake (position_size_usd) to match rule expectations (~$0.40 total)
             fee_rate = 0.0004
-            entry_fee = notional_value * fee_rate  # Fee on full notional value
-            exit_fee = notional_value * fee_rate   # Fee on full notional value
+            entry_fee = position_size_usd * fee_rate
+            exit_fee = position_size_usd * fee_rate
             total_fees = entry_fee + exit_fee
             
-            # RULE-BASED TARGET CALCULATIONS
+            # RULE-BASED TARGET CALCULATIONS aligned to desired net
+            net_target = 17.60
+            net_stop = 17.60
+            net_floor = 14.60
+            gross_target = net_target + total_fees
+            gross_stop = net_stop + total_fees
+            gross_floor = net_floor + total_fees
             
-            # Define gross targets for price calculations
-            gross_target = self.primary_target_dollars
-            gross_stop = self.stop_loss_dollars
-            gross_floor = self.absolute_floor_dollars
-            
-            # Set net-dollar targets to match required rules (paper trading engine will handle fee calculation)
-            net_target = 17.60  # Required net take profit
-            net_stop = 17.60    # Required net stop loss  
-            net_floor = 14.60   # Required net floor
-            
-            # Calculate price movement needed for $18 gross profit
+            # Calculate price movement needed so that hitting price yields desired net PnL
             if level.level_type == 'support':  # LONG
                 profit_target = level.price + (gross_target / notional_value) * level.price
             else:  # SHORT - resistance
                 profit_target = level.price - (gross_target / notional_value) * level.price
             
-            # Calculate price movement needed for $18 gross loss
+            # Calculate stop loss price
             if level.level_type == 'support':  # LONG
                 stop_loss = level.price - (gross_stop / notional_value) * level.price
             else:  # SHORT - resistance
                 stop_loss = level.price + (gross_stop / notional_value) * level.price
             
-            # Calculate price movement needed for $15 gross profit (for floor activation)
+            # Calculate floor activation price
             if level.level_type == 'support':  # LONG
                 floor_activation_price = level.price + (gross_floor / notional_value) * level.price
             else:  # SHORT - resistance

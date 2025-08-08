@@ -42,6 +42,8 @@ class VirtualPosition:
     tp_net_usd: float = 0.0  # Net USD take profit target
     sl_net_usd: float = 0.0  # Net USD stop loss target
     floor_net_usd: float = 0.0  # Net USD floor target
+    # Stake (margin) used for this position
+    stake_usd: float = 0.0
 
 @dataclass
 class VirtualTrade:
@@ -189,7 +191,7 @@ class EnhancedPaperTradingEngine:
             # Calculate fees
             fee_rate = self.fees.get('rate', 0.0004)  # 0.04%
             notional_value = position_size_usd * leverage
-            fees = notional_value * fee_rate  # Fee on full notional value
+            fees = position_size_usd * fee_rate  # Fee on stake (not notional)
             
             # Check if we have enough balance
             required_margin = position_size_usd  # Full position size is the margin stake
@@ -203,10 +205,9 @@ class EnhancedPaperTradingEngine:
             # Get floor configuration from config
             paper_config = self.config.get('paper_trading', {})
             absolute_floor_dollars = float(paper_config.get('absolute_floor_dollars', 15.0))
-            # Convert gross floor to net floor (subtract fees on notional value)
+            # Convert gross floor to net floor (subtract fees on stake)
             fee_rate = self.fees.get('rate', 0.0004)
-            notional_value = position_size_usd * leverage
-            total_fees = notional_value * fee_rate * 2  # Entry + exit fees on notional value
+            total_fees = position_size_usd * fee_rate * 2  # Entry + exit fees on stake
             net_floor = absolute_floor_dollars - total_fees
             
             position = VirtualPosition(
@@ -228,7 +229,8 @@ class EnhancedPaperTradingEngine:
                 profit_floor_activated=False,
                 tp_net_usd=tp_net_usd,
                 sl_net_usd=sl_net_usd,
-                floor_net_usd=floor_net_usd
+                floor_net_usd=floor_net_usd,
+                stake_usd=position_size_usd
             )
             
             # Update balance
@@ -283,15 +285,14 @@ class EnhancedPaperTradingEngine:
             close_fee_rate = self.fees.get('close_rate', 0.0004)
             position_value = executed_price * position.size
             notional_value = position_value * position.leverage
-            close_fees = notional_value * close_fee_rate  # Fee on full notional value
-            
+            close_fees = position.stake_usd * close_fee_rate  # Fee on stake
+
             # Net PnL after fees (entry + exit)
             net_pnl = pnl_usdt - position.fees_paid - close_fees
             pnl_pct = net_pnl / (position.entry_price * position.size) * 100
             
             # Update balance
-            position_value = executed_price * position.size
-            margin_returned = position_value / position.leverage
+            margin_returned = position.stake_usd  # Return the original stake
             self.virtual_balance += margin_returned + net_pnl
             
             # Create completed trade record
@@ -413,9 +414,9 @@ class EnhancedPaperTradingEngine:
                     
                     # Calculate exit fees for this position
                     exit_fee_rate = self.fees.get('close_rate', 0.0004)
-                    position_notional_value = position.size * current_price * position.leverage
-                    exit_fees = position_notional_value * exit_fee_rate
-                    
+                    # Estimate exit fees on stake basis
+                    exit_fees = position.stake_usd * exit_fee_rate
+
                     # Calculate net PnL after all fees (entry + exit)
                     total_fees = position.fees_paid + exit_fees
                     net_pnl = pnl - total_fees
