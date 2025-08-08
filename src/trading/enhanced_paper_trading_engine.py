@@ -192,7 +192,7 @@ class EnhancedPaperTradingEngine:
             fees = notional_value * fee_rate  # Fee on full notional value
             
             # Check if we have enough balance
-            required_margin = position_size_usd / leverage
+            required_margin = position_size_usd  # Full position size is the margin stake
             if required_margin + fees > self.virtual_balance:
                 logger.warning(f"⚠️ Insufficient virtual balance for {symbol} trade")
                 return None
