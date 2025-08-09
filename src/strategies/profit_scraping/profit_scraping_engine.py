@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Set, Any
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 import json
+import pandas as pd
+import numpy as np
 
 from .price_level_analyzer import PriceLevelAnalyzer, PriceLevel
 from .magnet_level_detector import MagnetLevelDetector, MagnetLevel
@@ -94,6 +96,10 @@ class ProfitScrapingEngine:
         self.active_opportunities: Dict[str, List[ScrapingOpportunity]] = {}
         self.active_trades: Dict[str, ActiveTrade] = {}
         
+        # ATR-adaptive tolerance caching
+        self.atr_cache = {}  # symbol -> {'atr_pct': float, 'timestamp': datetime}
+        self.atr_cache_duration = timedelta(minutes=30)  # Cache ATR for 30 minutes
+        
         # RULE COMPLIANT Configuration
         self.max_symbols = None  # No enforced limit; monitor all passed symbols
         self.max_trades_per_symbol = 2
@@ -109,6 +115,104 @@ class ProfitScrapingEngine:
         self.position_size_usd = float(paper_config.get('stake_amount', 500.0))  # $500 per position
         
         logger.info(f"🎯 RULE-BASED TARGETS: TP=${self.primary_target_dollars}, Floor=${self.absolute_floor_dollars}, SL=${self.stop_loss_dollars}")
+    
+    async def _get_atr_adaptive_tolerance(self, symbol: str, period: int = 14, days: int = 7,
+                                        min_pct: float = 0.0015, max_pct: float = 0.008, 
+                                        atr_fraction: float = 0.3, base_pct: float = 0.003) -> float:
+        """
+        Enhanced ATR-adaptive percentage tolerance that breathes with market volatility.
+        
+        Args:
+            symbol: Trading symbol
+            period: ATR calculation period (default 14)
+            days: Historical data lookback days (default 7)
+            min_pct: Minimum tolerance (0.15% for very calm markets)
+            max_pct: Maximum tolerance (0.8% for very volatile markets)
+            atr_fraction: Fraction of ATR to use as tolerance (30%)
+            base_pct: Fallback tolerance if ATR calculation fails (0.3%)
+            
+        Returns:
+            Adaptive tolerance percentage based on market volatility
+        """
+        try:
+            # Check cache first
+            now = datetime.now()
+            if symbol in self.atr_cache:
+                cache_entry = self.atr_cache[symbol]
+                if now - cache_entry['timestamp'] < self.atr_cache_duration:
+                    logger.debug(f"📊 ATR CACHE HIT: {symbol} = {cache_entry['atr_pct']*100:.2f}%")
+                    return cache_entry['atr_pct']
+            
+            # Fetch historical data
+            df = await self.level_analyzer._get_historical_data(symbol, self.exchange_client, days=days)
+            if df is None or len(df) < period + 5:
+                logger.warning(f"⚠️ ATR FALLBACK: Insufficient data for {symbol}, using base {base_pct*100:.2f}%")
+                return base_pct
+            
+            # Ensure numeric types
+            highs = pd.to_numeric(df['high'], errors='coerce')
+            lows = pd.to_numeric(df['low'], errors='coerce')
+            closes = pd.to_numeric(df['close'], errors='coerce')
+            
+            # Drop any NaN values
+            valid_mask = ~(highs.isna() | lows.isna() | closes.isna())
+            if valid_mask.sum() < period + 2:
+                logger.warning(f"⚠️ ATR FALLBACK: Invalid data for {symbol}, using base {base_pct*100:.2f}%")
+                return base_pct
+            
+            highs = highs[valid_mask]
+            lows = lows[valid_mask]
+            closes = closes[valid_mask]
+            
+            # Calculate True Range components
+            prev_close = closes.shift(1)
+            tr1 = highs - lows                    # High - Low
+            tr2 = (highs - prev_close).abs()     # |High - Previous Close|
+            tr3 = (lows - prev_close).abs()      # |Low - Previous Close|
+            
+            # True Range is the maximum of the three
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            
+            # Calculate ATR (Average True Range)
+            atr = true_range.rolling(window=period, min_periods=period).mean()
+            
+            # Get the most recent ATR and price
+            current_atr = atr.iloc[-1]
+            current_price = closes.iloc[-1]
+            
+            if pd.isna(current_atr) or pd.isna(current_price) or current_price <= 0:
+                logger.warning(f"⚠️ ATR FALLBACK: Invalid ATR/price for {symbol}, using base {base_pct*100:.2f}%")
+                return base_pct
+            
+            # Calculate ATR as percentage of price
+            atr_pct = float(current_atr / current_price)
+            
+            # Apply fraction and bounds
+            adaptive_tolerance = atr_pct * atr_fraction
+            final_tolerance = max(min_pct, min(max_pct, adaptive_tolerance))
+            
+            # Cache the result
+            self.atr_cache[symbol] = {
+                'atr_pct': final_tolerance,
+                'timestamp': now
+            }
+            
+            # Calculate volatility regime for logging
+            if final_tolerance <= 0.002:
+                regime = "CALM"
+            elif final_tolerance <= 0.004:
+                regime = "NORMAL"
+            elif final_tolerance <= 0.006:
+                regime = "ACTIVE"
+            else:
+                regime = "VOLATILE"
+            
+            logger.info(f"📊 ATR ADAPTIVE: {symbol} = {final_tolerance*100:.2f}% [{regime}] (ATR: {atr_pct*100:.2f}%)")
+            return final_tolerance
+            
+        except Exception as e:
+            logger.warning(f"⚠️ ATR ERROR: {symbol} calculation failed ({e}), using base {base_pct*100:.2f}%")
+            return base_pct
     
     def _calculate_rule_based_targets(self, level: PriceLevel, current_price: float, symbol: str) -> TradingTargets:
         """Calculate targets based on rule mode configuration instead of statistical analysis"""
@@ -401,65 +505,139 @@ class ProfitScrapingEngine:
                 return
             
             for opportunity in opportunities:
-                # Check if price is near the level (within 0.5%)
+                # Check if price is near the level (within 0.2%)
                 distance_to_level = abs(current_price - opportunity.level.price) / opportunity.level.price
                 
-                if distance_to_level <= 0.005:  # Within 0.5%
+                if distance_to_level <= 0.003:  # Within 0.3% (BALANCED - was 0.2%)
                     # Additional entry validation
                     if await self._validate_entry_conditions(opportunity, current_price):
-                        # DISABLED: Don't execute trades directly - provide signals to paper trading engine instead
-                        logger.info(f"🎯 PROFIT SCRAPING: Entry conditions met for {opportunity.symbol} - executing trade")
-                        await self._execute_trade(opportunity, current_price)
+                        # FIXED: Only emit signals - do NOT execute trades directly
+                        logger.info(f"🎯 PROFIT SCRAPING: Entry conditions met for {opportunity.symbol} - signal ready")
+                        # Trade execution is handled by paper trading engine via get_ready_to_trade_signals()
                     break  # Only one trade per check
             
         except Exception as e:
             logger.error(f"Error checking entry conditions for {symbol}: {e}")
     
     async def _validate_entry_conditions(self, opportunity: ScrapingOpportunity, current_price: float) -> bool:
-        """Validate additional entry conditions with RELAXED TREND AWARENESS for profit scraping"""
+        """Validate additional entry conditions with STRICT BOUNDS and CONFIRMATION REQUIREMENTS"""
         try:
             level = opportunity.level
             symbol = opportunity.symbol
             
-            # PROFIT SCRAPING FIX: Use relaxed trend filtering to allow more trades
+            # ARCHITECTURAL IMPROVEMENT: Validate level is still relevant
+            if not await self._validate_level_relevance(level, symbol):
+                logger.info(f"❌ STALE LEVEL: {symbol} level @ {level.price:.6f} no longer relevant")
+                return False
+            
+            # PROFIT SCRAPING FIX: Use trend filtering with bounds validation
             market_trend = await self._detect_market_trend(symbol)
             
             if level.level_type == 'support':
-                # RELAXED TREND CHECK: Only block in EXTREME downtrends, allow counter-trend scalping
-                if market_trend == 'strong_downtrend':
-                    # Check if support is VERY strong before blocking
-                    if level.strength_score < 80:  # Only block weak support in strong downtrends
-                        logger.info(f"❌ TREND FILTER: Skipping weak LONG {symbol} - strong downtrend + weak support")
+                # FIX #1: Two-sided bounds - price must be ABOVE the level, not below
+                lower = level.price * 1.000   # ≥ level (don't go long below support)
+                upper = level.price * 1.003   # ≤ +0.3% above level (BALANCED - was 0.2%)
+                if not (lower <= current_price <= upper):
+                    logger.info(f"❌ BOUNDS CHECK: {symbol} price ${current_price:.6f} not in support range [${lower:.6f}, ${upper:.6f}]")
+                    return False
+                
+                # HARDENED TREND CHECK: Block more counter-trend trades
+                if market_trend in ['strong_downtrend', 'downtrend']:
+                    if level.strength_score < 85:  # Raised threshold for counter-trend
+                        logger.info(f"❌ TREND FILTER: Skipping LONG {symbol} - downtrend + insufficient support strength ({level.strength_score})")
                         return False
                     else:
-                        logger.info(f"✅ ALLOWING COUNTER-TREND: Strong support {symbol} @ {level.price:.2f} (strength: {level.strength_score})")
+                        logger.info(f"✅ ALLOWING COUNTER-TREND: Very strong support {symbol} @ {level.price:.6f} (strength: {level.strength_score})")
                 
-                # Validate support is holding (bounce confirmation) - RELAXED
+                # FIX #3: Hard block when support bounce not confirmed (no more warnings)
                 if not await self._validate_support_bounce(symbol, level.price, current_price):
-                    # Don't block completely, just log warning
-                    logger.warning(f"⚠️ SUPPORT WARNING: {symbol} support not fully confirmed, but allowing trade")
+                    logger.info(f"❌ BOUNCE CONFIRMATION: {symbol} support bounce not confirmed - blocking trade")
+                    return False
                 
-                # Price approach validation
-                return current_price <= level.price * 1.005  # Within 0.5% above
+                # ARCHITECTURAL IMPROVEMENT: Wait for confirmation candle close
+                if not await self._wait_for_confirmation_candle(symbol, level, 'LONG'):
+                    logger.info(f"❌ CONFIRMATION CANDLE: {symbol} LONG confirmation not received")
+                    return False
+                
+                return True
             
             elif level.level_type == 'resistance':
-                # RELAXED TREND CHECK: Only block in EXTREME uptrends, allow counter-trend scalping
-                if market_trend == 'strong_uptrend':
-                    # Check if resistance is VERY strong before blocking
-                    if level.strength_score < 80:  # Only block weak resistance in strong uptrends
-                        logger.info(f"❌ TREND FILTER: Skipping weak SHORT {symbol} - strong uptrend + weak resistance")
+                # FIX #1: Two-sided bounds - price must be BELOW the level, not above  
+                lower = level.price * 0.997   # ≥ -0.3% below level (BALANCED - was 0.2%)
+                upper = level.price * 1.000   # ≤ level (don't go short above resistance)
+                if not (lower <= current_price <= upper):
+                    logger.info(f"❌ BOUNDS CHECK: {symbol} price ${current_price:.6f} not in resistance range [${lower:.6f}, ${upper:.6f}]")
+                    return False
+                
+                # HARDENED TREND CHECK: Block more counter-trend trades
+                if market_trend in ['strong_uptrend', 'uptrend']:
+                    if level.strength_score < 85:  # Raised threshold for counter-trend
+                        logger.info(f"❌ TREND FILTER: Skipping SHORT {symbol} - uptrend + insufficient resistance strength ({level.strength_score})")
                         return False
                     else:
-                        logger.info(f"✅ ALLOWING COUNTER-TREND: Strong resistance {symbol} @ {level.price:.2f} (strength: {level.strength_score})")
+                        logger.info(f"✅ ALLOWING COUNTER-TREND: Very strong resistance {symbol} @ {level.price:.6f} (strength: {level.strength_score})")
                 
-                # Price approach validation
-                return current_price >= level.price * 0.995  # Within 0.5% below
+                # FIX #2: Add resistance rejection validation (was missing!)
+                if not await self._validate_resistance_rejection(symbol, level.price):
+                    logger.info(f"❌ REJECTION CONFIRMATION: {symbol} resistance rejection not confirmed - blocking trade")
+                    return False
+                
+                # ARCHITECTURAL IMPROVEMENT: Wait for confirmation candle close
+                if not await self._wait_for_confirmation_candle(symbol, level, 'SHORT'):
+                    logger.info(f"❌ CONFIRMATION CANDLE: {symbol} SHORT confirmation not received")
+                    return False
             
             return True
+            
+            return False  # Unknown level type
             
         except Exception as e:
             logger.error(f"Error validating entry conditions: {e}")
             return False
+    
+    async def _wait_for_confirmation_candle(self, symbol: str, level: PriceLevel, direction: str) -> bool:
+        """Wait for a confirmation candle to close before entering trade"""
+        try:
+            # Get the most recent candle data
+            recent_data = await self.level_analyzer._get_historical_data(symbol, self.exchange_client, days=1)
+            if recent_data is None or len(recent_data) < 2:
+                logger.warning(f"Insufficient data for confirmation candle check: {symbol}")
+                return False  # Fail safe - don't allow trades without candle confirmation
+            
+            # Get the last completed candle (not the current forming one)
+            last_candle = recent_data.iloc[-2]  # Previous candle
+            current_candle = recent_data.iloc[-1]  # Current candle
+            
+            open_price = float(last_candle['open'])
+            high_price = float(last_candle['high'])
+            low_price = float(last_candle['low'])
+            close_price = float(last_candle['close'])
+            
+            if direction == 'LONG' and level.level_type == 'support':
+                # For LONG: Need a hammer/bullish candle that touched support and closed above it
+                touched_support = low_price <= level.price * 1.003  # Wick touched support (BALANCED - was 0.2%)
+                closed_above_support = close_price >= level.price * 1.002  # Closed above support
+                bullish_close = close_price > open_price  # Bullish candle
+                
+                confirmation = touched_support and closed_above_support and bullish_close
+                logger.info(f"🕯️ LONG confirmation {symbol}: Touch={touched_support}, CloseAbove={closed_above_support}, Bullish={bullish_close} → {confirmation}")
+                return confirmation
+                
+            elif direction == 'SHORT' and level.level_type == 'resistance':
+                # For SHORT: Need a shooting star/bearish candle that touched resistance and closed below it
+                touched_resistance = high_price >= level.price * 0.997  # Wick touched resistance (BALANCED - was 0.2%)
+                closed_below_resistance = close_price <= level.price * 0.998  # Closed below resistance
+                bearish_close = close_price < open_price  # Bearish candle
+                
+                confirmation = touched_resistance and closed_below_resistance and bearish_close
+                logger.info(f"🕯️ SHORT confirmation {symbol}: Touch={touched_resistance}, CloseBelow={closed_below_resistance}, Bearish={bearish_close} → {confirmation}")
+                return confirmation
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error waiting for confirmation candle: {e}", exc_info=True)
+            return False  # Fail safe - don't allow trades when confirmation data is flaky
     
     async def _execute_trade(self, opportunity: ScrapingOpportunity, current_price: float):
         """Execute a profit scraping trade"""
@@ -602,8 +780,12 @@ class ProfitScrapingEngine:
                 quick_exit = False
                 exit_reason_time = ""
                 
+                # Force exit after 60 minutes regardless (profit scraping shouldn't hold this long)
+                if time_elapsed_minutes > 60:
+                    quick_exit = True
+                    exit_reason_time = "TIME_EXIT_MAX"
                 # Exit after 15 minutes if flat or slightly losing
-                if time_elapsed_minutes > 15:
+                elif time_elapsed_minutes > 15:
                     if trade.side == 'LONG':
                         price_change_pct = (current_price - trade.entry_price) / trade.entry_price
                     else:  # SHORT
@@ -613,11 +795,6 @@ class ProfitScrapingEngine:
                     if price_change_pct <= 0.002:  # Less than 0.2% profit
                         quick_exit = True
                         exit_reason_time = "TIME_EXIT_FLAT"
-                
-                # Force exit after 60 minutes regardless (profit scraping shouldn't hold this long)
-                elif time_elapsed_minutes > 60:
-                    quick_exit = True
-                    exit_reason_time = "TIME_EXIT_MAX"
                 
                 # Safety net for extremely long positions (24 hours) - only if losing
                 time_elapsed_hours = time_elapsed_minutes / 60
@@ -811,10 +988,10 @@ class ProfitScrapingEngine:
                         continue
                     
                     for opportunity in opportunities:
-                        # Check if price is near the level (within 0.5%)
+                        # Check if price is near the level (within 0.2%)
                         distance_to_level = abs(current_price - opportunity.level.price) / opportunity.level.price
                         
-                        if distance_to_level <= 0.005:  # Within 0.5%
+                        if distance_to_level <= 0.003:  # Within 0.3% (BALANCED - was 0.2%)
                             # Additional entry validation
                             if await self._validate_entry_conditions(opportunity, current_price):
                                 # Create trading signal
@@ -822,9 +999,9 @@ class ProfitScrapingEngine:
                                 
                                 signal = {
                                     'symbol': opportunity.symbol,
-                                    'side': side,
+                                    'direction': side,  # FIXED: Use 'direction' to match paper trading engine expectation
                                     'confidence': opportunity.targets.confidence_score / 100.0,
-                                    'strategy_type': 'profit_scraping',
+                                    'strategy': 'profit_scraping_engine',  # FIXED: Use 'strategy' to match paper trading engine expectation
                                     'signal_source': 'profit_scraping_engine',
                                     'ml_score': opportunity.targets.confidence_score / 100.0,
                                     'entry_reason': f"profit_scraping_{opportunity.level.level_type}",
@@ -833,7 +1010,11 @@ class ProfitScrapingEngine:
                                     'entry_price': current_price,
                                     'profit_target': opportunity.targets.profit_target,
                                     'stop_loss': opportunity.targets.stop_loss,
-                                    'opportunity_score': opportunity.opportunity_score
+                                    'opportunity_score': opportunity.opportunity_score,
+                                    'optimal_leverage': self.leverage,  # Add leverage for consistency
+                                    'tp_net_usd': opportunity.targets.take_profit_net_usd,  # Add net targets
+                                    'sl_net_usd': opportunity.targets.stop_loss_net_usd,
+                                    'floor_net_usd': opportunity.targets.floor_net_usd
                                 }
                                 
                                 ready_signals.append(signal)
@@ -877,75 +1058,207 @@ class ProfitScrapingEngine:
             return {'price_levels': [], 'magnet_levels': []}
     
     async def _detect_market_trend(self, symbol: str) -> str:
-        """Detect market trend for trend-aware filtering"""
+        """Enhanced multi-timeframe trend detection for better directional bias"""
         try:
-            # Get recent price data
-            historical_data = await self.level_analyzer._get_historical_data(symbol, self.exchange_client)
-            if historical_data is None or len(historical_data) < 20:
+            # Get multiple timeframes for trend analysis
+            short_tf = await self.level_analyzer._get_historical_data(symbol, self.exchange_client, days=7)   # 1 week
+            medium_tf = await self.level_analyzer._get_historical_data(symbol, self.exchange_client, days=21)  # 3 weeks
+            long_tf = await self.level_analyzer._get_historical_data(symbol, self.exchange_client, days=60)   # 2 months
+            
+            if any(df is None or len(df) < 20 for df in [short_tf, medium_tf, long_tf]):
+                logger.warning(f"Insufficient data for multi-timeframe trend analysis: {symbol}")
                 return 'neutral'
             
-            # Calculate moving averages
-            recent_prices = historical_data['close'].tail(20).astype(float)
-            sma_5 = recent_prices.tail(5).mean()
-            sma_10 = recent_prices.tail(10).mean()
-            sma_20 = recent_prices.tail(20).mean()
+            # Calculate trend scores for each timeframe
+            short_trend = self._calculate_trend_score(short_tf)
+            medium_trend = self._calculate_trend_score(medium_tf)
+            long_trend = self._calculate_trend_score(long_tf)
             
-            current_price = recent_prices.iloc[-1]
+            # Weighted trend score (recent gets more weight)
+            combined_score = (short_trend * 0.5) + (medium_trend * 0.3) + (long_trend * 0.2)
             
-            # Determine trend strength
-            if sma_5 > sma_10 > sma_20 and current_price > sma_5 * 1.02:
+            logger.info(f"📊 Multi-TF trend {symbol}: Short={short_trend:.3f}, Medium={medium_trend:.3f}, Long={long_trend:.3f}, Combined={combined_score:.3f}")
+            
+            # Classify trend strength
+            if combined_score > 0.015:
                 return 'strong_uptrend'
-            elif sma_5 < sma_10 < sma_20 and current_price < sma_5 * 0.98:
-                return 'strong_downtrend'
-            elif sma_5 > sma_10 and current_price > sma_10:
+            elif combined_score > 0.005:
                 return 'uptrend'
-            elif sma_5 < sma_10 and current_price < sma_10:
+            elif combined_score < -0.015:
+                return 'strong_downtrend'
+            elif combined_score < -0.005:
                 return 'downtrend'
             else:
                 return 'neutral'
                 
         except Exception as e:
-            logger.error(f"Error detecting market trend for {symbol}: {e}")
+            logger.error(f"Error detecting multi-timeframe trend for {symbol}: {e}")
             return 'neutral'
     
+    def _calculate_trend_score(self, df: pd.DataFrame) -> float:
+        """Calculate trend score from price data using multiple indicators"""
+        try:
+            closes = df['close'].astype(float)
+            
+            # 1. Price momentum (recent vs older)
+            recent_avg = closes.tail(5).mean()
+            older_avg = closes.head(5).mean()
+            momentum_score = (recent_avg - older_avg) / older_avg
+            
+            # 2. Moving average slope
+            ma_20 = closes.rolling(20).mean()
+            ma_slope = (ma_20.iloc[-1] - ma_20.iloc[-10]) / ma_20.iloc[-10] if len(ma_20) >= 10 else 0
+            
+            # 3. Higher highs / Lower lows pattern
+            highs = df['high'].astype(float)
+            lows = df['low'].astype(float)
+            
+            recent_high = highs.tail(10).max()
+            recent_low = lows.tail(10).min()
+            earlier_high = highs.head(10).max()
+            earlier_low = lows.head(10).min()
+            
+            hh_ll_score = 0
+            if recent_high > earlier_high and recent_low > earlier_low:
+                hh_ll_score = 0.01  # Higher highs and higher lows = uptrend
+            elif recent_high < earlier_high and recent_low < earlier_low:
+                hh_ll_score = -0.01  # Lower highs and lower lows = downtrend
+            
+            # Combine scores
+            trend_score = (momentum_score * 0.5) + (ma_slope * 0.3) + (hh_ll_score * 0.2)
+            
+            return trend_score
+            
+        except Exception as e:
+            logger.error(f"Error calculating trend score: {e}")
+            return 0.0
+    
+    async def _validate_level_relevance(self, level: PriceLevel, symbol: str) -> bool:
+        """Validate that a historical level is still relevant in current market structure"""
+        try:
+            # Get recent data to check level relevance
+            recent_data = await self.level_analyzer._get_historical_data(symbol, self.exchange_client, days=7)
+            if recent_data is None or len(recent_data) < 20:
+                logger.warning(f"Insufficient data for level relevance check: {symbol}")
+                return False  # Fail safe - don't allow trades without proper level validation
+            
+            current_price = float(recent_data['close'].iloc[-1])
+            
+            # 1. Age check - levels older than 30 days are stale
+            days_since_last_test = (datetime.now() - level.last_tested).days
+            if days_since_last_test > 30:
+                logger.info(f"⏰ STALE LEVEL: {symbol} level @ {level.price:.6f} last tested {days_since_last_test} days ago")
+                return False
+            
+            # 2. Distance check - levels too far from current price are irrelevant
+            distance_pct = abs(level.price - current_price) / current_price
+            if distance_pct > 0.15:  # 15% away
+                logger.info(f"📏 DISTANT LEVEL: {symbol} level @ {level.price:.6f} is {distance_pct:.1%} from current price")
+                return False
+            
+            # 3. Volume confirmation - levels should have decent volume when formed
+            if level.volume_confirmation < 0.8:  # Below 80% of average volume
+                logger.info(f"📊 LOW VOLUME LEVEL: {symbol} level @ {level.price:.6f} formed on low volume ({level.volume_confirmation:.2f})")
+                return False
+            
+            # 4. Recent interaction check - level should have been tested recently to be valid
+            recent_touches = 0
+            tolerance = level.price * 0.01  # 1% tolerance for recent touches
+            
+            for _, candle in recent_data.tail(20).iterrows():  # Last 20 candles
+                high = float(candle['high'])
+                low = float(candle['low'])
+                
+                if level.level_type == 'support' and low <= level.price + tolerance:
+                    recent_touches += 1
+                elif level.level_type == 'resistance' and high >= level.price - tolerance:
+                    recent_touches += 1
+            
+            if recent_touches == 0:
+                logger.info(f"🔍 UNTESTED LEVEL: {symbol} level @ {level.price:.6f} not tested in recent 20 candles")
+                return False
+            
+            logger.info(f"✅ VALID LEVEL: {symbol} level @ {level.price:.6f} - Recent touches: {recent_touches}, Age: {days_since_last_test}d")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating level relevance for {symbol}: {e}", exc_info=True)
+            return False  # Fail safe - don't allow trades when level validation fails
+    
     async def _validate_support_bounce(self, symbol: str, support_level: float, current_price: float) -> bool:
-        """Validate that support level is actually holding with bounce confirmation"""
+        """Validate that support level is actually bouncing (not breaking)"""
         try:
             # Get recent price data
             historical_data = await self.level_analyzer._get_historical_data(symbol, self.exchange_client)
             if historical_data is None or len(historical_data) < 10:
-                return True  # Default to allow if no data
+                logger.warning(f"Insufficient data to validate support bounce for {symbol}")
+                return False  # Fail safe - don't allow trades without bounce confirmation
             
-            # Check recent 10 periods for bounce behavior
-            recent_data = historical_data.tail(10)
-            tolerance = support_level * 0.005  # 0.5% tolerance
+            # Check recent 10 candles for bounce pattern
+            recent_candles = historical_data.tail(10)
+            tolerance = support_level * 0.003  # 0.3% tolerance (BALANCED - was 0.2%)
             
-            # Look for recent touches of this support level
             touches = 0
             bounces = 0
             
-            for _, row in recent_data.iterrows():
-                low_price = float(row['low'])
-                high_price = float(row['high'])
+            for _, candle in recent_candles.iterrows():
+                low = float(candle['low'])
+                close = float(candle['close'])
                 
-                # Check if price touched support level
-                if low_price <= support_level + tolerance and low_price >= support_level - tolerance:
+                # Check if candle touched the support level
+                if support_level - tolerance <= low <= support_level + tolerance:
                     touches += 1
-                    
-                    # Check if it bounced (high is significantly above support)
-                    if high_price > support_level * 1.003:  # At least 0.3% bounce
+                    # Check if it bounced (closed above support + buffer)
+                    if close >= support_level * 1.002:  # Closed 0.2% above support
                         bounces += 1
             
-            # Require at least 1 recent touch with bounce, or no recent touches (fresh level)
             if touches == 0:
-                return True  # Fresh level, allow
-            elif touches > 0 and bounces > 0:
+                return True  # No recent tests, allow
+            
                 bounce_rate = bounces / touches
+            logger.info(f"🔍 Support validation {symbol}: {bounces}/{touches} bounces ({bounce_rate:.2%})")
+            
                 return bounce_rate >= 0.5  # At least 50% bounce rate
-            else:
-                logger.info(f"❌ Support validation failed: {symbol} @ {support_level:.2f} - {touches} touches, {bounces} bounces")
-                return False
                 
         except Exception as e:
-            logger.error(f"Error validating support bounce for {symbol}: {e}")
-            return True  # Default to allow on error
+            logger.error(f"Error validating support bounce: {e}", exc_info=True)
+            return False  # Fail safe - don't allow trades when bounce validation fails
+    
+    async def _validate_resistance_rejection(self, symbol: str, resistance_level: float) -> bool:
+        """Validate that resistance level is actually rejecting price (not being broken)"""
+        try:
+            # Get recent price data
+            historical_data = await self.level_analyzer._get_historical_data(symbol, self.exchange_client)
+            if historical_data is None or len(historical_data) < 10:
+                logger.warning(f"Insufficient data to validate resistance rejection for {symbol}")
+                return False  # Fail safe - don't allow trades without rejection confirmation
+            
+            # Check recent 10 candles for rejection pattern
+            recent_candles = historical_data.tail(10)
+            tolerance = resistance_level * 0.003  # 0.3% tolerance (BALANCED - was 0.2%)
+            
+            touches = 0
+            rejections = 0
+            
+            for _, candle in recent_candles.iterrows():
+                high = float(candle['high'])
+                close = float(candle['close'])
+                
+                # Check if candle touched the resistance level
+                if resistance_level - tolerance <= high <= resistance_level + tolerance:
+                    touches += 1
+                    # Check if it was rejected (closed below resistance - buffer)
+                    if close <= resistance_level * 0.997:  # Closed 0.3% below resistance
+                        rejections += 1
+            
+            if touches == 0:
+                return True  # No recent tests, allow
+            
+            rejection_rate = rejections / touches
+            logger.info(f"🔍 Resistance validation {symbol}: {rejections}/{touches} rejections ({rejection_rate:.2%})")
+            
+            return rejection_rate >= 0.5  # At least 50% rejection rate
+            
+        except Exception as e:
+            logger.error(f"Error validating resistance rejection: {e}", exc_info=True)
+            return False  # Fail safe - don't allow trades when rejection validation fails

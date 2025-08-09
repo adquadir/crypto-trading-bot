@@ -85,7 +85,7 @@ class PriceLevelAnalyzer:
             logger.error(f"Error analyzing {symbol}: {e}")
             return []
     
-    async def _get_historical_data(self, symbol: str, exchange_client) -> Optional[pd.DataFrame]:
+    async def _get_historical_data(self, symbol: str, exchange_client, days: int = 30) -> Optional[pd.DataFrame]:
         """Get historical OHLCV data - REAL DATA ONLY"""
         try:
             if not exchange_client:
@@ -94,11 +94,14 @@ class PriceLevelAnalyzer:
             
             logger.info(f"🔗 Using REAL Binance data for {symbol}")
             
+            # Calculate limit based on days requested (24 hours per day)
+            limit = min(days * 24, 1500)  # Binance API limit is 1500
+            
             # Use real exchange client with proper method
             klines = await exchange_client.get_klines(
                 symbol=symbol,
                 interval='1h',
-                limit=720  # 30 days * 24 hours
+                limit=limit
             )
             
             if not klines:

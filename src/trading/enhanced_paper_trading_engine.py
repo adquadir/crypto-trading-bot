@@ -133,7 +133,7 @@ class EnhancedPaperTradingEngine:
         self.running = True
         self.start_time = datetime.now()
         # Start monitoring and performance loops
-        asyncio.create_task(self._monitor_active_trades())
+        asyncio.create_task(self._position_monitoring_loop())
         asyncio.create_task(self._performance_tracking_loop())
         asyncio.create_task(self._learning_data_collection_loop())
         # NEW: start unified signal collection loop
