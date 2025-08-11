@@ -17,6 +17,64 @@ logger = logging.getLogger(__name__)
 class OpportunityManager:
     """Manages trading opportunities and their evaluation."""
     
+    def _normalize_direction(self, raw: Any) -> str:
+        """Map various labels to strict LONG/SHORT; never flip later."""
+        s = str(raw).strip().upper() if raw is not None else ""
+        if s in ("LONG", "BUY", "BULL", "UP"): return "LONG"
+        if s in ("SHORT", "SELL", "BEAR", "DOWN"): return "SHORT"
+        return "UNKNOWN"
+
+    def _fix_tp_sl_for_direction(self, direction: str, entry: float, tp: float, sl: float) -> tuple:
+        """
+        Ensure TP/SL are on the correct side of entry for the given direction.
+        Does not change direction; only adjusts levels if needed.
+        """
+        # tiny guard in % terms to avoid zero-distance levels
+        eps = max(entry * 0.0005, 1e-8)
+
+        if direction == "LONG":
+            if tp <= entry: tp = entry + max(eps, abs(entry - tp))
+            if sl >= entry: sl = entry - max(eps, abs(entry - sl))
+        elif direction == "SHORT":
+            if tp >= entry: tp = entry - max(eps, abs(entry - tp))
+            if sl <= entry: sl = entry + max(eps, abs(entry - sl))
+        return float(tp), float(sl)
+
+    def _finalize_opportunity(self, opp: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Last-mile guard before returning/storing an opportunity.
+        - Normalize direction
+        - Fix TP/SL placement to match direction
+        - Recompute R/R; never flip direction
+        """
+        original_direction = opp.get("direction")
+        direction = self._normalize_direction(original_direction)
+        
+        # Debug logging for direction changes
+        if str(original_direction).upper() != direction:
+            logger.warning(f"🔄 Direction normalized: {original_direction} → {direction} for {opp.get('symbol', 'UNKNOWN')}")
+        
+        opp["direction"] = direction
+
+        entry = float(opp.get("entry_price") or opp.get("entry") or 0.0)
+        tp    = float(opp.get("take_profit", 0.0))
+        sl    = float(opp.get("stop_loss", 0.0))
+
+        if entry > 0 and direction in ("LONG", "SHORT"):
+            tp, sl = self._fix_tp_sl_for_direction(direction, entry, tp, sl)
+            opp["take_profit"] = tp
+            opp["stop_loss"]   = sl
+
+            risk   = abs(entry - sl)
+            reward = abs(tp - entry)
+            opp["risk_reward"] = (reward / risk) if risk > 0 else opp.get("risk_reward", 0.0)
+
+        # keep common aliases consistent for frontend
+        opp["entry"] = opp.get("entry", entry) or entry
+        opp["confidence_score"] = opp.get("confidence_score", opp.get("confidence", 0.0))
+
+        return opp
+    
     def __init__(self, exchange_client: ExchangeClient, strategy_manager: StrategyManager, risk_manager: RiskManager, enhanced_signal_tracker=None):
         """Initialize the opportunity manager."""
         self.exchange_client = exchange_client
