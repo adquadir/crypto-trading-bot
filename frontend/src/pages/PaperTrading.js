@@ -74,6 +74,18 @@ const PaperTrading = () => {
   const [stoppingEngine, setStoppingEngine] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
 
+  // 🔧 POSITION ID NORMALIZATION HELPER - Handles backend field name variations
+  const getPositionId = (pos) => {
+    if (!pos || typeof pos !== 'object') return undefined;
+    // Most common variants first; extend as needed
+    for (const key of ['id', 'position_id', 'trade_id', '_id', 'uid']) {
+      if (pos[key] !== undefined && pos[key] !== null) return String(pos[key]);
+    }
+    // As a fallback, try a composite (symbol + entry_time) if backend supports it
+    if (pos.symbol && pos.entry_time) return `${pos.symbol}::${pos.entry_time}`;
+    return undefined;
+  };
+
   // 🎯 SIGNAL SOURCE DISPLAY MAPPING - Clear, accurate names
   const getSignalSourceDisplay = (signalSource) => {
     const sourceMap = {
@@ -166,6 +178,52 @@ const PaperTrading = () => {
   });
   const [changingRuleMode, setChangingRuleMode] = useState(false);
   const [showRuleConfig, setShowRuleConfig] = useState(false);
+
+  // Signal source toggles (independent)
+  const [signalSources, setSignalSources] = useState({
+    profit_scraping_enabled: true,
+    opportunity_manager_enabled: true,
+  });
+  const [updatingSignalSource, setUpdatingSignalSource] = useState(null);
+
+  const fetchSignalSources = async () => {
+    try {
+      const res = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/signal-sources`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data?.data) {
+        setSignalSources({
+          profit_scraping_enabled: Boolean(data.data.profit_scraping_enabled),
+          opportunity_manager_enabled: Boolean(data.data.opportunity_manager_enabled),
+        });
+      }
+    } catch (_) {
+      // Graceful fallback if backend route isn't live yet
+      setSignalSources((prev) => prev);
+    }
+  };
+
+  const handleSignalSourceToggle = async (sourceKey, enabled) => {
+    try {
+      setUpdatingSignalSource(sourceKey);
+      const res = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/signal-sources`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [sourceKey]: enabled }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.status === 'error') {
+        throw new Error(data?.message || data?.detail || `Failed to toggle ${sourceKey}`);
+      }
+      setSignalSources((prev) => ({ ...prev, [sourceKey]: enabled }));
+      setError(`✅ ${sourceKey.replace('_', ' ')} ${enabled ? 'enabled' : 'disabled'}`);
+      setTimeout(() => setError(null), 2500);
+    } catch (e) {
+      setError(e.message || `Failed to toggle ${sourceKey}`);
+    } finally {
+      setUpdatingSignalSource(null);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -271,6 +329,9 @@ const PaperTrading = () => {
         }
       }
       // If API fails, keep the default rule mode state
+
+      // Fetch signal sources
+      await fetchSignalSources();
     } catch (error) {
       console.error('Failed to fetch paper trading data:', error);
       console.error('Error details:', {
@@ -480,22 +541,21 @@ const PaperTrading = () => {
     return 'text.primary';
   };
 
-  const handleClosePosition = async (positionId) => {
+  const handleClosePosition = async (positionOrId) => {
+    const positionId = typeof positionOrId === 'string' ? positionOrId : getPositionId(positionOrId);
     try {
       console.log(`🔄 CLOSE REQUEST: Starting close for position ${positionId}`);
       
-      // Validate position ID
-      if (!positionId || typeof positionId !== 'string') {
-        console.error(`❌ CLOSE ERROR: Invalid position ID: ${positionId}`);
-        setError(`Invalid position ID: ${positionId}`);
+      if (!positionId) {
+        console.error(`❌ CLOSE ERROR: Invalid position ID from position payload`);
+        setError(`Invalid position ID from position payload`);
         return;
       }
       
-      // Check if position exists in current positions
-      const position = positions.find(p => p.id === positionId);
+      const position = positions.find(p => getPositionId(p) === positionId);
       if (!position) {
         console.error(`❌ CLOSE ERROR: Position ${positionId} not found in current positions`);
-        console.log(`📊 Available positions:`, positions.map(p => ({ id: p.id, symbol: p.symbol })));
+        console.log(`📊 Available positions:`, positions.map(p => ({ id: getPositionId(p), symbol: p.symbol })));
         setError(`Position ${positionId} not found`);
         return;
       }
@@ -512,13 +572,10 @@ const PaperTrading = () => {
       console.log(`🔒 CLOSE LOCK: Position ${positionId} marked as closing`);
       
       const requestBody = { exit_reason: 'manual_close' };
-      console.log(`📤 CLOSE REQUEST: Sending to API`, {
-        url: `${config.API_BASE_URL}/api/v1/paper-trading/positions/${positionId}/close`,
-        method: 'POST',
-        body: requestBody
-      });
+      const url = `${config.API_BASE_URL}/api/v1/paper-trading/positions/${encodeURIComponent(positionId)}/close`;
+      console.log(`📤 CLOSE REQUEST:`, { url, method: 'POST', body: requestBody });
       
-      const response = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/positions/${positionId}/close`, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody)
@@ -859,6 +916,74 @@ const PaperTrading = () => {
         </CardContent>
       </Card>
 
+      {/* Signal Source Toggles */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" fontWeight="bold" gutterBottom>
+            🎯 Signal Sources
+          </Typography>
+
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={!!signalSources.profit_scraping_enabled}
+                    onChange={(e) => handleSignalSourceToggle('profit_scraping_enabled', e.target.checked)}
+                    disabled={!!updatingSignalSource}
+                    color="primary"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body1" fontWeight="bold">Profit Scraper</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Allow Profit Scraper to open **new** positions.
+                    </Typography>
+                  </Box>
+                }
+              />
+            </Grid>
+
+            <Grid item xs={12} md={6}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={!!signalSources.opportunity_manager_enabled}
+                    onChange={(e) => handleSignalSourceToggle('opportunity_manager_enabled', e.target.checked)}
+                    disabled={!!updatingSignalSource}
+                    color="secondary"
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body1" fontWeight="bold">Opportunity Manager</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Allow Opportunity Manager to open **new** positions.
+                    </Typography>
+                  </Box>
+                }
+              />
+            </Grid>
+          </Grid>
+
+          {updatingSignalSource && (
+            <Box display="flex" alignItems="center" gap={1} mt={1}>
+              <CircularProgress size={16} />
+              <Typography variant="body2" color="text.secondary">
+                Updating {updatingSignalSource.replace('_',' ')}…
+              </Typography>
+            </Box>
+          )}
+
+          <Alert severity="info" sx={{ mt: 2 }}>
+            <Typography variant="body2">
+              These toggles only affect <strong>new</strong> entries. Existing positions continue under their original rules.
+            </Typography>
+          </Alert>
+        </CardContent>
+      </Card>
+
       {error && (
         <Alert 
           severity={error.includes('✅') ? 'success' : 'error'} 
@@ -1107,13 +1232,14 @@ const PaperTrading = () => {
                         </TableHead>
                         <TableBody>
                           {positions.map((position, index) => {
+                            const pid = getPositionId(position);
                             const priceChange = position.current_price && position.entry_price 
                               ? ((position.current_price - position.entry_price) / position.entry_price) * 100
                               : 0;
                             const priceChangeColor = priceChange > 0 ? 'success.main' : priceChange < 0 ? 'error.main' : 'text.secondary';
                             
                             return (
-                              <TableRow key={index}>
+                              <TableRow key={pid || index}>
                                 <TableCell>
                                   <Typography variant="body2" fontWeight="bold">
                                     {position.symbol}
@@ -1181,12 +1307,12 @@ const PaperTrading = () => {
                                     size="small"
                                     variant="outlined"
                                     color="error"
-                                    startIcon={closingPositions.has(position.id) ? <CircularProgress size={16} /> : <CloseIcon />}
-                                    onClick={() => handleClosePosition(position.id)}
-                                    disabled={closingPositions.has(position.id)}
+                                    startIcon={closingPositions.has(pid) ? <CircularProgress size={16} /> : <CloseIcon />}
+                                    onClick={() => handleClosePosition(position)}
+                                    disabled={!pid || closingPositions.has(pid)}
                                     sx={{ minWidth: 'auto', px: 1 }}
                                   >
-                                    {closingPositions.has(position.id) ? 'Closing...' : 'Close'}
+                                    {closingPositions.has(pid) ? 'Closing...' : 'Close'}
                                   </Button>
                                 </TableCell>
                               </TableRow>

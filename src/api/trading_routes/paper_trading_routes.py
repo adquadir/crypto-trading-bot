@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from src.trading.enhanced_paper_trading_engine import EnhancedPaperTradingEngine
 from src.config.flow_trading_config import get_config_manager
 from src.utils.config import load_config
+from src.trading.signal_config import get_signal_config, set_signal_config
 
 logger = logging.getLogger(__name__)
 
@@ -1871,6 +1872,10 @@ class RuleConfigUpdate(BaseModel):
     absolute_floor_dollars: float = 15.0 # $15 gross = $7 net
     stop_loss_percent: float = 0.5
 
+class SignalConfigUpdate(BaseModel):
+    profit_scraping_enabled: Optional[bool] = None
+    opportunity_manager_enabled: Optional[bool] = None
+
 @router.post("/rule-config")
 async def update_rule_configuration(config: RuleConfigUpdate):
     """⚙️ UPDATE RULE CONFIGURATION PARAMETERS"""
@@ -2149,3 +2154,122 @@ async def enable_fallback_mode():
     except Exception as e:
         logger.error(f"Error enabling fallback mode: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to enable fallback mode: {str(e)}")
+
+# ============================================================================
+# INDEPENDENT SIGNAL SOURCE TOGGLES (NEW IMPLEMENTATION)
+# ============================================================================
+
+class EngineToggleRequest(BaseModel):
+    engine: str  # "opportunity_manager" or "profit_scraper"
+    enabled: bool
+
+@router.get("/engines")
+async def get_engines_status():
+    """🎯 GET ENGINE STATUS (Frontend Compatible)"""
+    try:
+        config = get_signal_config()
+        
+        return {
+            "status": "success",
+            "data": {
+                "opportunity_manager": config.get("opportunity_manager_enabled", True),
+                "profit_scraper": config.get("profit_scraping_enabled", True)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting engines status: {e}")
+        return {
+            "status": "success",
+            "data": {
+                "opportunity_manager": True,
+                "profit_scraper": True
+            }
+        }
+
+@router.post("/engine-toggle")
+async def toggle_engine(request: EngineToggleRequest):
+    """🎯 TOGGLE ENGINE ON/OFF (Frontend Compatible)"""
+    try:
+        logger.info(f"🎯 ENGINE TOGGLE: {request.engine} -> {request.enabled}")
+        
+        # Validate engine name
+        if request.engine not in ["opportunity_manager", "profit_scraper"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid engine name. Must be 'opportunity_manager' or 'profit_scraper'"
+            )
+        
+        # Map frontend engine names to backend config keys
+        config_key = f"{request.engine.replace('_', '_')}_enabled"
+        if request.engine == "profit_scraper":
+            config_key = "profit_scraping_enabled"
+        
+        # Update the configuration
+        updates = {config_key: request.enabled}
+        new_config = set_signal_config(updates)
+        
+        # Log the change
+        action = "ENABLED" if request.enabled else "DISABLED"
+        engine_display = request.engine.replace('_', ' ').title()
+        logger.info(f"✅ {engine_display} {action}")
+        
+        return {
+            "status": "success",
+            "message": f"{engine_display} {action.lower()} successfully",
+            "data": {
+                "opportunity_manager": new_config.get("opportunity_manager_enabled", True),
+                "profit_scraper": new_config.get("profit_scraping_enabled", True)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling engine: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to toggle engine: {str(e)}")
+
+@router.get("/signal-sources")
+async def get_signal_sources_config():
+    """🎯 GET INDEPENDENT SIGNAL SOURCE CONFIGURATION"""
+    try:
+        config = get_signal_config()
+        
+        return {
+            "status": "success",
+            "data": config
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting signal sources config: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to get signal sources config: {str(e)}",
+            "data": {
+                "profit_scraping_enabled": True,
+                "opportunity_manager_enabled": True
+            }
+        }
+
+@router.post("/signal-sources")
+async def update_signal_sources_config(config: SignalConfigUpdate):
+    """🎯 UPDATE INDEPENDENT SIGNAL SOURCE CONFIGURATION"""
+    try:
+        # Build update dictionary from provided values
+        updates = {}
+        if config.profit_scraping_enabled is not None:
+            updates['profit_scraping_enabled'] = config.profit_scraping_enabled
+        if config.opportunity_manager_enabled is not None:
+            updates['opportunity_manager_enabled'] = config.opportunity_manager_enabled
+        
+        # Update the configuration
+        new_config = set_signal_config(updates)
+        
+        return {
+            "status": "success",
+            "data": new_config
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating signal sources config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update signal sources config: {str(e)}")

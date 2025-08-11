@@ -49,12 +49,20 @@ class PriceLevelAnalyzer:
         self.min_touches = min_touches
         self.min_strength = min_strength
         self.lookback_days = 30
-        self.price_tolerance = 0.002  # 0.2% tolerance for level clustering
+        # Remove static tolerance - will use ATR-adaptive from engine
         
-    async def analyze_symbol(self, symbol: str, exchange_client) -> List[PriceLevel]:
+    async def analyze_symbol(self, symbol: str, exchange_client, profit_scraping_engine=None) -> List[PriceLevel]:
         """Analyze a symbol and return identified price levels"""
         try:
             logger.info(f"🔍 Analyzing price levels for {symbol}")
+            
+            # Get ATR-adaptive tolerance for clustering
+            if profit_scraping_engine:
+                clustering_tolerance = await profit_scraping_engine.get_level_clustering_tolerance(symbol)
+                logger.info(f"📊 Using ATR-adaptive clustering tolerance: {clustering_tolerance*100:.3f}%")
+            else:
+                clustering_tolerance = 0.002  # Fallback to static
+                logger.warning(f"⚠️ No profit scraping engine provided, using static tolerance: {clustering_tolerance*100:.2f}%")
             
             # Get historical data
             historical_data = await self._get_historical_data(symbol, exchange_client)
@@ -65,9 +73,9 @@ class PriceLevelAnalyzer:
             # Find pivot points
             pivot_highs, pivot_lows = self._find_pivot_points(historical_data)
             
-            # Cluster similar price levels
-            support_levels = self._cluster_price_levels(pivot_lows, historical_data, 'support')
-            resistance_levels = self._cluster_price_levels(pivot_highs, historical_data, 'resistance')
+            # Cluster similar price levels with adaptive tolerance
+            support_levels = self._cluster_price_levels(pivot_lows, historical_data, 'support', clustering_tolerance)
+            resistance_levels = self._cluster_price_levels(pivot_highs, historical_data, 'resistance', clustering_tolerance)
             
             # Combine and validate levels
             all_levels = support_levels + resistance_levels
@@ -265,7 +273,7 @@ class PriceLevelAnalyzer:
             logger.error(f"Error finding pivot points: {e}")
             return [], []
     
-    def _cluster_price_levels(self, prices: List[float], df: pd.DataFrame, level_type: str) -> List[PriceLevel]:
+    def _cluster_price_levels(self, prices: List[float], df: pd.DataFrame, level_type: str, clustering_tolerance: float) -> List[PriceLevel]:
         """Cluster similar price levels using DBSCAN"""
         try:
             if len(prices) < 3:
@@ -277,7 +285,7 @@ class PriceLevelAnalyzer:
             # Use DBSCAN to cluster similar prices
             # eps is the maximum distance between points (as percentage of price)
             avg_price = np.mean(prices)
-            eps = avg_price * self.price_tolerance  # 0.2% tolerance
+            eps = avg_price * clustering_tolerance  # 0.2% tolerance
             
             clustering = DBSCAN(eps=eps, min_samples=2).fit(price_array)
             
@@ -336,7 +344,7 @@ class PriceLevelAnalyzer:
             touches = []
             volumes = []
             
-            tolerance = level_price * self.price_tolerance
+            tolerance = level_price * 0.002 # Use static tolerance for bounce analysis
             
             for i, row in df.iterrows():
                 # Check if price touched this level

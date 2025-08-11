@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 import json
 import uuid
+from src.trading.signal_config import is_profit_scraping_enabled, is_opportunity_manager_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -863,17 +864,20 @@ class EnhancedPaperTradingEngine:
                     await asyncio.sleep(poll_interval_sec)
                     continue
 
-                # Collect from profit scraping engine if available
+                # Collect from profit scraping engine if available AND enabled
                 profit_signals: List[Dict[str, Any]] = []
-                if hasattr(self, 'profit_scraping_engine') and self.profit_scraping_engine:
+                if is_profit_scraping_enabled() and hasattr(self, 'profit_scraping_engine') and self.profit_scraping_engine:
                     try:
                         profit_signals = await self.profit_scraping_engine.get_ready_to_trade_signals()
+                        logger.debug(f"🎯 Profit scraping signals collected: {len(profit_signals)} (enabled: {is_profit_scraping_enabled()})")
                     except Exception as e:
                         logger.warning(f"Error fetching profit scraping signals: {e}")
+                elif not is_profit_scraping_enabled():
+                    logger.debug("🚫 Profit scraping signals disabled by configuration")
 
-                # Collect from opportunity manager if available
+                # Collect from opportunity manager if available AND enabled
                 opp_signals: List[Dict[str, Any]] = []
-                if self.opportunity_manager:
+                if is_opportunity_manager_enabled() and self.opportunity_manager:
                     try:
                         opportunities = self.opportunity_manager.get_opportunities()
                         if isinstance(opportunities, dict):
@@ -926,8 +930,11 @@ class EnhancedPaperTradingEngine:
                                 opp_signals.append(unified)
                         else:
                             logger.warning("OpportunityManager.get_opportunities() returned unsupported type")
+                        logger.debug(f"🎯 Opportunity manager signals collected: {len(opp_signals)} (enabled: {is_opportunity_manager_enabled()})")
                     except Exception as e:
                         logger.warning(f"Error fetching opportunities: {e}")
+                elif not is_opportunity_manager_enabled():
+                    logger.debug("🚫 Opportunity manager signals disabled by configuration")
 
                 # Merge and execute, respecting limits
                 for signal in (*profit_signals, *opp_signals):
@@ -962,4 +969,4 @@ class EnhancedPaperTradingEngine:
 
     @property
     def is_running(self) -> bool:
-        return self.running 
+        return self.running

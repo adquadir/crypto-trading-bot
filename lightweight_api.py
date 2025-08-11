@@ -285,6 +285,82 @@ def create_app():
             logger.error(f"Error stopping paper trading: {e}")
             return {"success": False, "message": str(e)}
 
+    @app.post("/api/v1/paper-trading/positions/{position_id}/close")
+    async def close_position(position_id: str):
+        """Close a specific position - CRITICAL MISSING ENDPOINT"""
+        try:
+            logger.info(f"🔄 CLOSE REQUEST: Received request to close position {position_id}")
+            
+            if not components['initialization_complete'] or not components['paper_trading_engine']:
+                logger.error(f"❌ CLOSE ERROR: System not ready - init: {components['initialization_complete']}, engine: {components['paper_trading_engine'] is not None}")
+                raise HTTPException(status_code=503, detail="Paper trading engine not available")
+            
+            # Validate position_id
+            if not position_id or not isinstance(position_id, str) or len(position_id.strip()) == 0:
+                logger.error(f"❌ CLOSE ERROR: Invalid position_id: '{position_id}'")
+                raise HTTPException(status_code=400, detail=f"Invalid position ID: '{position_id}'")
+            
+            position_id = position_id.strip()
+            logger.info(f"🔍 CLOSE: Looking for position {position_id}")
+            
+            engine = components['paper_trading_engine']
+            
+            # Check if position exists
+            if not hasattr(engine, 'virtual_positions') or position_id not in engine.virtual_positions:
+                available_positions = list(engine.virtual_positions.keys()) if hasattr(engine, 'virtual_positions') else []
+                logger.error(f"❌ CLOSE ERROR: Position {position_id} not found")
+                logger.error(f"📊 CLOSE: Available positions: {available_positions}")
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Position '{position_id}' not found. Available positions: {available_positions}"
+                )
+            
+            # Get position details
+            position = engine.virtual_positions[position_id]
+            logger.info(f"📋 CLOSE: Found position {position_id} - {position.symbol} {position.side}")
+            
+            # Close the position
+            logger.info(f"🔄 CLOSE: Calling engine.close_position for {position_id}")
+            
+            # Try different close methods based on what's available
+            if hasattr(engine, 'close_position'):
+                trade = await engine.close_position(position_id, "manual_close")
+            elif hasattr(engine, 'close_virtual_position'):
+                trade = await engine.close_virtual_position(position_id, "manual_close")
+            else:
+                logger.error(f"❌ CLOSE ERROR: No close method available on engine")
+                raise HTTPException(status_code=500, detail="Close method not available on trading engine")
+            
+            if trade:
+                logger.info(f"✅ CLOSE SUCCESS: Position {position_id} closed successfully")
+                logger.info(f"💰 CLOSE: P&L: ${getattr(trade, 'pnl', 0):.2f}")
+                
+                return {
+                    "status": "success",
+                    "message": f"Position closed successfully",
+                    "trade": {
+                        "id": getattr(trade, 'id', position_id),
+                        "symbol": getattr(trade, 'symbol', position.symbol),
+                        "side": getattr(trade, 'side', position.side),
+                        "pnl": getattr(trade, 'pnl', 0),
+                        "exit_reason": "manual_close"
+                    },
+                    "account_update": {
+                        "new_balance": getattr(engine, 'virtual_balance', 0)
+                    }
+                }
+            else:
+                logger.error(f"❌ CLOSE FAILED: Close method returned None for {position_id}")
+                raise HTTPException(status_code=500, detail="Failed to close position - engine returned None")
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"❌ CLOSE CRITICAL ERROR: {e}")
+            import traceback
+            logger.error(f"❌ CLOSE TRACEBACK: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
     # Basic endpoints for other features
     @app.get("/api/v1/paper-trading/strategies")
     async def get_strategies():

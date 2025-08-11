@@ -55,13 +55,14 @@ class StatisticalCalculator:
         
     def calculate_targets(self, level: PriceLevel, current_price: float, 
                          historical_data: pd.DataFrame, 
-                         magnet_level: Optional[MagnetLevel] = None) -> Optional[TradingTargets]:
+                         magnet_level: Optional[MagnetLevel] = None,
+                         adaptive_tolerance: float = 0.003) -> Optional[TradingTargets]:
         """Calculate optimal trading targets for a price level"""
         try:
             logger.info(f"📊 Calculating targets for {level.level_type} level at ${level.price:.2f}")
             
-            # Analyze historical bounces from this level
-            bounce_analysis = self._analyze_historical_bounces(level, historical_data)
+            # Analyze historical bounces from this level with adaptive tolerance
+            bounce_analysis = self._analyze_historical_bounces(level, historical_data, adaptive_tolerance)
             
             if not bounce_analysis or bounce_analysis['sample_size'] < 5:
                 logger.warning(f"Insufficient bounce data for level ${level.price:.2f}")
@@ -110,7 +111,8 @@ class StatisticalCalculator:
             return None
     
     def _analyze_historical_bounces(self, level: PriceLevel, 
-                                  historical_data: pd.DataFrame) -> Optional[Dict]:
+                                  historical_data: pd.DataFrame,
+                                  adaptive_tolerance: float = 0.003) -> Optional[Dict]:
         """Analyze historical bounce behavior at this level"""
         try:
             bounces = []
@@ -118,7 +120,7 @@ class StatisticalCalculator:
             durations = []
             volumes = []
             
-            tolerance = level.price * 0.003  # 0.3% tolerance
+            tolerance = level.price * adaptive_tolerance  # Use adaptive tolerance
             
             for i in range(len(historical_data) - 10):  # Need future data
                 row = historical_data.iloc[i]

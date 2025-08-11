@@ -198,21 +198,66 @@ class ProfitScrapingEngine:
             }
             
             # Calculate volatility regime for logging
-            if final_tolerance <= 0.002:
-                regime = "CALM"
-            elif final_tolerance <= 0.004:
-                regime = "NORMAL"
-            elif final_tolerance <= 0.006:
-                regime = "ACTIVE"
-            else:
-                regime = "VOLATILE"
+            volatility_regime = self._get_volatility_regime(atr_pct)
+            logger.info(f"📊 ATR ADAPTIVE: {symbol} = {final_tolerance*100:.2f}% "
+                       f"(ATR: {atr_pct*100:.2f}%, Regime: {volatility_regime})")
             
-            logger.info(f"📊 ATR ADAPTIVE: {symbol} = {final_tolerance*100:.2f}% [{regime}] (ATR: {atr_pct*100:.2f}%)")
             return final_tolerance
             
         except Exception as e:
-            logger.warning(f"⚠️ ATR ERROR: {symbol} calculation failed ({e}), using base {base_pct*100:.2f}%")
+            logger.error(f"❌ ATR calculation error for {symbol}: {e}")
             return base_pct
+    
+    def _get_volatility_regime(self, atr_pct: float) -> str:
+        """Classify market volatility regime based on ATR percentage"""
+        if atr_pct < 0.015:  # < 1.5%
+            return "CALM"
+        elif atr_pct < 0.035:  # 1.5-3.5%
+            return "NORMAL"
+        elif atr_pct < 0.055:  # 3.5-5.5%
+            return "ELEVATED"
+        else:  # > 5.5%
+            return "HIGH"
+    
+    async def get_level_clustering_tolerance(self, symbol: str) -> float:
+        """Get ATR-adaptive tolerance for price level clustering"""
+        return await self._get_atr_adaptive_tolerance(
+            symbol, 
+            min_pct=0.001,      # 0.1% minimum for tight clustering
+            max_pct=0.005,      # 0.5% maximum for loose clustering
+            atr_fraction=0.2,   # Use 20% of ATR for clustering
+            base_pct=0.002      # 0.2% fallback
+        )
+    
+    async def get_level_validation_tolerance(self, symbol: str) -> float:
+        """Get ATR-adaptive tolerance for level validation (touches, bounces)"""
+        return await self._get_atr_adaptive_tolerance(
+            symbol,
+            min_pct=0.003,      # 0.3% minimum for level validation
+            max_pct=0.012,      # 1.2% maximum for volatile markets
+            atr_fraction=0.4,   # Use 40% of ATR for validation
+            base_pct=0.005      # 0.5% fallback
+        )
+    
+    async def get_entry_tolerance(self, symbol: str) -> float:
+        """Get ATR-adaptive tolerance for trade entry points"""
+        return await self._get_atr_adaptive_tolerance(
+            symbol,
+            min_pct=0.002,      # 0.2% minimum for precise entries
+            max_pct=0.008,      # 0.8% maximum for volatile entries
+            atr_fraction=0.25,  # Use 25% of ATR for entries
+            base_pct=0.003      # 0.3% fallback
+        )
+    
+    async def get_proximity_tolerance(self, symbol: str) -> float:
+        """Get ATR-adaptive tolerance for proximity checks (distance to levels)"""
+        return await self._get_atr_adaptive_tolerance(
+            symbol,
+            min_pct=0.005,      # 0.5% minimum for proximity
+            max_pct=0.020,      # 2.0% maximum for volatile proximity
+            atr_fraction=0.5,   # Use 50% of ATR for proximity
+            base_pct=0.010      # 1.0% fallback
+        )
     
     def _calculate_rule_based_targets(self, level: PriceLevel, current_price: float, symbol: str) -> TradingTargets:
         """Calculate targets based on rule mode configuration instead of statistical analysis"""
@@ -421,8 +466,8 @@ class ProfitScrapingEngine:
             if not current_price:
                 return
             
-            # Analyze price levels
-            price_levels = await self.level_analyzer.analyze_symbol(symbol, self.exchange_client)
+            # Analyze price levels with ATR-adaptive tolerance
+            price_levels = await self.level_analyzer.analyze_symbol(symbol, self.exchange_client, profit_scraping_engine=self)
             self.identified_levels[symbol] = price_levels
             
             # Detect magnet levels
@@ -505,10 +550,11 @@ class ProfitScrapingEngine:
                 return
             
             for opportunity in opportunities:
-                # Check if price is near the level (within 0.2%)
+                # Check if price is near the level - use ATR-adaptive tolerance
                 distance_to_level = abs(current_price - opportunity.level.price) / opportunity.level.price
+                proximity_tolerance = await self.get_proximity_tolerance(opportunity.symbol)
                 
-                if distance_to_level <= 0.003:  # Within 0.3% (BALANCED - was 0.2%)
+                if distance_to_level <= proximity_tolerance:  # ATR-adaptive proximity gate
                     # Additional entry validation
                     if await self._validate_entry_conditions(opportunity, current_price):
                         # FIXED: Only emit signals - do NOT execute trades directly
@@ -530,15 +576,18 @@ class ProfitScrapingEngine:
                 logger.info(f"❌ STALE LEVEL: {symbol} level @ {level.price:.6f} no longer relevant")
                 return False
             
+            # Get ATR-adaptive entry tolerance for strict bounds validation
+            tol_pct = await self.get_entry_tolerance(symbol)
+            
             # PROFIT SCRAPING FIX: Use trend filtering with bounds validation
             market_trend = await self._detect_market_trend(symbol)
             
             if level.level_type == 'support':
-                # FIX #1: Two-sided bounds - price must be ABOVE the level, not below
-                lower = level.price * 1.000   # ≥ level (don't go long below support)
-                upper = level.price * 1.003   # ≤ +0.3% above level (BALANCED - was 0.2%)
+                # ATR-ADAPTIVE BOUNDS: price must be ABOVE the level, not below
+                lower = level.price * 1.000            # never long below the level
+                upper = level.price * (1 + tol_pct)    # allow only a small move above
                 if not (lower <= current_price <= upper):
-                    logger.info(f"❌ BOUNDS CHECK: {symbol} price ${current_price:.6f} not in support range [${lower:.6f}, ${upper:.6f}]")
+                    logger.info(f"❌ BOUNDS CHECK: {symbol} price ${current_price:.6f} not in support range [${lower:.6f}, ${upper:.6f}] (tolerance: {tol_pct*100:.3f}%)")
                     return False
                 
                 # HARDENED TREND CHECK: Block more counter-trend trades
@@ -562,11 +611,11 @@ class ProfitScrapingEngine:
                 return True
             
             elif level.level_type == 'resistance':
-                # FIX #1: Two-sided bounds - price must be BELOW the level, not above  
-                lower = level.price * 0.997   # ≥ -0.3% below level (BALANCED - was 0.2%)
-                upper = level.price * 1.000   # ≤ level (don't go short above resistance)
+                # ATR-ADAPTIVE BOUNDS: price must be BELOW the level, not above
+                lower = level.price * (1 - tol_pct)    # allow only a small move below
+                upper = level.price * 1.000            # never short above the level
                 if not (lower <= current_price <= upper):
-                    logger.info(f"❌ BOUNDS CHECK: {symbol} price ${current_price:.6f} not in resistance range [${lower:.6f}, ${upper:.6f}]")
+                    logger.info(f"❌ BOUNDS CHECK: {symbol} price ${current_price:.6f} not in resistance range [${lower:.6f}, ${upper:.6f}] (tolerance: {tol_pct*100:.3f}%)")
                     return False
                 
                 # HARDENED TREND CHECK: Block more counter-trend trades
@@ -589,8 +638,6 @@ class ProfitScrapingEngine:
             
             return True
             
-            return False  # Unknown level type
-            
         except Exception as e:
             logger.error(f"Error validating entry conditions: {e}")
             return False
@@ -604,40 +651,45 @@ class ProfitScrapingEngine:
                 logger.warning(f"Insufficient data for confirmation candle check: {symbol}")
                 return False  # Fail safe - don't allow trades without candle confirmation
             
-            # Get the last completed candle (not the current forming one)
-            last_candle = recent_data.iloc[-2]  # Previous candle
-            current_candle = recent_data.iloc[-1]  # Current candle
+            # Get ATR-adaptive tolerance and derive close buffer
+            tol_pct = await self.get_level_validation_tolerance(symbol)
+            close_pct = tol_pct * 0.8  # Tighter close buffer - 80% of touch tolerance
             
+            # Get the last closed candle (not the current forming one)
+            last_candle = recent_data.iloc[-2]  # Second to last (fully closed candle)
             open_price = float(last_candle['open'])
             high_price = float(last_candle['high'])
             low_price = float(last_candle['low'])
             close_price = float(last_candle['close'])
             
             if direction == 'LONG' and level.level_type == 'support':
-                # For LONG: Need a hammer/bullish candle that touched support and closed above it
-                touched_support = low_price <= level.price * 1.003  # Wick touched support (BALANCED - was 0.2%)
-                closed_above_support = close_price >= level.price * 1.002  # Closed above support
-                bullish_close = close_price > open_price  # Bullish candle
+                # For LONG: Wick can touch within tolerance, close must be tighter
+                touched = low_price <= level.price * (1 + tol_pct)    # Wick touched support
+                closed = close_price >= level.price * (1 + close_pct)  # Closed above support (tighter)
+                bullish = close_price > open_price                     # Bullish candle
                 
-                confirmation = touched_support and closed_above_support and bullish_close
-                logger.info(f"🕯️ LONG confirmation {symbol}: Touch={touched_support}, CloseAbove={closed_above_support}, Bullish={bullish_close} → {confirmation}")
+                confirmation = touched and closed and bullish
+                logger.info(f"🕯️ LONG confirmation {symbol}: Touch={touched}, Close={closed}, Bullish={bullish} → {confirmation} "
+                           f"(touch: {tol_pct*100:.3f}%, close: {close_pct*100:.3f}%)")
                 return confirmation
                 
             elif direction == 'SHORT' and level.level_type == 'resistance':
-                # For SHORT: Need a shooting star/bearish candle that touched resistance and closed below it
-                touched_resistance = high_price >= level.price * 0.997  # Wick touched resistance (BALANCED - was 0.2%)
-                closed_below_resistance = close_price <= level.price * 0.998  # Closed below resistance
-                bearish_close = close_price < open_price  # Bearish candle
+                # For SHORT: Wick can touch within tolerance, close must be tighter
+                touched = high_price >= level.price * (1 - tol_pct)    # Wick touched resistance
+                closed = close_price <= level.price * (1 - close_pct)  # Closed below resistance (tighter)
+                bearish = close_price < open_price                      # Bearish candle
                 
-                confirmation = touched_resistance and closed_below_resistance and bearish_close
-                logger.info(f"🕯️ SHORT confirmation {symbol}: Touch={touched_resistance}, CloseBelow={closed_below_resistance}, Bearish={bearish_close} → {confirmation}")
+                confirmation = touched and closed and bearish
+                logger.info(f"🕯️ SHORT confirmation {symbol}: Touch={touched}, Close={closed}, Bearish={bearish} → {confirmation} "
+                           f"(touch: {tol_pct*100:.3f}%, close: {close_pct*100:.3f}%)")
                 return confirmation
             
+            logger.warning(f"Invalid direction/level combination: {direction}/{level.level_type}")
             return False
             
         except Exception as e:
-            logger.error(f"Error waiting for confirmation candle: {e}", exc_info=True)
-            return False  # Fail safe - don't allow trades when confirmation data is flaky
+            logger.error(f"Error checking confirmation candle: {e}")
+            return False  # Fail safe - don't allow trades when candle confirmation fails
     
     async def _execute_trade(self, opportunity: ScrapingOpportunity, current_price: float):
         """Execute a profit scraping trade"""
@@ -988,10 +1040,11 @@ class ProfitScrapingEngine:
                         continue
                     
                     for opportunity in opportunities:
-                        # Check if price is near the level (within 0.2%)
+                        # Check if price is near the level - use ATR-adaptive tolerance
                         distance_to_level = abs(current_price - opportunity.level.price) / opportunity.level.price
+                        proximity_tolerance = await self.get_proximity_tolerance(opportunity.symbol)
                         
-                        if distance_to_level <= 0.003:  # Within 0.3% (BALANCED - was 0.2%)
+                        if distance_to_level <= proximity_tolerance:  # ATR-adaptive proximity gate
                             # Additional entry validation
                             if await self._validate_entry_conditions(opportunity, current_price):
                                 # Create trading signal
@@ -1163,7 +1216,11 @@ class ProfitScrapingEngine:
             
             # 4. Recent interaction check - level should have been tested recently to be valid
             recent_touches = 0
-            tolerance = level.price * 0.01  # 1% tolerance for recent touches
+            # Use ATR-adaptive tolerance for level validation
+            validation_tolerance_pct = await self.get_level_validation_tolerance(symbol)
+            tolerance = level.price * validation_tolerance_pct
+            
+            logger.debug(f"📊 Using adaptive validation tolerance: {validation_tolerance_pct*100:.3f}% for {symbol}")
             
             for _, candle in recent_data.tail(20).iterrows():  # Last 20 candles
                 high = float(candle['high'])
@@ -1194,9 +1251,13 @@ class ProfitScrapingEngine:
                 logger.warning(f"Insufficient data to validate support bounce for {symbol}")
                 return False  # Fail safe - don't allow trades without bounce confirmation
             
+            # Get ATR-adaptive tolerances with close buffer
+            tol_pct = await self.get_level_validation_tolerance(symbol)
+            tolerance = support_level * tol_pct
+            close_up_pct = max(0.002, tol_pct * 0.8)  # LONG close buffer with 0.2% minimum
+            
             # Check recent 10 candles for bounce pattern
             recent_candles = historical_data.tail(10)
-            tolerance = support_level * 0.003  # 0.3% tolerance (BALANCED - was 0.2%)
             
             touches = 0
             bounces = 0
@@ -1208,18 +1269,19 @@ class ProfitScrapingEngine:
                 # Check if candle touched the support level
                 if support_level - tolerance <= low <= support_level + tolerance:
                     touches += 1
-                    # Check if it bounced (closed above support + buffer)
-                    if close >= support_level * 1.002:  # Closed 0.2% above support
+                    # Check if it bounced (closed above support + close buffer)
+                    if close >= support_level * (1 + close_up_pct):  # Confirm bounce
                         bounces += 1
             
             if touches == 0:
                 return True  # No recent tests, allow
             
-                bounce_rate = bounces / touches
-            logger.info(f"🔍 Support validation {symbol}: {bounces}/{touches} bounces ({bounce_rate:.2%})")
+            bounce_rate = bounces / touches
+            logger.info(f"🔍 Support validation {symbol}: {bounces}/{touches} bounces ({bounce_rate:.2%}) "
+                       f"(touch: {tol_pct*100:.3f}%, close: {close_up_pct*100:.3f}%)")
             
-                return bounce_rate >= 0.5  # At least 50% bounce rate
-                
+            return bounce_rate >= 0.5  # At least 50% bounce rate
+            
         except Exception as e:
             logger.error(f"Error validating support bounce: {e}", exc_info=True)
             return False  # Fail safe - don't allow trades when bounce validation fails
@@ -1233,9 +1295,13 @@ class ProfitScrapingEngine:
                 logger.warning(f"Insufficient data to validate resistance rejection for {symbol}")
                 return False  # Fail safe - don't allow trades without rejection confirmation
             
+            # Get ATR-adaptive tolerances with close buffer
+            tol_pct = await self.get_level_validation_tolerance(symbol)
+            tolerance = resistance_level * tol_pct
+            close_dn_pct = max(0.002, tol_pct * 0.8)  # SHORT close buffer with 0.2% minimum
+            
             # Check recent 10 candles for rejection pattern
             recent_candles = historical_data.tail(10)
-            tolerance = resistance_level * 0.003  # 0.3% tolerance (BALANCED - was 0.2%)
             
             touches = 0
             rejections = 0
@@ -1247,15 +1313,16 @@ class ProfitScrapingEngine:
                 # Check if candle touched the resistance level
                 if resistance_level - tolerance <= high <= resistance_level + tolerance:
                     touches += 1
-                    # Check if it was rejected (closed below resistance - buffer)
-                    if close <= resistance_level * 0.997:  # Closed 0.3% below resistance
+                    # Check if it was rejected (closed below resistance - close buffer)
+                    if close <= resistance_level * (1 - close_dn_pct):  # Confirm rejection
                         rejections += 1
             
             if touches == 0:
                 return True  # No recent tests, allow
             
             rejection_rate = rejections / touches
-            logger.info(f"🔍 Resistance validation {symbol}: {rejections}/{touches} rejections ({rejection_rate:.2%})")
+            logger.info(f"🔍 Resistance validation {symbol}: {rejections}/{touches} rejections ({rejection_rate:.2%}) "
+                       f"(touch: {tol_pct*100:.3f}%, close: {close_dn_pct*100:.3f}%)")
             
             return rejection_rate >= 0.5  # At least 50% rejection rate
             
