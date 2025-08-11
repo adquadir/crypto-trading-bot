@@ -16,6 +16,18 @@ from .price_level_analyzer import PriceLevelAnalyzer, PriceLevel
 from .magnet_level_detector import MagnetLevelDetector, MagnetLevel
 from .statistical_calculator import StatisticalCalculator, TradingTargets
 
+@dataclass
+class ToleranceProfile:
+    """Single source of truth for all ATR-based tolerances per symbol"""
+    atr_pct: float
+    regime: str
+    clustering_pct: float
+    validation_pct: float
+    entry_pct: float
+    proximity_pct: float
+    close_buffer_pct: float
+    ts: datetime
+
 # Import ML learning service
 try:
     from src.ml.ml_learning_service import get_ml_learning_service, TradeOutcome
@@ -66,6 +78,23 @@ class ActiveTrade:
     entry_time: datetime
     level_type: str
     confidence_score: int
+    # --- NEW: Dollar/percent step trail state ---
+    locked_profit_usd: float = 0.0
+    last_step_usd: float = 0.0
+    max_trail_cap_usd: float = 100.0
+    step_increment_usd: float = 10.0
+    step_mode_percent: bool = False      # False = $ steps, True = % steps
+    step_increment_pct: float = 0.002    # 0.2% per step if in % mode
+    # --- Anti-whipsaw & timing ---
+    step_cooldown_sec: int = 20
+    last_step_time: Optional[datetime] = None
+    hysteresis_pct: float = 0.0008       # ~0.08% beyond step to confirm
+    # --- Start criteria / fee aware ---
+    trail_start_net_usd: float = 18.0    # start trailing after this net
+    fee_buffer_usd: float = 0.40         # cover round-trip fees
+    # --- Cap hand-off to ATR trail ---
+    cap_handoff_tight_atr: bool = True
+    cap_trail_mult: float = 0.55         # ATR multiple for tight trail after cap
     
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -107,6 +136,12 @@ class ProfitScrapingEngine:
         self.account_balance = 10000          # RULE COMPLIANT: $10,000 virtual balance
         self.max_risk_per_trade = 0.05       # RULE COMPLIANT: 5% risk per trade = $500
         
+        # Performance tracking metrics
+        self.total_trades = 0
+        self.winning_trades = 0
+        self.total_profit = 0.0
+        self.start_time = None
+        
         # Rule-based target configuration
         paper_config = self.config.get('paper_trading', {})
         self.primary_target_dollars = float(paper_config.get('primary_target_dollars', 18.0))  # $18 gross
@@ -115,6 +150,83 @@ class ProfitScrapingEngine:
         self.position_size_usd = float(paper_config.get('stake_amount', 500.0))  # $500 per position
         
         logger.info(f"🎯 RULE-BASED TARGETS: TP=${self.primary_target_dollars}, Floor=${self.absolute_floor_dollars}, SL=${self.stop_loss_dollars}")
+    
+    # --- PATCH 1: ATR% + volatility helpers ---------------------------------
+    async def _get_atr_pct_latest(self, symbol: str, period: int = 14, days: int = 7) -> Optional[float]:
+        """Return latest ATR as a % of price (e.g. 0.018 == 1.8%). Cached via atr_cache."""
+        now = datetime.now()
+        # reuse existing cache container; store raw atr_pct under a different key
+        cache = self.atr_cache.get(symbol, {})
+        if cache and 'raw_atr_pct' in cache and now - cache.get('timestamp', now) < self.atr_cache_duration:
+            return cache['raw_atr_pct']
+
+        df = await self.level_analyzer._get_historical_data(symbol, self.exchange_client, days=days)
+        if df is None or len(df) < period + 5:
+            return None
+
+        highs = pd.to_numeric(df['high'], errors='coerce')
+        lows = pd.to_numeric(df['low'], errors='coerce')
+        closes = pd.to_numeric(df['close'], errors='coerce')
+        valid = ~(highs.isna() | lows.isna() | closes.isna())
+        if valid.sum() < period + 2:
+            return None
+
+        highs, lows, closes = highs[valid], lows[valid], closes[valid]
+        prev_close = closes.shift(1)
+        tr = pd.concat([(highs - lows), (highs - prev_close).abs(), (lows - prev_close).abs()], axis=1).max(axis=1)
+        atr = tr.rolling(window=period, min_periods=period).mean().iloc[-1]
+        price = float(closes.iloc[-1])
+        if pd.isna(atr) or price <= 0:
+            return None
+
+        atr_pct = float(atr / price)
+        self.atr_cache[symbol] = {'atr_pct': cache.get('atr_pct', 0.003),
+                                  'raw_atr_pct': atr_pct,
+                                  'timestamp': now}
+        return atr_pct
+
+    def _vol_mults_from_regime(self, atr_pct: float) -> Dict[str, float]:
+        """
+        Choose TP/SL/trail multipliers by regime. Keeps SL sane on HIGH vol,
+        and prevents impossible TP on CALM pairs.
+        """
+        regime = self._get_volatility_regime(atr_pct or 0.02)  # default NORMAL-ish
+        # tp_mult: how many ATR we target from level; sl_mult: ATR on the other side
+        if regime == "CALM":      # <1.5%
+            return {"tp_mult": 0.8, "sl_mult": 0.7, "trail_mult": 0.5, "be_mult": 0.6}
+        if regime == "NORMAL":    # 1.5–3.5%
+            return {"tp_mult": 1.1, "sl_mult": 0.9, "trail_mult": 0.7, "be_mult": 0.8}
+        if regime == "ELEVATED":  # 3.5–5.5%
+            return {"tp_mult": 1.3, "sl_mult": 1.0, "trail_mult": 0.9, "be_mult": 1.0}
+        # HIGH
+        return {"tp_mult": 1.6, "sl_mult": 1.1, "trail_mult": 1.2, "be_mult": 1.1}
+
+    async def _build_tolerance_profile(self, symbol: str) -> ToleranceProfile:
+        """Single source of truth for all ATR-based tolerances per symbol"""
+        atr_pct = await self._get_atr_pct_latest(symbol) or 0.02
+        regime = self._get_volatility_regime(atr_pct)
+
+        # Derive all tolerances from the same ATR% + regime, once.
+        # (Numbers reflect your current ranges but tied together deterministically.)
+        clustering = min(max(atr_pct * 0.20, 0.0010), 0.0050)
+        validation = min(max(atr_pct * 0.40, 0.0030), 0.0120)
+        entry      = min(max(atr_pct * 0.25, 0.0020), 0.0080)
+        proximity  = min(max(atr_pct * 0.50, 0.0050), 0.0200)
+
+        # Confirmation close buffer scales from validation; regime just nudges it
+        base_close = validation * 0.8
+        if regime == "CALM":      close_buf = max(0.0015, base_close * 0.75)
+        elif regime == "NORMAL":  close_buf = max(0.0020, base_close * 0.85)
+        elif regime == "ELEVATED":close_buf = max(0.0025, base_close * 0.95)
+        else:                     close_buf = max(0.0035, base_close * 1.00)
+
+        return ToleranceProfile(
+            atr_pct=atr_pct, regime=regime,
+            clustering_pct=clustering, validation_pct=validation,
+            entry_pct=entry, proximity_pct=proximity,
+            close_buffer_pct=close_buf, ts=datetime.now()
+        )
+    # ----------------------------------------------------------------------
     
     async def _get_atr_adaptive_tolerance(self, symbol: str, period: int = 14, days: int = 7,
                                         min_pct: float = 0.0015, max_pct: float = 0.008, 
@@ -208,6 +320,63 @@ class ProfitScrapingEngine:
             logger.error(f"❌ ATR calculation error for {symbol}: {e}")
             return base_pct
     
+    # --- PATCH 2: ATR-aware target calculator --------------------------------
+    async def _calculate_targets_atr_aware(self, level: PriceLevel, current_price: float, symbol: str) -> Optional[TradingTargets]:
+        try:
+            # Preserve your net-dollar policy as MIN floors
+            position_size_usd = self.position_size_usd
+            notional_value = position_size_usd * self.leverage
+            fee_rate = 0.0004
+            total_fees = position_size_usd * fee_rate * 2
+            net_target, net_stop, net_floor = 17.60, 17.60, 14.60
+            gross_target = net_target + total_fees
+            gross_stop   = net_stop   + total_fees
+            gross_floor  = net_floor  + total_fees
+
+            # Dollar floors → minimum percent move from level
+            min_tp_pct = float(gross_target / notional_value)
+            min_sl_pct = float(gross_stop   / notional_value)
+            min_fl_pct = float(gross_floor  / notional_value)
+
+            atr_pct = await self._get_atr_pct_latest(symbol) or 0.02  # 2% fallback
+            mults = self._vol_mults_from_regime(atr_pct)
+
+            # ATR-based distances (in % of price)
+            tp_pct_atr = atr_pct * mults["tp_mult"]
+            sl_pct_atr = atr_pct * mults["sl_mult"]
+            fl_pct_atr = atr_pct * mults["trail_mult"]  # floor activation "breakeven nudger"
+
+            # Final % distances = max(dollar-minimum, ATR-based)
+            tp_pct = max(min_tp_pct, tp_pct_atr)
+            sl_pct = max(min_sl_pct, sl_pct_atr)
+            fl_pct = max(min_fl_pct, fl_pct_atr)
+
+            if level.level_type == 'support':  # LONG
+                tp  = level.price * (1 + tp_pct)
+                sl  = level.price * (1 - sl_pct)
+                flp = level.price * (1 + fl_pct)
+            else:                               # SHORT
+                tp  = level.price * (1 - tp_pct)
+                sl  = level.price * (1 + sl_pct)
+                flp = level.price * (1 - fl_pct)
+
+            return TradingTargets(
+                entry_price=level.price,
+                profit_target=tp,
+                stop_loss=sl,
+                profit_probability=0.72,
+                risk_reward_ratio=tp_pct / sl_pct if sl_pct > 0 else 1.0,
+                expected_duration_minutes=35,
+                confidence_score=min(95, int(level.strength_score*0.6 + (1-abs(tp_pct-sl_pct))*40)),
+                take_profit_net_usd=net_target,
+                stop_loss_net_usd=net_stop,
+                floor_net_usd=net_floor
+            )
+        except Exception as e:
+            logger.error(f"ATR-aware target calc error for {symbol}: {e}")
+            return None
+    # ----------------------------------------------------------------------
+    
     def _get_volatility_regime(self, atr_pct: float) -> str:
         """Classify market volatility regime based on ATR percentage"""
         if atr_pct < 0.015:  # < 1.5%
@@ -218,6 +387,16 @@ class ProfitScrapingEngine:
             return "ELEVATED"
         else:  # > 5.5%
             return "HIGH"
+    
+    def _price_for_locked_usd(self, trade: ActiveTrade, locked_usd: float) -> float:
+        """Convert locked USD profit to stop-loss price."""
+        try:
+            denom = max(1e-12, trade.quantity * trade.leverage)
+            delta = locked_usd / denom
+            return trade.entry_price + delta if trade.side == 'LONG' else trade.entry_price - delta
+        except Exception as e:
+            logger.error(f"Error calculating price for locked USD {locked_usd}: {e}")
+            return trade.stop_loss
     
     async def get_level_clustering_tolerance(self, symbol: str) -> float:
         """Get ATR-adaptive tolerance for price level clustering"""
@@ -582,6 +761,26 @@ class ProfitScrapingEngine:
             # PROFIT SCRAPING FIX: Use trend filtering with bounds validation
             market_trend = await self._detect_market_trend(symbol)
             
+            # --- PATCH 3: stricter counter-trend gate --------------------------------
+            # Require much stronger level to fight the trend, and be very close to level
+            atr_pct = await self._get_atr_pct_latest(symbol) or 0.02
+            proximity_tolerance = await self.get_proximity_tolerance(symbol)
+
+            # Determine if this trade is counter-trend
+            is_counter = ((level.level_type == 'support' and market_trend in ['downtrend','strong_downtrend']) or
+                          (level.level_type == 'resistance' and market_trend in ['uptrend','strong_uptrend']))
+
+            if is_counter:
+                # much stricter: very strong level and price within half of proximity tolerance
+                if level.strength_score < 92:
+                    logger.info(f"❌ COUNTER-TREND BLOCK: {symbol} level strength {level.strength_score} < 92")
+                    return False
+                # Also require ATR-aware tightness to the level
+                if abs(current_price - level.price)/level.price > (proximity_tolerance * 0.5):
+                    logger.info(f"❌ COUNTER-TREND BLOCK: {symbol} too far from level for counter-trend entry")
+                    return False
+            # ----------------------------------------------------------------------
+            
             if level.level_type == 'support':
                 # ATR-ADAPTIVE BOUNDS: price must be ABOVE the level, not below
                 lower = level.price * 1.000            # never long below the level
@@ -653,7 +852,19 @@ class ProfitScrapingEngine:
             
             # Get ATR-adaptive tolerance and derive close buffer
             tol_pct = await self.get_level_validation_tolerance(symbol)
-            close_pct = tol_pct * 0.8  # Tighter close buffer - 80% of touch tolerance
+            
+            # --- PATCH 4: volatility-aware close buffer ------------------------------
+            regime = self._get_volatility_regime(await self._get_atr_pct_latest(symbol) or 0.02)
+            # tighten in CALM, relax in HIGH; still derived from tol_pct
+            if regime == "CALM":
+                close_pct = max(0.0015, tol_pct * 0.6)
+            elif regime == "NORMAL":
+                close_pct = max(0.0020, tol_pct * 0.7)
+            elif regime == "ELEVATED":
+                close_pct = max(0.0025, tol_pct * 0.8)
+            else:  # HIGH
+                close_pct = max(0.0035, tol_pct * 0.9)
+            # ----------------------------------------------------------------------
             
             # Get the last closed candle (not the current forming one)
             last_candle = recent_data.iloc[-2]  # Second to last (fully closed candle)
@@ -802,71 +1013,144 @@ class ProfitScrapingEngine:
             logger.error(f"Error executing trade: {e}")
     
     async def _monitor_active_trades(self):
-        """Monitor active trades for exit conditions"""
+        """Monitor active trades for exit conditions with enhanced step-trailing."""
         try:
             current_time = datetime.now()
-            
+
             for trade_id, trade in list(self.active_trades.items()):
                 current_price = await self._get_current_price(trade.symbol)
                 if not current_price:
                     continue
-                
+
                 # Check for profit target hit
-                profit_hit = False
-                if trade.side == 'LONG':
-                    profit_hit = current_price >= trade.profit_target
-                else:  # SHORT
-                    profit_hit = current_price <= trade.profit_target
-                
+                profit_hit = current_price >= trade.profit_target if trade.side == 'LONG' else current_price <= trade.profit_target
+
                 # Check for stop loss hit
-                stop_hit = False
-                if trade.side == 'LONG':
-                    stop_hit = current_price <= trade.stop_loss
-                else:  # SHORT
-                    stop_hit = current_price >= trade.stop_loss
-                
-                # PROFIT SCRAPING: Add time-based exits for quick scalping
+                stop_hit = current_price <= trade.stop_loss if trade.side == 'LONG' else current_price >= trade.stop_loss
+
+                # --- ENHANCED STEP TRAILING LAYER ---
+                if trade.quantity > 0:
+                    pnl_pct = ((current_price - trade.entry_price) if trade.side == 'LONG'
+                               else (trade.entry_price - current_price)) / max(1e-12, trade.entry_price)
+                    notional = trade.quantity * trade.entry_price
+                    unrealized_usd = pnl_pct * trade.leverage * notional
+
+                    if unrealized_usd > 0:
+                        start_threshold = trade.trail_start_net_usd + trade.fee_buffer_usd
+                        if unrealized_usd >= start_threshold:
+                            # Step size ($ or %)
+                            step_usd = (trade.step_increment_pct * trade.leverage * notional
+                                        if trade.step_mode_percent else trade.step_increment_usd)
+
+                            # Next target + hysteresis
+                            next_step_base = max(step_usd, trade.last_step_usd + step_usd)
+                            target_to_lock = min(trade.max_trail_cap_usd, next_step_base)
+                            hysteresis_add = max(0.0, trade.hysteresis_pct * trade.entry_price * trade.quantity * trade.leverage)
+                            arm_level_usd = target_to_lock + hysteresis_add
+
+                            # Cooldown check
+                            now = datetime.now()
+                            cooled = (trade.last_step_time is None) or ((now - trade.last_step_time).total_seconds() >= trade.step_cooldown_sec)
+
+                            if unrealized_usd >= arm_level_usd and cooled:
+                                trade.locked_profit_usd = target_to_lock
+                                new_sl_price = self._price_for_locked_usd(trade, trade.locked_profit_usd)
+
+                                if trade.side == 'LONG':
+                                    if new_sl_price > trade.stop_loss:
+                                        trade.stop_loss = new_sl_price
+                                        trade.last_step_usd = target_to_lock
+                                        trade.last_step_time = now
+                                        logger.info(f"🔒 STEP TRAIL {trade.trade_id}: SL -> {trade.stop_loss:.6f} (locked ${trade.locked_profit_usd:.2f})")
+                                else:
+                                    if (trade.stop_loss == 0) or (new_sl_price < trade.stop_loss):
+                                        trade.stop_loss = new_sl_price
+                                        trade.last_step_usd = target_to_lock
+                                        trade.last_step_time = now
+                                        logger.info(f"🔒 STEP TRAIL {trade.trade_id}: SL -> {trade.stop_loss:.6f} (locked ${trade.locked_profit_usd:.2f})")
+
+                            # Cap hand-off
+                            if trade.cap_handoff_tight_atr and trade.locked_profit_usd >= trade.max_trail_cap_usd:
+                                atr_pct = await self._get_atr_pct_latest(trade.symbol) or 0.02
+                                tight_gap = max(atr_pct * trade.cap_trail_mult, 0.0012)
+                                cap_sl = (current_price * (1 - tight_gap) if trade.side == 'LONG'
+                                          else current_price * (1 + tight_gap))
+
+                                if trade.side == 'LONG':
+                                    if cap_sl > trade.stop_loss:
+                                        trade.stop_loss = cap_sl
+                                        logger.info(f"🎯 CAP HANDOFF {trade.trade_id}: Tight ATR SL -> {trade.stop_loss:.6f}")
+                                else:
+                                    if (trade.stop_loss == 0) or (cap_sl < trade.stop_loss):
+                                        trade.stop_loss = cap_sl
+                                        logger.info(f"🎯 CAP HANDOFF {trade.trade_id}: Tight ATR SL -> {trade.stop_loss:.6f}")
+
+                # --- ATR BREAKEVEN & TRAIL ---
+                atr_pct = await self._get_atr_pct_latest(trade.symbol) or 0.02
+                mults = self._vol_mults_from_regime(atr_pct)
+
+                favor_pct = ((current_price - trade.entry_price) if trade.side == 'LONG'
+                             else (trade.entry_price - current_price)) / trade.entry_price
+
+                # Breakeven
+                if favor_pct >= (atr_pct * mults["be_mult"]):
+                    be_buffer = max(0.0006, atr_pct * 0.1)
+                    new_sl = (trade.entry_price * (1 - be_buffer) if trade.side == 'LONG'
+                              else trade.entry_price * (1 + be_buffer))
+                    if (trade.side == 'LONG' and new_sl > trade.stop_loss) or (trade.side == 'SHORT' and new_sl < trade.stop_loss):
+                        trade.stop_loss = new_sl
+                        logger.info(f"🔒 BE SET {trade.trade_id}: SL -> {trade.stop_loss:.6f}")
+
+                # ATR trailing
+                if favor_pct >= (atr_pct * (mults["be_mult"] + mults["trail_mult"])):
+                    trail_gap = atr_pct * mults["trail_mult"]
+                    new_sl = (current_price * (1 - trail_gap) if trade.side == 'LONG'
+                              else current_price * (1 + trail_gap))
+                    if (trade.side == 'LONG' and new_sl > trade.stop_loss) or (trade.side == 'SHORT' and new_sl < trade.stop_loss):
+                        trade.stop_loss = new_sl
+                        logger.info(f"📈 ATR TRAIL {trade.trade_id}: SL -> {trade.stop_loss:.6f}")
+
+                # --- TIME-BASED EXITS ---
                 time_elapsed_minutes = (current_time - trade.entry_time).total_seconds() / 60
-                
-                # Quick exit conditions for profit scraping
+                market_trend = await self._detect_market_trend(trade.symbol)
+                aligned = ((trade.side == 'LONG'  and market_trend in ['uptrend','strong_uptrend']) or
+                           (trade.side == 'SHORT' and market_trend in ['downtrend','strong_downtrend']))
+                counter = ((trade.side == 'LONG'  and market_trend in ['downtrend','strong_downtrend']) or
+                           (trade.side == 'SHORT' and market_trend in ['uptrend','strong_uptrend']))
+
+                max_hold = 90 if aligned else 45 if counter else 60
+                flat_cut = 30 if aligned else 10 if counter else 15
+
                 quick_exit = False
                 exit_reason_time = ""
-                
-                # Force exit after 60 minutes regardless (profit scraping shouldn't hold this long)
-                if time_elapsed_minutes > 60:
+                if time_elapsed_minutes > max_hold:
                     quick_exit = True
                     exit_reason_time = "TIME_EXIT_MAX"
-                # Exit after 15 minutes if flat or slightly losing
-                elif time_elapsed_minutes > 15:
-                    if trade.side == 'LONG':
-                        price_change_pct = (current_price - trade.entry_price) / trade.entry_price
-                    else:  # SHORT
-                        price_change_pct = (trade.entry_price - current_price) / trade.entry_price
-                    
-                    # Exit if flat or losing after 15 minutes
-                    if price_change_pct <= 0.002:  # Less than 0.2% profit
+                elif time_elapsed_minutes > flat_cut:
+                    min_edge = max(0.0020, (await self._get_atr_pct_latest(trade.symbol) or 0.02) * 0.8)
+                    edge = ((current_price - trade.entry_price) if trade.side == 'LONG'
+                            else (trade.entry_price - current_price)) / trade.entry_price
+                    if edge <= min_edge:
                         quick_exit = True
                         exit_reason_time = "TIME_EXIT_FLAT"
-                
-                # Safety net for extremely long positions (24 hours) - only if losing
-                time_elapsed_hours = time_elapsed_minutes / 60
-                safety_time_exit = time_elapsed_hours > 24 and (
+
+                safety_time_exit = (time_elapsed_minutes / 60 > 24) and (
                     (trade.side == 'LONG' and current_price < trade.entry_price * 0.95) or
                     (trade.side == 'SHORT' and current_price > trade.entry_price * 1.05)
                 )
-                
-                # Exit trade if any condition met
+
+                # --- EXIT DECISIONS ---
                 if profit_hit:
                     await self._close_trade(trade_id, "PROFIT_TARGET")
                 elif stop_hit:
                     await self._close_trade(trade_id, "STOP_LOSS")
                 elif quick_exit:
                     await self._close_trade(trade_id, exit_reason_time)
-                    logger.info(f"⏰ Profit scraping time exit: {trade_id} after {time_elapsed_minutes:.1f} minutes - {exit_reason_time}")
+                    logger.info(f"⏰ Time exit: {trade_id} after {time_elapsed_minutes:.1f} minutes - {exit_reason_time}")
                 elif safety_time_exit:
                     await self._close_trade(trade_id, "SAFETY_TIME_EXIT")
                     logger.warning(f"⚠️ Closing losing position {trade_id} after 24 hours for safety")
-            
+
         except Exception as e:
             logger.error(f"Error monitoring active trades: {e}")
     

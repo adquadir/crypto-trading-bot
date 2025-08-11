@@ -179,49 +179,80 @@ const PaperTrading = () => {
   const [changingRuleMode, setChangingRuleMode] = useState(false);
   const [showRuleConfig, setShowRuleConfig] = useState(false);
 
-  // Signal source toggles (independent)
-  const [signalSources, setSignalSources] = useState({
-    profit_scraping_enabled: true,
-    opportunity_manager_enabled: true,
+  // Engine toggles (independent) - Enhanced with better state management
+  const [engineStates, setEngineStates] = useState({
+    opportunity_manager: true,
+    profit_scraper: true,
   });
-  const [updatingSignalSource, setUpdatingSignalSource] = useState(null);
+  const [updatingEngine, setUpdatingEngine] = useState(null);
 
-  const fetchSignalSources = async () => {
+  const fetchEngineStates = async () => {
     try {
-      const res = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/signal-sources`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data?.data) {
-        setSignalSources({
-          profit_scraping_enabled: Boolean(data.data.profit_scraping_enabled),
-          opportunity_manager_enabled: Boolean(data.data.opportunity_manager_enabled),
-        });
+      const res = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/engines`);
+      if (!res.ok) {
+        console.warn(`Engine states API returned ${res.status}, using defaults`);
+        return;
       }
-    } catch (_) {
-      // Graceful fallback if backend route isn't live yet
-      setSignalSources((prev) => prev);
+      const data = await res.json();
+      
+      if (data?.status === 'success' && data?.data) {
+        const newStates = {
+          opportunity_manager: Boolean(data.data.opportunity_manager),
+          profit_scraper: Boolean(data.data.profit_scraper),
+        };
+        setEngineStates(newStates);
+        console.log('✅ Engine states updated:', newStates);
+      }
+    } catch (error) {
+      console.warn('Engine states fetch failed, using current state:', error.message);
+      // Graceful degradation - keep current state
     }
   };
 
-  const handleSignalSourceToggle = async (sourceKey, enabled) => {
+  const handleEngineToggle = async (engineKey, enabled) => {
+    const engineDisplayName = engineKey.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+    
     try {
-      setUpdatingSignalSource(sourceKey);
-      const res = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/signal-sources`, {
+      setUpdatingEngine(engineKey);
+      setError(null); // Clear any existing errors
+      
+      console.log(`🔄 Toggling ${engineDisplayName}: ${enabled ? 'ON' : 'OFF'}`);
+      
+      const res = await fetch(`${config.API_BASE_URL}/api/v1/paper-trading/engine-toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [sourceKey]: enabled }),
+        body: JSON.stringify({ engine: engineKey, enabled }),
       });
+      
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.status === 'error') {
-        throw new Error(data?.message || data?.detail || `Failed to toggle ${sourceKey}`);
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${data?.message || data?.detail || 'Toggle request failed'}`);
       }
-      setSignalSources((prev) => ({ ...prev, [sourceKey]: enabled }));
-      setError(`✅ ${sourceKey.replace('_', ' ')} ${enabled ? 'enabled' : 'disabled'}`);
-      setTimeout(() => setError(null), 2500);
-    } catch (e) {
-      setError(e.message || `Failed to toggle ${sourceKey}`);
+      
+      if (data?.status === 'error') {
+        throw new Error(data.message || data.detail || `Failed to toggle ${engineDisplayName}`);
+      }
+      
+      // Update local state optimistically
+      setEngineStates((prev) => ({ ...prev, [engineKey]: enabled }));
+      
+      // Show success message
+      const action = enabled ? 'enabled' : 'disabled';
+      setError(`✅ ${engineDisplayName} ${action} successfully`);
+      setTimeout(() => setError(null), 3000);
+      
+      console.log(`✅ ${engineDisplayName} ${action} successfully`);
+      
+    } catch (error) {
+      console.error(`❌ Failed to toggle ${engineDisplayName}:`, error);
+      setError(`❌ Failed to toggle ${engineDisplayName}: ${error.message}`);
+      
+      // Revert optimistic update on error
+      setEngineStates((prev) => ({ ...prev, [engineKey]: !enabled }));
+      
     } finally {
-      setUpdatingSignalSource(null);
+      setUpdatingEngine(null);
     }
   };
 
@@ -330,8 +361,8 @@ const PaperTrading = () => {
       }
       // If API fails, keep the default rule mode state
 
-      // Fetch signal sources
-      await fetchSignalSources();
+      // Fetch engine states
+      await fetchEngineStates();
     } catch (error) {
       console.error('Failed to fetch paper trading data:', error);
       console.error('Error details:', {
@@ -916,71 +947,140 @@ const PaperTrading = () => {
         </CardContent>
       </Card>
 
-      {/* Signal Source Toggles */}
+      {/* Engines */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" fontWeight="bold" gutterBottom>
-            🎯 Signal Sources
+            Engines
           </Typography>
 
-          <Grid container spacing={2}>
+          <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
+              <Box 
+                sx={{ 
+                  p: 2, 
+                  border: '1px solid', 
+                  borderColor: engineStates.opportunity_manager ? 'secondary.main' : 'divider',
+                  borderRadius: 2,
+                  bgcolor: engineStates.opportunity_manager ? 'secondary.light' : 'background.default',
+                  opacity: updatingEngine === 'opportunity_manager' ? 0.7 : 1,
+                  transition: 'all 0.3s ease'
+                }}
+              >
+                <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+                  <Typography variant="h6" fontWeight="bold" color="secondary.main">
+                    🎯 Opportunity Manager
+                  </Typography>
                   <Switch
-                    checked={!!signalSources.profit_scraping_enabled}
-                    onChange={(e) => handleSignalSourceToggle('profit_scraping_enabled', e.target.checked)}
-                    disabled={!!updatingSignalSource}
-                    color="primary"
+                    checked={!!engineStates.opportunity_manager}
+                    onChange={(e) => handleEngineToggle('opportunity_manager', e.target.checked)}
+                    disabled={!!updatingEngine}
+                    color="secondary"
+                    size="medium"
                   />
-                }
-                label={
-                  <Box>
-                    <Typography variant="body1" fontWeight="bold">Profit Scraper</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Allow Profit Scraper to open **new** positions.
-                    </Typography>
-                  </Box>
-                }
-              />
+                </Box>
+                
+                <Typography variant="body2" color="text.secondary" mb={1}>
+                  Advanced market analysis with relaxed validation for paper trading
+                </Typography>
+                
+                <Box display="flex" alignItems="center" gap={1}>
+                  <Chip 
+                    label={engineStates.opportunity_manager ? "ACTIVE" : "DISABLED"}
+                    color={engineStates.opportunity_manager ? "secondary" : "default"}
+                    size="small"
+                    variant={engineStates.opportunity_manager ? "filled" : "outlined"}
+                  />
+                  {updatingEngine === 'opportunity_manager' && (
+                    <>
+                      <CircularProgress size={16} color="secondary" />
+                      <Typography variant="caption" color="text.secondary">
+                        Updating...
+                      </Typography>
+                    </>
+                  )}
+                </Box>
+              </Box>
             </Grid>
 
             <Grid item xs={12} md={6}>
-              <FormControlLabel
-                control={
+              <Box 
+                sx={{ 
+                  p: 2, 
+                  border: '1px solid', 
+                  borderColor: engineStates.profit_scraper ? 'primary.main' : 'divider',
+                  borderRadius: 2,
+                  bgcolor: engineStates.profit_scraper ? 'primary.light' : 'background.default',
+                  opacity: updatingEngine === 'profit_scraper' ? 0.7 : 1,
+                  transition: 'all 0.3s ease'
+                }}
+              >
+                <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+                  <Typography variant="h6" fontWeight="bold" color="primary.main">
+                    💰 Profit Scraper
+                  </Typography>
                   <Switch
-                    checked={!!signalSources.opportunity_manager_enabled}
-                    onChange={(e) => handleSignalSourceToggle('opportunity_manager_enabled', e.target.checked)}
-                    disabled={!!updatingSignalSource}
-                    color="secondary"
+                    checked={!!engineStates.profit_scraper}
+                    onChange={(e) => handleEngineToggle('profit_scraper', e.target.checked)}
+                    disabled={!!updatingEngine}
+                    color="primary"
+                    size="medium"
                   />
-                }
-                label={
-                  <Box>
-                    <Typography variant="body1" fontWeight="bold">Opportunity Manager</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Allow Opportunity Manager to open **new** positions.
-                    </Typography>
-                  </Box>
-                }
-              />
+                </Box>
+                
+                <Typography variant="body2" color="text.secondary" mb={1}>
+                  Support/resistance level detection with rule-based targets
+                </Typography>
+                
+                <Box display="flex" alignItems="center" gap={1}>
+                  <Chip 
+                    label={engineStates.profit_scraper ? "ACTIVE" : "DISABLED"}
+                    color={engineStates.profit_scraper ? "primary" : "default"}
+                    size="small"
+                    variant={engineStates.profit_scraper ? "filled" : "outlined"}
+                  />
+                  {updatingEngine === 'profit_scraper' && (
+                    <>
+                      <CircularProgress size={16} color="primary" />
+                      <Typography variant="caption" color="text.secondary">
+                        Updating...
+                      </Typography>
+                    </>
+                  )}
+                </Box>
+              </Box>
             </Grid>
           </Grid>
 
-          {updatingSignalSource && (
-            <Box display="flex" alignItems="center" gap={1} mt={1}>
-              <CircularProgress size={16} />
-              <Typography variant="body2" color="text.secondary">
-                Updating {updatingSignalSource.replace('_',' ')}…
-              </Typography>
-            </Box>
-          )}
-
           <Alert severity="info" sx={{ mt: 2 }}>
             <Typography variant="body2">
-              These toggles only affect <strong>new</strong> entries. Existing positions continue under their original rules.
+              <strong>Independent Control:</strong> These toggles only affect <strong>new position entries</strong>. 
+              Existing positions continue under their original rules. Both engines can run simultaneously or independently.
             </Typography>
           </Alert>
+
+          {/* Engine Status Summary */}
+          <Box mt={2} p={2} bgcolor="background.default" borderRadius={1}>
+            <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+              📊 Current Engine Status
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">
+                  Opportunity Manager: <strong style={{ color: engineStates.opportunity_manager ? '#1976d2' : '#666' }}>
+                    {engineStates.opportunity_manager ? 'Accepting new signals' : 'Blocked from new entries'}
+                  </strong>
+                </Typography>
+              </Grid>
+              <Grid item xs={6}>
+                <Typography variant="body2" color="text.secondary">
+                  Profit Scraper: <strong style={{ color: engineStates.profit_scraper ? '#1976d2' : '#666' }}>
+                    {engineStates.profit_scraper ? 'Accepting new signals' : 'Blocked from new entries'}
+                  </strong>
+                </Typography>
+              </Grid>
+            </Grid>
+          </Box>
         </CardContent>
       </Card>
 

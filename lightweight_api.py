@@ -370,6 +370,86 @@ def create_app():
     async def get_rule_mode():
         return {"rule_mode": "3_rule_mode"} if components['initialization_complete'] else {"rule_mode": "initializing"}
 
+    # Engine Toggle Endpoints - MISSING FROM LIGHTWEIGHT API
+    @app.get("/api/v1/paper-trading/engines")
+    async def get_engines_status():
+        """🎯 GET ENGINE STATUS (Frontend Compatible)"""
+        try:
+            from src.trading.signal_config import get_signal_config
+            config = get_signal_config()
+
+            return {
+                "status": "success",
+                "data": {
+                    "opportunity_manager": config.get("opportunity_manager_enabled", True),
+                    "profit_scraper": config.get("profit_scraping_enabled", True)
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting engines status: {e}")
+            return {
+                "status": "success",
+                "data": {
+                    "opportunity_manager": True,
+                    "profit_scraper": True
+                }
+            }
+
+    @app.post("/api/v1/paper-trading/engine-toggle")
+    async def toggle_engine(request: dict):
+        """🎯 TOGGLE ENGINE ON/OFF (Frontend Compatible)"""
+        try:
+            from src.trading.signal_config import set_signal_config
+            from pydantic import BaseModel
+            
+            # Validate request structure
+            if not isinstance(request, dict) or 'engine' not in request or 'enabled' not in request:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Request must contain 'engine' and 'enabled' fields"
+                )
+            
+            engine = request['engine']
+            enabled = request['enabled']
+            
+            logger.info(f"🎯 ENGINE TOGGLE: {engine} -> {enabled}")
+
+            # Validate engine name
+            if engine not in ["opportunity_manager", "profit_scraper"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid engine name. Must be 'opportunity_manager' or 'profit_scraper'"
+                )
+
+            # Map frontend engine names to backend config keys
+            config_key = f"{engine.replace('_', '_')}_enabled"
+            if engine == "profit_scraper":
+                config_key = "profit_scraping_enabled"
+
+            # Update the configuration
+            updates = {config_key: enabled}
+            new_config = set_signal_config(updates)
+
+            # Log the change
+            action = "ENABLED" if enabled else "DISABLED"
+            engine_display = engine.replace('_', ' ').title()
+            logger.info(f"✅ {engine_display} {action}")
+
+            return {
+                "status": "success",
+                "message": f"{engine_display} {action.lower()}",
+                "data": {
+                    engine: enabled
+                }
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error toggling engine: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to toggle engine: {str(e)}")
+
     return app
 
 async def initialize_components_background():

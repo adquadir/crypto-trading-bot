@@ -24,6 +24,11 @@ Signal Flow: profit_scraping → paper_trading_engine
 
 the paper trading engine is configured for "Pure Profit Scraping Mode" by default, the profit scraping engine should always be connected and active. 
 
+We should always use an approach that demonstrates systems thinking
+Preserve what works
+Add what's missing
+Ensure compatibility
+
 Profit Scraping and Opportunity is the main source of signals
 
 positions close automatically when API restarts
