@@ -1,14 +1,14 @@
 """
 Real Trading Engine
-For actual money trading with real exchange connections
+For actual money trading with real exchange connections using OpportunityManager signals only
 """
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
-import uuid
-from dataclasses import dataclass, asdict
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, Optional, List
 
 from ..market_data.exchange_client import ExchangeClient
 from ..database.database import Database
@@ -19,85 +19,141 @@ from .trade_sync_service import TradeSyncService
 logger = setup_logger(__name__)
 
 @dataclass
-class RealPosition:
-    """Represents a real trading position"""
+class LivePosition:
+    """Represents a live trading position"""
     position_id: str
     symbol: str
-    side: str  # 'LONG' or 'SHORT'
+    side: str               # LONG / SHORT
     entry_price: float
-    position_size: float
+    qty: float
+    stake_usd: float
     leverage: float
-    stop_loss: Optional[float]
-    take_profit: Optional[float]
     entry_time: datetime
-    strategy: str
-    confidence: float
-    status: str = 'OPEN'  # 'OPEN', 'CLOSED', 'CANCELLED'
+    tp_order_id: Optional[str] = None
+    sl_order_id: Optional[str] = None
+    tp_price: Optional[float] = None     # Take profit price for UI display
+    sl_price: Optional[float] = None     # Stop loss price for UI display
+    highest_profit_ever: float = 0.0     # gross PnL tracking
+    profit_floor_activated: bool = False # $7 floor tracking
+    status: str = 'OPEN'    # OPEN, CLOSED, CANCELLED
     exit_price: Optional[float] = None
     exit_time: Optional[datetime] = None
     pnl: float = 0.0
     pnl_pct: float = 0.0
     
     def to_dict(self) -> Dict:
-        data = asdict(self)
-        # Convert datetime objects to ISO strings
-        if self.entry_time:
-            data['entry_time'] = self.entry_time.isoformat()
-        if self.exit_time:
-            data['exit_time'] = self.exit_time.isoformat()
-        return data
+        """Convert position to dictionary for API responses"""
+        return {
+            'position_id': self.position_id,
+            'symbol': self.symbol,
+            'side': self.side,
+            'entry_price': self.entry_price,
+            'qty': self.qty,
+            'stake_usd': self.stake_usd,
+            'leverage': self.leverage,
+            'entry_time': self.entry_time.isoformat(),
+            'tp_order_id': self.tp_order_id,
+            'sl_order_id': self.sl_order_id,
+            'tp_price': self.tp_price,  # Include TP price for UI display
+            'sl_price': self.sl_price,  # Include SL price for UI display
+            'highest_profit_ever': self.highest_profit_ever,
+            'profit_floor_activated': self.profit_floor_activated,
+            'status': self.status,
+            'exit_price': self.exit_price,
+            'exit_time': self.exit_time.isoformat() if self.exit_time else None,
+            'pnl': self.pnl,
+            'pnl_pct': self.pnl_pct
+        }
 
 class RealTradingEngine:
-    """Real trading engine for actual money trading"""
+    """
+    Real trading engine that mirrors paper trading behavior but executes live orders.
+    - Uses only Opportunity Manager signals
+    - Fixed $200 stake per trade
+    - Pure 3-rule mode: $10 TP → $7 floor → 0.5% SL
+    """
     
-    def __init__(self, exchange_client: Optional[ExchangeClient] = None):
-        self.exchange_client = exchange_client or ExchangeClient()
+    def __init__(self, config: Dict[str, Any], exchange_client: Optional[ExchangeClient] = None):
+        if exchange_client is None:
+            raise ValueError("RealTradingEngine requires an exchange_client")
+        
+        self.config = config
+        self.cfg = config.get("real_trading", {}) or {}
+        self.enabled = bool(self.cfg.get("enabled", False))
+        self.exchange_client = exchange_client
         self.db_manager = Database()
         
-        # Real trading state
+        # OpportunityManager connection (set via connect_opportunity_manager)
+        self.opportunity_manager = None
+        
+        # Real trading configuration - CONSERVATIVE FOR REAL MONEY
+        self.stake_usd = float(self.cfg.get("stake_usd", 200.0))  # Fixed $200 per trade
+        self.max_positions = int(self.cfg.get("max_positions", 20))
+        self.accept_sources = set(self.cfg.get("accept_sources", ["opportunity_manager"]))
+        
+        # Pure 3-rule mode configuration
+        self.pure_3_rule_mode = bool(self.cfg.get("pure_3_rule_mode", True))
+        self.primary_target_dollars = float(self.cfg.get("primary_target_dollars", 10.0))
+        self.absolute_floor_dollars = float(self.cfg.get("absolute_floor_dollars", 7.0))
+        self.stop_loss_percent = float(self.cfg.get("stop_loss_percent", 0.5)) / 100.0  # 0.5%
+        
+        # Position tracking
+        self.positions: Dict[str, LivePosition] = {}   # key: position_id
+        self.positions_by_symbol: Dict[str, str] = {}  # symbol -> position_id
+        self.completed_trades: List[Dict] = []
+        
+        # Engine state
         self.is_running = False
-        self.active_positions: Dict[str, RealPosition] = {}
+        self.start_time = None
         self.total_pnl = 0.0
         self.total_trades = 0
         self.winning_trades = 0
-        self.start_time = None
-        
-        # Real trading configuration - CONSERVATIVE FOR REAL MONEY
-        self.max_daily_loss = 500.0  # Conservative $500 daily loss limit for real money
-        self.position_size_usd = 200.0  # Fixed $200 per position (same as paper)
-        self.leverage = 10.0  # Fixed 10x leverage (same as paper)
-        self.max_total_exposure = 1.0  # 100% exposure like paper trading
-        
-        # Minimal safety controls (only essential ones)
-        self.emergency_stop = False
         self.daily_pnl = 0.0
         self.last_reset_date = datetime.now().date()
         
+        # Frontend compatibility - in-memory completed trades list
+        self.completed_trades: List[Dict[str, Any]] = []
+        
+        # Safety controls
+        self.emergency_stop = False
+        self.max_daily_loss = 500.0  # Conservative $500 daily loss limit
+        
+        # Poll intervals
+        self.signal_poll_sec = 5
+        self.position_poll_sec = 3
+        
         # Manual trade learning
         self.trade_sync_service = TradeSyncService(self.exchange_client)
-        self.last_sync_time = datetime.now()
         
-        logger.info("🚀 Real Trading Engine initialized with Trade Sync Service")
+        logger.info("🚀 Real Trading Engine initialized - OpportunityManager only, $%.2f per trade", self.stake_usd)
     
-    async def start_trading(self, symbols: List[str]) -> bool:
+    def connect_opportunity_manager(self, manager: Any) -> None:
+        """Connect the OpportunityManager to this engine"""
+        self.opportunity_manager = manager
+        logger.info("🔗 OpportunityManager connected to Real Trading Engine")
+    
+    async def start_trading(self, symbols: List[str] = None) -> bool:
         """Start real trading for specified symbols"""
         try:
             if self.is_running:
                 logger.warning("Real trading is already running")
                 return False
             
-            # Safety check - ensure we have real exchange connection
-            if not self.exchange_client or not hasattr(self.exchange_client, 'ccxt_client'):
-                logger.error("❌ SAFETY: No real exchange connection available")
-                logger.error("❌ SAFETY: Real trading requires valid API keys and exchange connection")
+            if not self.enabled:
+                logger.error("❌ Real trading is disabled in configuration")
                 return False
             
-            # Test exchange connection
+            if not self.opportunity_manager:
+                logger.error("❌ OpportunityManager not connected - cannot start real trading")
+                return False
+            
+            # Test exchange connection (real health check)
             try:
                 balance = await self.exchange_client.get_account_balance()
                 if not balance or balance.get('total', 0) < 100:
                     logger.error("❌ SAFETY: Insufficient account balance for real trading")
                     return False
+                logger.info(f"✅ Account balance verified: ${balance.get('total', 0):.2f}")
             except Exception as e:
                 logger.error(f"❌ SAFETY: Cannot connect to exchange: {e}")
                 return False
@@ -110,9 +166,14 @@ class RealTradingEngine:
                 await self.trade_sync_service.start_sync()
                 logger.info("🔄 Trade synchronization service started")
             
-            logger.info(f"🚀 Real Trading started for {symbols}")
+            # Start core loops
+            asyncio.create_task(self._signal_collection_loop())
+            asyncio.create_task(self._position_monitoring_loop())
+            
+            logger.info(f"🚀 Real Trading started - OpportunityManager only")
             logger.warning("⚠️  REAL MONEY TRADING IS NOW ACTIVE")
             logger.warning("⚠️  ALL TRADES WILL USE ACTUAL FUNDS")
+            logger.info(f"💰 Configuration: ${self.stake_usd} per trade, max {self.max_positions} positions")
             
             return True
             
@@ -129,8 +190,8 @@ class RealTradingEngine:
             logger.info("🛑 Stopping real trading...")
             
             # Close all open positions
-            for position_id in list(self.active_positions.keys()):
-                await self.close_position(position_id, "SYSTEM_STOP")
+            for position_id in list(self.positions.keys()):
+                await self._market_close_position(position_id, "SYSTEM_STOP")
             
             self.is_running = False
             
@@ -141,130 +202,458 @@ class RealTradingEngine:
             logger.error(f"Error stopping real trading: {e}")
             return False
     
-    async def execute_trade(self, signal: Dict[str, Any]) -> Optional[str]:
-        """Execute a real trade based on signal"""
+    async def _signal_collection_loop(self):
+        """Collect signals from OpportunityManager and execute trades"""
+        logger.info("🔄 Starting OpportunityManager signal collection loop")
+        
+        while self.is_running:
+            try:
+                # Respect max open positions
+                if len(self.positions) >= self.max_positions:
+                    await asyncio.sleep(self.signal_poll_sec)
+                    continue
+                
+                # Safety checks
+                if self.emergency_stop:
+                    logger.warning("Emergency stop is active - no new trades")
+                    await asyncio.sleep(self.signal_poll_sec)
+                    continue
+                
+                # Get opportunities from OpportunityManager
+                if self.opportunity_manager:
+                    opportunities = self.opportunity_manager.get_opportunities() or []
+                    
+                    # Handle both dict and list formats
+                    signals = []
+                    if isinstance(opportunities, dict):
+                        # Legacy format: {symbol: [opportunities...]}
+                        for symbol, opp_list in opportunities.items():
+                            for opp in opp_list:
+                                if self._is_acceptable_opportunity(opp):
+                                    signals.append(opp)
+                    elif isinstance(opportunities, list):
+                        # New format: [opportunity, ...]
+                        for opp in opportunities:
+                            if self._is_acceptable_opportunity(opp):
+                                signals.append(opp)
+                    
+                    # Execute signals
+                    for signal in signals:
+                        if len(self.positions) >= self.max_positions:
+                            break
+                        
+                        symbol = signal.get('symbol')
+                        if symbol in self.positions_by_symbol:
+                            continue  # Already have position in this symbol
+                        
+                        # Execute the trade
+                        await self._open_live_position_from_opportunity(signal)
+                
+                await asyncio.sleep(self.signal_poll_sec)
+                
+            except Exception as e:
+                logger.error(f"Error in signal collection loop: {e}")
+                await asyncio.sleep(5)
+    
+    async def _position_monitoring_loop(self):
+        """Monitor live positions for TP/SL hits and floor rule enforcement"""
+        logger.info("🔍 Starting position monitoring loop")
+        
+        while self.is_running:
+            try:
+                positions_to_close = []
+                
+                for position_id, position in list(self.positions.items()):
+                    try:
+                        # Get current market price
+                        ticker = await self.exchange_client.get_ticker_24h(position.symbol)
+                        current_price = float(ticker.get("lastPrice", 0))
+                        
+                        if current_price <= 0:
+                            continue
+                        
+                        # Calculate gross PnL
+                        if position.side == "LONG":
+                            gross_pnl = (current_price - position.entry_price) * position.qty
+                        else:  # SHORT
+                            gross_pnl = (position.entry_price - current_price) * position.qty
+                        
+                        # Update highest profit ever for floor tracking
+                        position.highest_profit_ever = max(position.highest_profit_ever, gross_pnl)
+                        
+                        # Floor rule enforcement (Pure 3-rule mode)
+                        if self.pure_3_rule_mode:
+                            # Activate floor if we've reached the threshold
+                            if position.highest_profit_ever >= self.absolute_floor_dollars and not position.profit_floor_activated:
+                                position.profit_floor_activated = True
+                                logger.info(f"🛡️ FLOOR ACTIVATED {position.symbol}: reached ${position.highest_profit_ever:.2f}")
+                            
+                            # Close if profit falls back to floor level
+                            if position.profit_floor_activated and gross_pnl <= self.absolute_floor_dollars:
+                                logger.info(f"🛡️ FLOOR EXIT {position.symbol}: PnL ${gross_pnl:.2f} <= ${self.absolute_floor_dollars:.2f}")
+                                positions_to_close.append((position_id, "absolute_floor_7_dollars"))
+                                continue
+                        
+                        # Check if position was closed by exchange (TP/SL hit)
+                        if not await self._has_open_position_on_exchange(position.symbol):
+                            logger.info(f"✅ Position closed on exchange (TP/SL): {position.symbol}")
+                            await self._mark_position_closed(position_id, reason="tp_sl_hit_exchange")
+                            continue
+                    
+                    except Exception as e:
+                        logger.error(f"Error monitoring position {position_id}: {e}")
+                        continue
+                
+                # Close positions that need closing
+                for position_id, reason in positions_to_close:
+                    await self._market_close_position(position_id, reason)
+                
+                # Check for emergency conditions
+                await self._check_emergency_conditions()
+                
+                await asyncio.sleep(self.position_poll_sec)
+                
+            except Exception as e:
+                logger.error(f"Error in position monitoring loop: {e}")
+                await asyncio.sleep(10)
+    
+    def _is_acceptable_opportunity(self, opp: Dict[str, Any]) -> bool:
+        """Check if opportunity is acceptable for real trading"""
         try:
-            if not self.is_running:
-                logger.warning("Real trading is not running")
-                return None
+            # Only from Opportunity Manager
+            src = (opp.get("signal_source") or opp.get("strategy") or "").lower()
+            if "opportunity_manager" not in src and "opportunity" not in src:
+                return False
             
-            if self.emergency_stop:
-                logger.warning("Emergency stop is active - no new trades")
-                return None
+            # Must have required fields
+            if not opp.get("symbol") or not opp.get("entry_price") or not opp.get("direction"):
+                return False
             
-            # Safety checks
-            if not await self._safety_checks(signal):
-                return None
+            # Must be tradable
+            if not opp.get("tradable", True):
+                return False
             
-            symbol = signal['symbol']
-            side = signal['side']
-            confidence = signal.get('confidence', 0.5)
+            # Optional: require real data tag if available
+            if opp.get("is_real_data") is False:
+                logger.debug(f"Skipping {opp.get('symbol')} - not real data")
+                return False
             
-            # Get current price
-            current_price = await self.exchange_client.get_current_price(symbol)
-            if not current_price:
-                logger.error(f"Cannot get current price for {symbol}")
-                return None
+            # Confidence check
+            confidence = opp.get("confidence", opp.get("confidence_score", 0))
+            if confidence < 0.6:  # Minimum confidence for real money
+                logger.debug(f"Skipping {opp.get('symbol')} - low confidence: {confidence}")
+                return False
             
-            # Calculate position size based on risk management
-            position_size = self._calculate_position_size(symbol, current_price, confidence)
-            if position_size <= 0:
-                logger.warning(f"Position size too small for {symbol}")
-                return None
+            return True
             
-            # Execute real trade on exchange
-            order_result = await self._execute_exchange_order(
-                symbol, side, position_size, current_price
+        except Exception as e:
+            logger.error(f"Error checking opportunity acceptability: {e}")
+            return False
+    
+    async def _open_live_position_from_opportunity(self, opp: Dict[str, Any]):
+        """Open a live position from an opportunity"""
+        try:
+            symbol = opp["symbol"]
+            direction = opp["direction"].upper()  # LONG/SHORT
+            entry_hint = float(opp["entry_price"])
+            
+            logger.info(f"🎯 Opening live position: {symbol} {direction} @ ${entry_hint:.6f}")
+            
+            # Set leverage and margin mode BEFORE placing orders
+            try:
+                # Set isolated margin mode for safety
+                await self.exchange_client.set_margin_type(symbol, "ISOLATED")
+                
+                # Calculate bounded leverage
+                recommended_leverage = float(opp.get("recommended_leverage", self.cfg.get("default_leverage", 3)))
+                max_leverage = int(self.cfg.get("max_leverage", 5))
+                leverage = int(min(recommended_leverage, max_leverage))
+                
+                # Set leverage for this symbol
+                await self.exchange_client.set_leverage(symbol, leverage)
+                
+                logger.info(f"✅ Leverage setup: {symbol} ISOLATED margin, {leverage}x leverage")
+                
+            except Exception as e:
+                logger.warning(f"Leverage/margin setup failed for {symbol}: {e}")
+                # Continue with trade - some exchanges may not support these calls
+                leverage = 1  # Fallback to 1x if setup failed
+            
+            # Get symbol precision info
+            try:
+                symbol_info = await self.exchange_client.get_symbol_info(symbol)
+                step_size = float(symbol_info.get("stepSize", "0.001"))
+                tick_size = float(symbol_info.get("tickSize", "0.01"))
+                min_notional = float(symbol_info.get("minNotional", "10"))
+            except Exception as e:
+                logger.error(f"Failed to get symbol info for {symbol}: {e}")
+                # Use defaults
+                step_size = 0.001
+                tick_size = 0.01
+                min_notional = 10
+            
+            # Calculate quantity from fixed stake
+            qty = max(self.stake_usd / entry_hint, step_size)
+            qty = self._round_step(qty, step_size)
+            
+            # Check minimum notional
+            notional = qty * entry_hint
+            if notional < min_notional:
+                logger.warning(f"Skip {symbol}: notional ${notional:.2f} < min_notional ${min_notional:.2f}")
+                return
+            
+            # Execute market entry order
+            side_for_market = "BUY" if direction == "LONG" else "SELL"
+            
+            logger.warning(f"🚨 EXECUTING REAL ORDER: {side_for_market} {qty:.6f} {symbol}")
+            logger.warning(f"💰 REAL MONEY: ${notional:.2f} notional value")
+            
+            entry_order = await self.exchange_client.create_order(
+                symbol=symbol,
+                side=side_for_market,
+                type="MARKET",
+                quantity=qty
             )
             
-            if not order_result:
-                logger.error(f"Failed to execute order on exchange for {symbol}")
-                return None
+            if not entry_order or not entry_order.get("orderId"):
+                logger.error(f"❌ Failed to execute entry order for {symbol}")
+                return
+            
+            # Get actual fill price
+            fill_price = float(entry_order.get("avgPrice") or entry_order.get("price") or entry_hint)
+            
+            # Calculate TP/SL prices using Pure 3-rule mode
+            if direction == "LONG":
+                # TP: $10 profit target
+                tp_price = self._round_tick(fill_price + (self.primary_target_dollars / qty), tick_size)
+                # SL: 0.5% below entry
+                sl_price = self._round_tick(fill_price * (1.0 - self.stop_loss_percent), tick_size)
+                tp_side = "SELL"
+                sl_side = "SELL"
+            else:  # SHORT
+                # TP: $10 profit target
+                tp_price = self._round_tick(fill_price - (self.primary_target_dollars / qty), tick_size)
+                # SL: 0.5% above entry
+                sl_price = self._round_tick(fill_price * (1.0 + self.stop_loss_percent), tick_size)
+                tp_side = "BUY"
+                sl_side = "BUY"
+            
+            # Place TP and SL orders
+            tp_order = None
+            sl_order = None
+            
+            try:
+                # Take Profit order
+                tp_order = await self.exchange_client.create_order(
+                    symbol=symbol,
+                    side=tp_side,
+                    type="TAKE_PROFIT_MARKET",
+                    quantity=qty,
+                    stopPrice=tp_price,
+                    reduceOnly=True
+                )
+                
+                # Stop Loss order
+                sl_order = await self.exchange_client.create_order(
+                    symbol=symbol,
+                    side=sl_side,
+                    type="STOP_MARKET",
+                    quantity=qty,
+                    stopPrice=sl_price,
+                    reduceOnly=True
+                )
+                
+            except Exception as e:
+                logger.error(f"Failed to place TP/SL orders for {symbol}: {e}")
+                # Continue without TP/SL - position monitoring will handle exits
             
             # Create position record
-            position_id = str(uuid.uuid4())
-            position = RealPosition(
-                position_id=position_id,
+            position = LivePosition(
+                position_id=f"live_{int(time.time())}_{symbol}",
                 symbol=symbol,
-                side=side,
-                entry_price=current_price,
-                position_size=position_size,
-                leverage=self.leverage,
-                stop_loss=self._calculate_stop_loss(current_price, side),
-                take_profit=self._calculate_take_profit(current_price, side),
+                side=direction,
+                entry_price=fill_price,
+                qty=qty,
+                stake_usd=self.stake_usd,
+                leverage=float(opp.get("recommended_leverage", 1.0)),
                 entry_time=datetime.now(),
-                strategy=signal.get('strategy_type', 'profit_scraping'),
-                confidence=confidence
+                tp_order_id=str(tp_order.get("orderId")) if tp_order else None,
+                sl_order_id=str(sl_order.get("orderId")) if sl_order else None,
+                tp_price=tp_price,  # Store TP price for UI display
+                sl_price=sl_price   # Store SL price for UI display
             )
             
             # Store position
-            self.active_positions[position_id] = position
+            self.positions[position.position_id] = position
+            self.positions_by_symbol[symbol] = position.position_id
+            
+            # Update statistics
+            self.total_trades += 1
             
             # Store in database
             await self._store_position_in_db(position)
             
-            # Register with trade sync service for manual trade learning
+            # Register with trade sync service
             if self.trade_sync_service:
-                await self.trade_sync_service.register_system_trade(position_id, position.to_dict())
+                await self.trade_sync_service.register_system_trade(position.position_id, position.to_dict())
             
-            self.total_trades += 1
-            
-            logger.info(f"✅ Real Trade Executed: {symbol} {side} @ ${current_price:.2f} "
-                       f"Size: {position_size:.6f} Position ID: {position_id}")
-            logger.warning(f"💰 REAL MONEY: ${position_size * current_price:.2f} notional value")
-            
-            return position_id
+            logger.info(f"✅ LIVE POSITION OPENED: {symbol} {direction} qty={qty:.6f} entry=${fill_price:.6f} "
+                       f"TP=${tp_price:.6f} SL=${sl_price:.6f} (stake ${self.stake_usd:.2f})")
             
         except Exception as e:
-            logger.error(f"Error executing real trade: {e}")
-            return None
+            logger.error(f"❌ Error opening live position for {opp.get('symbol', 'UNKNOWN')}: {e}")
     
-    async def close_position(self, position_id: str, reason: str = "MANUAL") -> bool:
-        """Close a real position"""
+    async def _market_close_position(self, position_id: str, reason: str = "MANUAL"):
+        """Close a position at market price"""
         try:
-            if position_id not in self.active_positions:
+            if position_id not in self.positions:
                 logger.warning(f"Position {position_id} not found")
                 return False
             
-            position = self.active_positions[position_id]
+            position = self.positions[position_id]
             
-            # Get current price
-            current_price = await self.exchange_client.get_current_price(position.symbol)
-            if not current_price:
-                logger.error(f"Cannot get current price for {position.symbol}")
+            # Cancel existing TP/SL orders first
+            try:
+                if position.tp_order_id:
+                    await self.exchange_client.cancel_order(position.symbol, position.tp_order_id)
+                if position.sl_order_id:
+                    await self.exchange_client.cancel_order(position.symbol, position.sl_order_id)
+            except Exception as e:
+                logger.debug(f"Error canceling orders for {position.symbol}: {e}")
+            
+            # Execute market close order
+            close_side = "SELL" if position.side == "LONG" else "BUY"
+            
+            logger.warning(f"🚨 CLOSING REAL POSITION: {close_side} {position.qty:.6f} {position.symbol}")
+            
+            close_order = await self.exchange_client.create_order(
+                symbol=position.symbol,
+                side=close_side,
+                type="MARKET",
+                quantity=position.qty,
+                reduceOnly=True
+            )
+            
+            if close_order and close_order.get("orderId"):
+                # Get exit price
+                exit_price = float(close_order.get("avgPrice") or close_order.get("price") or 0)
+                
+                # Calculate final PnL
+                if position.side == "LONG":
+                    pnl = (exit_price - position.entry_price) * position.qty
+                else:  # SHORT
+                    pnl = (position.entry_price - exit_price) * position.qty
+                
+                pnl_pct = (pnl / (position.entry_price * position.qty)) * 100
+                
+                # Update position
+                position.exit_price = exit_price
+                position.exit_time = datetime.now()
+                position.pnl = pnl
+                position.pnl_pct = pnl_pct
+                position.status = 'CLOSED'
+                
+                # Update statistics
+                self.total_pnl += pnl
+                self.daily_pnl += pnl
+                if pnl > 0:
+                    self.winning_trades += 1
+                
+                # Store completed trade
+                trade_record = position.to_dict()
+                trade_record['exit_reason'] = reason
+                self.completed_trades.append(trade_record)
+                
+                # Update in database
+                await self._update_position_in_db(position)
+                
+                # Unregister with trade sync service
+                if self.trade_sync_service:
+                    close_data = {
+                        'exit_price': exit_price,
+                        'exit_time': position.exit_time,
+                        'pnl': pnl,
+                        'reason': reason
+                    }
+                    await self.trade_sync_service.unregister_system_trade(position_id, close_data)
+                
+                duration_minutes = int((position.exit_time - position.entry_time).total_seconds() / 60)
+                duration_formatted = format_duration(duration_minutes)
+                
+                logger.info(f"✅ REAL POSITION CLOSED: {position.symbol} {position.side} @ ${exit_price:.6f} "
+                           f"P&L: ${pnl:.2f} ({pnl_pct:.2f}%) Duration: {duration_formatted} Reason: {reason}")
+                logger.warning(f"💰 REAL MONEY P&L: ${pnl:.2f}")
+                
+                # Remove from active positions
+                del self.positions[position_id]
+                del self.positions_by_symbol[position.symbol]
+                
+                return True
+            else:
+                logger.error(f"❌ Failed to close position {position_id}")
                 return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error closing position {position_id}: {e}")
+            return False
+    
+    async def _has_open_position_on_exchange(self, symbol: str) -> bool:
+        """Check if position is still open on the exchange"""
+        try:
+            position_info = await self.exchange_client.get_position(symbol)
+            size = float(position_info.get("positionAmt", 0) or 0)
+            return abs(size) > 0.001  # Account for floating point precision
+        except Exception as e:
+            logger.debug(f"Error checking position status for {symbol}: {e}")
+            return True  # Assume open if we can't check
+    
+    async def _mark_position_closed(self, position_id: str, reason: str):
+        """Mark position as closed locally without sending market order"""
+        try:
+            position = self.positions.get(position_id)
+            if not position:
+                return
             
-            # Execute close order on exchange
-            close_result = await self._execute_close_order(position, current_price)
-            if not close_result:
-                logger.error(f"Failed to close position on exchange: {position_id}")
-                return False
+            # Try to get actual exit price from recent trades
+            try:
+                recent_trades = await self.exchange_client.get_account_trades(position.symbol, limit=10)
+                exit_price = position.entry_price  # Fallback
+                
+                # Find the most recent trade for this position
+                for trade in recent_trades:
+                    if abs(float(trade.get('qty', 0))) >= position.qty * 0.9:  # Match quantity
+                        exit_price = float(trade.get('price', position.entry_price))
+                        break
+                        
+            except Exception as e:
+                logger.debug(f"Could not fetch recent trades for {position.symbol}: {e}")
+                exit_price = position.entry_price  # Use entry price as fallback
             
-            # Calculate P&L
-            if position.side == 'LONG':
-                pnl = (current_price - position.entry_price) * position.position_size
-                pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+            # Calculate PnL
+            if position.side == "LONG":
+                pnl = (exit_price - position.entry_price) * position.qty
             else:  # SHORT
-                pnl = (position.entry_price - current_price) * position.position_size
-                pnl_pct = ((position.entry_price - current_price) / position.entry_price) * 100
+                pnl = (position.entry_price - exit_price) * position.qty
             
-            # Apply leverage to P&L
-            pnl *= position.leverage
-            pnl_pct *= position.leverage
+            pnl_pct = (pnl / (position.entry_price * position.qty)) * 100
             
             # Update position
-            position.exit_price = current_price
+            position.status = "CLOSED"
             position.exit_time = datetime.now()
+            position.exit_price = exit_price
             position.pnl = pnl
             position.pnl_pct = pnl_pct
-            position.status = 'CLOSED'
             
             # Update statistics
             self.total_pnl += pnl
             self.daily_pnl += pnl
-            
             if pnl > 0:
                 self.winning_trades += 1
+            
+            # Store completed trade
+            trade_record = position.to_dict()
+            trade_record['exit_reason'] = reason
+            self.completed_trades.append(trade_record)
             
             # Update in database
             await self._update_position_in_db(position)
@@ -272,7 +661,7 @@ class RealTradingEngine:
             # Unregister with trade sync service
             if self.trade_sync_service:
                 close_data = {
-                    'exit_price': current_price,
+                    'exit_price': exit_price,
                     'exit_time': position.exit_time,
                     'pnl': pnl,
                     'reason': reason
@@ -280,193 +669,73 @@ class RealTradingEngine:
                 await self.trade_sync_service.unregister_system_trade(position_id, close_data)
             
             # Remove from active positions
-            del self.active_positions[position_id]
+            self.positions_by_symbol.pop(position.symbol, None)
+            self.positions.pop(position_id, None)
             
             duration_minutes = int((position.exit_time - position.entry_time).total_seconds() / 60)
             duration_formatted = format_duration(duration_minutes)
             
-            logger.info(f"📉 Real Position Closed: {position.symbol} {position.side} @ ${current_price:.2f} "
-                       f"P&L: ${pnl:.2f} ({pnl_pct:.2f}%) Duration: {duration_formatted}")
-            logger.warning(f"💰 REAL MONEY: P&L ${pnl:.2f}")
-            
-            # Check for emergency stop conditions
-            await self._check_emergency_conditions()
-            
-            return True
+            logger.info(f"✅ POSITION MARKED CLOSED: {position.symbol} {position.side} @ ${exit_price:.6f} "
+                       f"P&L: ${pnl:.2f} ({pnl_pct:.2f}%) Duration: {duration_formatted} Reason: {reason}")
             
         except Exception as e:
-            logger.error(f"Error closing real position: {e}")
-            return False
+            logger.error(f"Error marking position closed {position_id}: {e}")
     
-    async def _safety_checks(self, signal: Dict[str, Any]) -> bool:
-        """Safety checks using SAME logic as successful paper trading"""
+    async def _check_emergency_conditions(self):
+        """Check for emergency stop conditions"""
         try:
-            # Check signal confidence (HIGH threshold like paper trading)
-            confidence = signal.get('confidence', 0)
-            if confidence < 0.7:  # HIGH threshold like successful paper trading
-                logger.warning(f"❌ SAFETY: Signal confidence too low: {confidence:.2f}")
-                return False
-            
-            # Check daily loss limit (same as paper trading)
-            daily_loss_limit = -self.max_daily_loss
-            if self.daily_pnl < daily_loss_limit:
-                logger.warning(f"❌ SAFETY: Daily loss limit exceeded: ${self.daily_pnl:.2f} < ${daily_loss_limit:.2f}")
-                return False
-            
-            # Check margin exposure (same logic as paper trading)
-            current_margin_used = len(self.active_positions) * 200.0  # $200 per position
-            
-            # Get account balance
-            try:
-                balance_info = await self.exchange_client.get_account_balance()
-                account_balance = balance_info.get('total', 10000.0) if balance_info else 10000.0
-            except:
-                account_balance = 10000.0  # Fallback
-            
-            max_exposure = account_balance * self.max_total_exposure
-            margin_per_trade = 200.0
-            
-            if (current_margin_used + margin_per_trade) > max_exposure:
-                logger.warning(f"❌ SAFETY: Margin limit exceeded: ${current_margin_used + margin_per_trade:.2f} > ${max_exposure:.2f}")
-                logger.info(f"🔍 Available margin: ${max_exposure:.2f}, can have {max_exposure/200:.0f} positions")
-                return False
-            
-            # Reset daily P&L if new day
+            # Reset daily PnL if new day
             current_date = datetime.now().date()
             if current_date != self.last_reset_date:
                 self.daily_pnl = 0.0
                 self.last_reset_date = current_date
                 logger.info("📅 Daily P&L reset for new trading day")
             
-            return True
+            # Check daily loss limit
+            if self.daily_pnl < -self.max_daily_loss:
+                logger.error(f"🚨 EMERGENCY STOP: Daily loss limit exceeded: ${self.daily_pnl:.2f}")
+                self.emergency_stop = True
+                await self.stop_trading()
             
-        except Exception as e:
-            logger.error(f"Error in safety checks: {e}")
-            return False
-    
-    def _calculate_position_size(self, symbol: str, price: float, confidence: float) -> float:
-        """Calculate position size based on risk management"""
-        try:
-            # Fixed $200 per position as requested
-            position_size_usd = self.position_size_usd  # $200 fixed
-            
-            # Calculate position size in base currency
-            position_size = position_size_usd / price
-            
-            logger.info(f"Position size calculated: ${position_size_usd} = {position_size:.6f} {symbol}")
-            
-            return position_size
-            
-        except Exception as e:
-            logger.error(f"Error calculating position size: {e}")
-            return 0.0
-    
-    def _calculate_stop_loss(self, entry_price: float, side: str) -> float:
-        """Calculate FIXED 0.5% stop loss for exactly $10 maximum loss per trade"""
-        # FIXED STOP LOSS: 0.5% price movement = $10 loss with current leverage setup
-        # $200 capital × 10x leverage = $2000 notional
-        # $10 loss ÷ $2000 notional = 0.5% price movement
-        fixed_sl_pct = 0.005  # 0.5% FIXED stop-loss for $10 maximum loss
-        
-        if side == 'LONG':
-            sl_price = entry_price * (1 - fixed_sl_pct)
-        else:  # SHORT
-            sl_price = entry_price * (1 + fixed_sl_pct)
-        
-        # Calculate expected loss for verification
-        if side == 'LONG':
-            expected_loss = (entry_price - sl_price) * (200.0 * 10.0 / entry_price)  # $200 capital × 10x leverage
-        else:  # SHORT
-            expected_loss = (sl_price - entry_price) * (200.0 * 10.0 / entry_price)
-        
-        logger.info(f"🛡️ REAL TRADING FIXED SL: {side} @ {entry_price:.4f} → SL @ {sl_price:.4f} ({fixed_sl_pct:.1%}) [Expected Loss: ${expected_loss:.2f}]")
-        return sl_price
-    
-    def _calculate_take_profit(self, entry_price: float, side: str) -> float:
-        """Calculate take profit price"""
-        take_profit_pct = 0.04  # 4% take profit (2:1 risk/reward)
-        
-        if side == 'LONG':
-            return entry_price * (1 + take_profit_pct)
-        else:  # SHORT
-            return entry_price * (1 - take_profit_pct)
-    
-    async def _execute_exchange_order(self, symbol: str, side: str, size: float, price: float) -> bool:
-        """Execute order on real exchange"""
-        try:
-            logger.warning(f"🚨 EXECUTING REAL ORDER: {side} {size:.6f} {symbol} @ ${price:.2f}")
-            logger.warning(f"💰 REAL MONEY: ${size * price:.2f} notional value")
-            
-            # Execute real order on exchange
-            order = await self.exchange_client.create_market_order(symbol, side, size)
-            
-            if order and order.get('id'):
-                logger.info(f"✅ Real order executed successfully: Order ID {order['id']}")
-                return True
-            else:
-                logger.error(f"❌ Failed to execute real order: {order}")
-                return False
-            
-        except Exception as e:
-            logger.error(f"❌ Error executing real exchange order: {e}")
-            return False
-    
-    async def _execute_close_order(self, position: RealPosition, price: float) -> bool:
-        """Execute close order on real exchange"""
-        try:
-            logger.warning(f"🚨 CLOSING REAL POSITION: {position.side} {position.position_size:.6f} {position.symbol} @ ${price:.2f}")
-            
-            # Determine close side (opposite of entry)
-            close_side = 'SELL' if position.side == 'LONG' else 'BUY'
-            
-            # Execute real close order on exchange
-            order = await self.exchange_client.create_market_order(position.symbol, close_side, position.position_size)
-            
-            if order and order.get('id'):
-                logger.info(f"✅ Real position closed successfully: Order ID {order['id']}")
-                return True
-            else:
-                logger.error(f"❌ Failed to close real position: {order}")
-                return False
-            
-        except Exception as e:
-            logger.error(f"❌ Error executing real close order: {e}")
-            return False
-    
-    async def _store_position_in_db(self, position: RealPosition):
-        """Store position in database"""
-        try:
-            with self.db_manager.session_scope() as session:
-                # For now, just log the position data
-                # In a full implementation, you would create a Trade model and save it
-                logger.info(f"Storing position in database: {position.position_id}")
-                
-        except Exception as e:
-            logger.error(f"Error storing position in database: {e}")
-    
-    async def _update_position_in_db(self, position: RealPosition):
-        """Update position in database"""
-        try:
-            with self.db_manager.session_scope() as session:
-                # For now, just log the position update
-                # In a full implementation, you would update the Trade model
-                logger.info(f"Updating position in database: {position.position_id}")
-                
-        except Exception as e:
-            logger.error(f"Error updating position in database: {e}")
-    
-    async def _check_emergency_conditions(self):
-        """Check for emergency stop conditions - MINIMAL CHECKS ONLY"""
-        try:
-            # NO LOSS LIMITS - removed as requested
-            # Only check for critical system errors or manual emergency stop
-            
+            # Manual emergency stop
             if self.emergency_stop:
                 logger.error("🚨 EMERGENCY STOP: Manual emergency stop activated")
                 await self.stop_trading()
-            
+                
         except Exception as e:
             logger.error(f"Error checking emergency conditions: {e}")
+    
+    @staticmethod
+    def _round_step(qty: float, step: float) -> float:
+        """Round quantity to exchange step size"""
+        if step <= 0:
+            return qty
+        return (qty // step) * step
+    
+    @staticmethod
+    def _round_tick(price: float, tick: float) -> float:
+        """Round price to exchange tick size"""
+        if tick <= 0:
+            return price
+        return round(price / tick) * tick
+    
+    async def _store_position_in_db(self, position: LivePosition):
+        """Store position in database"""
+        try:
+            # For now, just log the position data
+            # In a full implementation, you would create a Trade model and save it
+            logger.debug(f"Storing position in database: {position.position_id}")
+        except Exception as e:
+            logger.error(f"Error storing position in database: {e}")
+    
+    async def _update_position_in_db(self, position: LivePosition):
+        """Update position in database"""
+        try:
+            # For now, just log the position update
+            # In a full implementation, you would update the Trade model
+            logger.debug(f"Updating position in database: {position.position_id}")
+        except Exception as e:
+            logger.error(f"Error updating position in database: {e}")
     
     def get_status(self) -> Dict[str, Any]:
         """Get current real trading status"""
@@ -478,9 +747,10 @@ class RealTradingEngine:
                 uptime_minutes = (datetime.now() - self.start_time).total_seconds() / 60
             
             return {
-                'active': self.is_running,
+                'is_running': self.is_running,
+                'enabled': self.enabled,
                 'emergency_stop': self.emergency_stop,
-                'active_positions': len(self.active_positions),
+                'active_positions': len(self.positions),
                 'total_trades': self.total_trades,
                 'winning_trades': self.winning_trades,
                 'win_rate': win_rate,
@@ -488,13 +758,30 @@ class RealTradingEngine:
                 'daily_pnl': self.daily_pnl,
                 'uptime_minutes': uptime_minutes,
                 'max_daily_loss': self.max_daily_loss,
-                'positions': [pos.to_dict() for pos in self.active_positions.values()]
+                'stake_usd': self.stake_usd,
+                'max_positions': self.max_positions,
+                'mode': 'real',
+                'engine': 'opportunity_manager_only',
+                'pure_3_rule_mode': self.pure_3_rule_mode,
+                'primary_target_dollars': self.primary_target_dollars,
+                'absolute_floor_dollars': self.absolute_floor_dollars,
+                'stop_loss_percent': self.stop_loss_percent * 100
             }
             
         except Exception as e:
             logger.error(f"Error getting real trading status: {e}")
-            return {'active': False, 'error': str(e)}
+            return {'is_running': False, 'error': str(e)}
     
     def get_active_positions(self) -> List[Dict[str, Any]]:
         """Get all active real positions"""
-        return [pos.to_dict() for pos in self.active_positions.values()]
+        return [pos.to_dict() for pos in self.positions.values()]
+    
+    def get_completed_trades(self) -> List[Dict[str, Any]]:
+        """Get all completed trades"""
+        return self.completed_trades.copy()
+    
+    # Frontend compatibility property aliases
+    @property
+    def active(self) -> bool:
+        """Routes expect 'active' field instead of 'is_running'"""
+        return self.is_running

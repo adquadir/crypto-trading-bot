@@ -11,6 +11,7 @@ import Signals from './pages/Signals';
 import Opportunities from './pages/Opportunities';
 import Scalping from './pages/Scalping';
 import PaperTrading from './pages/PaperTrading';
+import RealTrading from './pages/RealTrading';
 import FlowTrading from './pages/FlowTrading';
 import ProfitScraping from './pages/ProfitScraping';
 import Settings from './pages/Settings';
@@ -429,6 +430,7 @@ function App() {
             <Route path="/opportunities" element={<Opportunities />} />
             <Route path="/scalping" element={<Scalping />} />
             <Route path="/paper-trading" element={<PaperTrading />} />
+            <Route path="/real-trading" element={<RealTrading />} />
             <Route path="/flow-trading" element={<FlowTrading />} />
             <Route path="/profit-scraping" element={<ProfitScraping />} />
             <Route path="/positions" element={<Positions />} />
@@ -444,4 +446,4 @@ function App() {
   );
 }
 
-export default App; 
+export default App;

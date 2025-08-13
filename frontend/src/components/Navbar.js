@@ -27,6 +27,7 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import PsychologyIcon from '@mui/icons-material/Psychology';
+import WarningIcon from '@mui/icons-material/Warning';
 import SettingsIcon from '@mui/icons-material/Settings';
 
 const Navbar = () => {
@@ -41,6 +42,7 @@ const Navbar = () => {
     { path: '/opportunities', label: 'Opportunities', icon: <TrendingUpIcon /> },
     { path: '/scalping', label: 'Scalping', icon: <SpeedIcon /> },
     { path: '/paper-trading', label: 'Paper Trading', icon: <PsychologyIcon /> },
+    { path: '/real-trading', label: '⚠️ Real Trading', icon: <WarningIcon />, isRealMoney: true },
     { path: '/flow-trading', label: 'Flow Trading', icon: <GridOnIcon /> },
     { path: '/profit-scraping', label: 'Profit Scraping', icon: <MonetizationOnIcon /> },
     { path: '/positions', label: 'Positions', icon: <AccountBalanceWalletIcon /> },
@@ -102,14 +104,20 @@ const Navbar = () => {
                 to={item.path}
                 startIcon={item.icon}
                 sx={{
-                  color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
+                  color: item.isRealMoney 
+                    ? (location.pathname === item.path ? 'error.main' : 'warning.main')
+                    : (location.pathname === item.path ? 'primary.main' : 'text.secondary'),
                   '&:hover': {
-                    backgroundColor: 'action.hover',
+                    backgroundColor: item.isRealMoney ? 'error.dark' : 'action.hover',
+                    color: item.isRealMoney ? 'error.contrastText' : undefined,
                   },
-                    px: { sm: 1, md: 2 },
-                    fontSize: { sm: '0.8rem', md: '0.875rem' },
-                    minWidth: 'auto',
-                    flexShrink: 0
+                  px: { sm: 1, md: 2 },
+                  fontSize: { sm: '0.8rem', md: '0.875rem' },
+                  minWidth: 'auto',
+                  flexShrink: 0,
+                  fontWeight: item.isRealMoney ? 'bold' : 'normal',
+                  border: item.isRealMoney ? '1px solid' : 'none',
+                  borderColor: item.isRealMoney ? 'warning.main' : 'transparent',
                 }}
               >
                 {item.label}
@@ -158,7 +166,14 @@ const Navbar = () => {
                     onClick={handleMobileMenuClose}
                     selected={location.pathname === item.path}
                     sx={{
-                      color: location.pathname === item.path ? 'primary.main' : 'inherit',
+                      color: item.isRealMoney 
+                        ? (location.pathname === item.path ? 'error.main' : 'warning.main')
+                        : (location.pathname === item.path ? 'primary.main' : 'inherit'),
+                      fontWeight: item.isRealMoney ? 'bold' : 'normal',
+                      backgroundColor: item.isRealMoney ? 'warning.light' : 'transparent',
+                      '&:hover': {
+                        backgroundColor: item.isRealMoney ? 'error.light' : undefined,
+                      },
                     }}
                   >
                     <ListItemIcon sx={{ color: 'inherit', minWidth: 36 }}>
@@ -181,4 +196,4 @@ const Navbar = () => {
   );
 };
 
-export default Navbar; 
+export default Navbar;

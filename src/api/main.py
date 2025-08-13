@@ -461,7 +461,7 @@ def create_app():
     app.include_router(profit_scraping_router, prefix="/api/v1")
     app.include_router(signal_tracking_router, prefix="/api/v1")
     app.include_router(paper_trading_router, prefix="/api/v1")
-    app.include_router(real_trading_router, prefix="/api/v1")
+    app.include_router(real_trading_router)
     app.include_router(backtesting_router, prefix="/api/v1")
     app.include_router(ws_router)
 

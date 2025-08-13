@@ -30,6 +30,7 @@ components = {
     'profit_scraping_engine': None,
     'enhanced_signal_tracker': None,
     'realtime_scalping_manager': None,
+    'real_trading_engine': None,      # NEW: Real trading engine
     'initialization_complete': False,
     'initialization_error': None,
     'profit_scraping_active': False,  # NEW: Track profit scraping status
@@ -450,6 +451,298 @@ def create_app():
             logger.error(f"Error toggling engine: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to toggle engine: {str(e)}")
 
+    # ========================================
+    # REAL TRADING ROUTES - WITH IDEMPOTENT CLOSE & TP/SL DISPLAY
+    # ========================================
+
+    def get_real_trading_engine():
+        """Helper function to get real trading engine"""
+        if not components['initialization_complete'] or not components['real_trading_engine']:
+            raise HTTPException(status_code=503, detail="Real trading engine not available")
+        return components['real_trading_engine']
+
+    @app.get("/api/v1/real-trading/status")
+    async def get_real_trading_status():
+        """Get real trading engine status"""
+        try:
+            engine = get_real_trading_engine()
+            status = engine.get_status()
+            return {"success": True, "data": status}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting real trading status: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/v1/real-trading/safety-status")
+    async def get_real_trading_safety_status():
+        """Get real trading safety status + LIVE balance"""
+        try:
+            engine = get_real_trading_engine()
+
+            status = engine.get_status()
+            max_daily_loss = float(status.get('max_daily_loss', 500))
+            daily_pnl = float(status.get('daily_pnl', 0))
+
+            safety_status = {
+                "is_safe": not status.get('emergency_stop', False),
+                "emergency_stop": status.get('emergency_stop', False),
+                "daily_pnl": daily_pnl,
+                "max_daily_loss": max_daily_loss,
+                # remaining should shrink on losses:
+                "daily_loss_remaining": max_daily_loss - max(0.0, -daily_pnl),
+                "active_positions": status.get('active_positions', 0),
+                "max_positions": status.get('max_positions', 20),
+                "positions_remaining": status.get('max_positions', 20) - status.get('active_positions', 0),
+                "enabled": status.get('enabled', False),
+                "is_running": status.get('is_running', False)
+            }
+
+            # 🔹 NEW: pull and normalize real balance
+            try:
+                bal = await engine.exchange_client.get_account_balance()
+                total = (bal.get("total")
+                         or bal.get("wallet")
+                         or bal.get("walletBalance")
+                         or bal.get("totalWalletBalance")
+                         or 0.0)
+                available = (bal.get("available")
+                             or bal.get("free")
+                             or bal.get("availableBalance")
+                             or 0.0)
+                initial_margin = bal.get("initial_margin") or bal.get("totalInitialMargin") or 0.0
+                maint_margin = bal.get("maintenance_margin") or bal.get("totalMaintMargin") or 0.0
+
+                safety_status.update({
+                    "balance_total_usd": float(total),
+                    "available_usd": float(available),
+                    "initial_margin_usd": float(initial_margin),
+                    "maint_margin_usd": float(maint_margin),
+                })
+            except Exception as e:
+                logger.warning(f"Could not fetch account balance: {e}")
+                # Add null values if balance fetch fails
+                safety_status.update({
+                    "balance_total_usd": None,
+                    "available_usd": None,
+                    "initial_margin_usd": None,
+                    "maint_margin_usd": None,
+                })
+
+            return {"success": True, "data": safety_status}
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting real trading safety status: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/v1/real-trading/account-balance")
+    async def get_real_trading_account_balance():
+        """Get real account balance from exchange"""
+        try:
+            if not components['exchange_client']:
+                raise HTTPException(status_code=503, detail="Exchange client not available")
+            
+            # Get balance from exchange
+            balance = await components['exchange_client'].get_account_balance()
+            
+            if not balance:
+                raise HTTPException(status_code=500, detail="Failed to fetch account balance")
+            
+            return {"success": True, "data": balance}
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting account balance: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/v1/real-trading/positions")
+    async def get_real_trading_positions():
+        """Get real trading positions with TP/SL price display"""
+        try:
+            engine = get_real_trading_engine()
+            positions = engine.get_active_positions()
+            return {"success": True, "data": positions}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting real trading positions: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/v1/real-trading/trades")
+    async def get_real_trading_trades():
+        """Get completed real trades"""
+        try:
+            engine = get_real_trading_engine()
+            trades = engine.get_completed_trades()
+            return {"success": True, "data": trades}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting real trading trades: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/v1/real-trading/start")
+    async def start_real_trading():
+        """Start real trading (REAL MONEY - USE WITH CAUTION)"""
+        try:
+            engine = get_real_trading_engine()
+            
+            logger.warning("🚨 REAL TRADING START REQUEST - REAL MONEY WILL BE USED")
+            
+            # Start real trading
+            success = await engine.start_trading()
+            
+            if success:
+                logger.warning("🚨 REAL TRADING STARTED - LIVE MONEY TRADING ACTIVE")
+                return {
+                    "success": True, 
+                    "message": "Real trading started successfully",
+                    "warning": "REAL MONEY TRADING IS NOW ACTIVE"
+                }
+            else:
+                return {"success": False, "message": "Failed to start real trading"}
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error starting real trading: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/v1/real-trading/stop")
+    async def stop_real_trading():
+        """Stop real trading and close all positions"""
+        try:
+            engine = get_real_trading_engine()
+            
+            logger.warning("🛑 REAL TRADING STOP REQUEST")
+            
+            # Stop real trading
+            success = await engine.stop_trading()
+            
+            if success:
+                logger.info("✅ Real trading stopped successfully")
+                return {"success": True, "message": "Real trading stopped successfully"}
+            else:
+                return {"success": False, "message": "Failed to stop real trading"}
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error stopping real trading: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/v1/real-trading/close-position/{position_id}")
+    async def close_real_position(position_id: str, reason: str = "MANUAL"):
+        """Close a specific real position (IDEMPOTENT - SAFE FOR REPEATED CALLS)"""
+        try:
+            logger.info(f"🔄 REAL CLOSE REQUEST: {position_id} (reason: {reason})")
+            
+            engine = get_real_trading_engine()
+            
+            # Check if position exists
+            pos = engine.positions.get(position_id)
+            if not pos:
+                logger.warning(f"❌ Position {position_id} not found")
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Position {position_id} not found"
+                )
+            
+            # 🔒 IDEMPOTENT GUARD: Check if position is already flat on exchange
+            try:
+                is_open = await engine._has_open_position_on_exchange(pos.symbol)
+                if not is_open:
+                    logger.info(f"🔒 IDEMPOTENT: Position {pos.symbol} already flat on exchange")
+                    # Mark as closed locally
+                    await engine._mark_position_closed(position_id, reason="already_flat")
+                    return {
+                        "success": True,
+                        "message": f"Real position {position_id} was already closed on exchange",
+                        "idempotent": True,
+                        "warning": "Position was already flat - marked as closed locally"
+                    }
+            except Exception as e:
+                logger.warning(f"Could not check exchange position status: {e}")
+                # Continue with normal close attempt
+            
+            # Execute market close
+            logger.warning(f"🚨 CLOSING REAL POSITION: {position_id} - REAL MONEY")
+            success = await engine._market_close_position(position_id, reason)
+            
+            if success:
+                logger.info(f"✅ Real position {position_id} closed successfully")
+                return {
+                    "success": True,
+                    "message": f"Real position {position_id} closed successfully",
+                    "idempotent": False
+                }
+            else:
+                logger.error(f"❌ Failed to close real position {position_id}")
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Failed to close position {position_id}"
+                )
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"❌ Error closing real position {position_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/v1/real-trading/emergency-stop")
+    async def emergency_stop_real_trading():
+        """Emergency stop - immediately halt all real trading"""
+        try:
+            engine = get_real_trading_engine()
+            
+            logger.error("🚨 EMERGENCY STOP ACTIVATED")
+            
+            # Set emergency stop flag
+            engine.emergency_stop = True
+            
+            # Stop trading
+            await engine.stop_trading()
+            
+            logger.error("🛑 Emergency stop completed")
+            return {
+                "success": True, 
+                "message": "Emergency stop activated - all real trading halted"
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error during emergency stop: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/v1/real-trading/performance")
+    async def get_real_trading_performance():
+        """Get real trading performance metrics"""
+        try:
+            engine = get_real_trading_engine()
+            status = engine.get_status()
+            
+            performance = {
+                "total_pnl": status.get('total_pnl', 0),
+                "daily_pnl": status.get('daily_pnl', 0),
+                "total_trades": status.get('total_trades', 0),
+                "winning_trades": status.get('winning_trades', 0),
+                "win_rate": status.get('win_rate', 0),
+                "active_positions": status.get('active_positions', 0),
+                "uptime_minutes": status.get('uptime_minutes', 0)
+            }
+            
+            return {"success": True, "data": performance}
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting real trading performance: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     return app
 
 async def initialize_components_background():
@@ -570,6 +863,22 @@ async def initialize_components_background():
             if components['profit_scraping_engine']:
                 components['profit_scraping_active'] = True
                 components['pure_mode_enforced'] = True
+        
+        # Initialize real trading engine
+        logger.info("Initializing real trading engine...")
+        from src.trading.real_trading_engine import RealTradingEngine
+        
+        components['real_trading_engine'] = RealTradingEngine(
+            config=config,
+            exchange_client=components['exchange_client']
+        )
+        
+        # Connect opportunity manager to real trading engine
+        if components['opportunity_manager']:
+            components['real_trading_engine'].connect_opportunity_manager(components['opportunity_manager'])
+            logger.info("✅ Opportunity manager connected to real trading engine")
+        
+        logger.info("✅ Real trading engine initialized")
         
         # Initialize realtime scalping manager
         logger.info("Initializing realtime scalping manager...")

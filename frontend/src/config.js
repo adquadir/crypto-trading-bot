@@ -63,6 +63,22 @@ const config = {
             PERFORMANCE: '/api/v1/paper-trading/performance',
             TRADES: '/api/v1/paper-trading/trades',
             ACCOUNT: '/api/v1/paper-trading/account'
+        },
+        
+        // Real Trading endpoints
+        REAL_TRADING: {
+            STATUS: '/api/v1/real-trading/status',
+            START: '/api/v1/real-trading/start',
+            STOP: '/api/v1/real-trading/stop',
+            POSITIONS: '/api/v1/real-trading/positions',
+            COMPLETED_TRADES: '/api/v1/real-trading/completed-trades',
+            SAFETY_STATUS: '/api/v1/real-trading/safety-status',
+            OM_STATUS: '/api/v1/real-trading/opportunity-manager/status',
+            EMERGENCY_STOP: '/api/v1/real-trading/emergency-stop',
+            CLOSE_POSITION: (id) => `/api/v1/real-trading/close-position/${id}`,
+            PERFORMANCE: '/api/v1/real-trading/performance',
+            TRADE_SYNC_STATUS: '/api/v1/real-trading/trade-sync/status',
+            MANUAL_TRADES: '/api/v1/real-trading/trade-sync/manual-trades'
         }
     },
     // API endpoints - WebSocket disabled
