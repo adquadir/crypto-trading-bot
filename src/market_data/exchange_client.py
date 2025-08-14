@@ -1200,6 +1200,8 @@ class ExchangeClient:
             # Only initialize ccxt for private endpoints (orders, balances, etc.)
             exchange_config = {
                 'enableRateLimit': True,
+                'apiKey': self.api_key,          # 🔐 add
+                'secret': self.api_secret,       # 🔐 add
                 'options': {
                     'defaultType': 'future',  # Use futures market
                     'adjustForTimeDifference': True,
@@ -1208,6 +1210,10 @@ class ExchangeClient:
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                 }
             }
+            # If you ever run testnet, also map Futures testnet URL:
+            if self.testnet:
+                exchange_config.setdefault('urls', {}).setdefault('api', {})['fapi'] = 'https://testnet.binancefuture.com/fapi'
+
             # Check for proxy configuration in the proxy section or from environment
             use_proxy = (
                 self.config.get('proxy', {}).get('USE_PROXY', False) or 
@@ -1222,10 +1228,10 @@ class ExchangeClient:
                 exchange_config['proxy'] = proxy_url
                 logger.info(f"Proxy configured for exchange: {self.proxy_host}:{self.proxy_port}")
                 logger.info(f"Full proxy URL: {proxy_url}")
-            logger.info(f"Initializing ccxt for private endpoints only: {exchange_config}")
+            logger.info(f"Initializing ccxt with API credentials: {exchange_config}")
             self.exchange = ccxt.binance(exchange_config)
             self.ccxt_client = self.exchange  # Alias for compatibility
-            logger.info("Exchange client initialized for private endpoints only (no public ccxt calls)")
+            logger.info("Exchange client initialized with API credentials for private endpoints")
         except Exception as e:
             logger.error(f"Error initializing exchange: {e}")
             raise
@@ -1513,17 +1519,60 @@ class ExchangeClient:
             return None
 
     async def get_account_balance(self) -> Optional[Dict]:
-        """Get account balance"""
+        """Return a normalized futures balance dict."""
+        # 1) Prefer signed REST: /fapi/v2/account (exact fields we need)
+        try:
+            acct = await self.get_account()  # uses _make_request(..., signed=True)
+            return {
+                # Binance futures canonical fields:
+                "totalWalletBalance": float(acct.get("totalWalletBalance", 0.0)),
+                "availableBalance": float(acct.get("availableBalance", 0.0)),
+                "totalInitialMargin": float(acct.get("totalInitialMargin", 0.0)),
+                "totalMaintMargin": float(acct.get("totalMaintMargin", 0.0)),
+                # Friendly aliases (optional) for route normalizers that look for these
+                "total": float(acct.get("totalWalletBalance", 0.0)),
+                "available": float(acct.get("availableBalance", 0.0)),
+                "initial_margin": float(acct.get("totalInitialMargin", 0.0)),
+                "maintenance_margin": float(acct.get("totalMaintMargin", 0.0)),
+            }
+        except Exception as e_rest:
+            logger.warning(f"REST account fallback failed, trying CCXT: {e_rest}")
+
+        # 2) CCXT fallback with normalization of nested dicts
         try:
             if not self.ccxt_client:
                 logger.error("CCXT client not initialized")
                 return None
-            
-            # Fetch balance using CCXT
-            balance = await asyncio.to_thread(self.ccxt_client.fetch_balance)
-            
-            return balance
-            
-        except Exception as e:
-            logger.error(f"Error getting account balance: {e}")
+            bal = await asyncio.to_thread(self.ccxt_client.fetch_balance)
+
+            def pick_num(d, key, *prefer):
+                v = d.get(key)
+                if isinstance(v, (int, float, str)) and v not in (None, ""):
+                    try: return float(v)
+                    except: pass
+                if isinstance(v, dict):
+                    for cur in (*prefer, "USDT", "USD"):
+                        if cur in v and v[cur] is not None:
+                            try: return float(v[cur])
+                            except: pass
+                    nums = [x for x in v.values() if isinstance(x, (int, float))]
+                    if nums: return float(sum(nums))
+                return 0.0
+
+            total = pick_num(bal, "total")
+            free  = pick_num(bal, "free")
+            info  = bal.get("info", {}) if isinstance(bal, dict) else {}
+
+            return {
+                "totalWalletBalance": float(info.get("totalWalletBalance", total)),
+                "availableBalance":  float(info.get("availableBalance", free)),
+                "totalInitialMargin": float(info.get("totalInitialMargin", 0.0)),
+                "totalMaintMargin":   float(info.get("totalMaintMargin", 0.0)),
+                "total": float(info.get("totalWalletBalance", total)),
+                "available": float(info.get("availableBalance", free)),
+                "initial_margin": float(info.get("totalInitialMargin", 0.0)),
+                "maintenance_margin": float(info.get("totalMaintMargin", 0.0)),
+            }
+        except Exception as e_ccxt:
+            logger.error(f"Error getting account balance via CCXT: {e_ccxt}")
             return None
