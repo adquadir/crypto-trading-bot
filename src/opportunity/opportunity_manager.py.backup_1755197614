@@ -121,63 +121,6 @@ class OpportunityManager:
         self.scalping_opportunities = {}  # Stateful signal cache with market invalidation
         self.scalping_signal_states = {}  # Track signal status: active/hit_tp/hit_sl/stale
         
-    
-    def _drop_forming_candle(self, klines):
-        """
-        Return klines with the last (possibly-forming) candle removed.
-        Works for list[dict] or list[list].
-        """
-        if not klines or len(klines) < 2:
-            return klines
-        try:
-            # If your kline dicts carry 'isClosed' or 'x' flag, prefer that:
-            last = klines[-1]
-            is_closed = (isinstance(last, dict) and (last.get('isClosed') or last.get('x')))
-            if is_closed is True:
-                return klines
-        except Exception:
-            pass
-        # Default: drop the very last element (safer for direction calc)
-        return klines[:-1]
-
-    def _should_accept_flip(self, symbol: str, new_dir: str, momentum: float = None,
-                            min_flip_seconds: int = 60, hysteresis_mult: float = 1.25,
-                            base_momo_threshold: float = 0.001):
-        """
-        Debounce direction changes and require extra headroom near threshold.
-        Returns True if we should accept changing to new_dir.
-        """
-        try:
-            last = self.opportunities.get(symbol, {})
-            last_dir = str(last.get('direction', '')).upper()
-            last_ts = float(last.get('signal_timestamp', 0) or 0)
-            now = time.time()
-            if last_dir and new_dir and new_dir != last_dir:
-                if (now - last_ts) < min_flip_seconds:
-                    return False
-                # Hysteresis: if we know momentum, require > threshold * multiplier
-                if momentum is not None and abs(momentum) < (hysteresis_mult * base_momo_threshold):
-                    return False
-            return True
-        except Exception:
-            return True
-
-    def _finalize_and_stamp(self, opp: dict):
-        """
-        Always normalize direction and fix TP/SL orientation, and add signal_timestamp.
-        """
-        if not opp:
-            return None
-        try:
-            opp = self._finalize_opportunity(opp)  # your existing finalizer
-            if opp is None:
-                return None
-            opp.setdefault('signal_timestamp', time.time())
-            return opp
-        except Exception:
-            return None
-
-
     def get_opportunities(self) -> List[Dict[str, Any]]:
         """Get all current trading opportunities."""
         # Check if we need to refresh opportunities
@@ -257,17 +200,8 @@ class OpportunityManager:
                     # Generate balanced, profitable signals with improved logic
                     opportunity = self._analyze_market_and_generate_signal_balanced(symbol, market_data, time.time())
                     if opportunity:
-                        # Apply finalization and debouncing
-                        new_dir = str(opportunity.get('direction', '')).upper()
-                        momentum = opportunity.get('price_change_5')  # or your momentum field
-                        if not self._should_accept_flip(symbol, new_dir, momentum):
-                            opportunity = None
-
-                        if opportunity:
-                            opportunity = self._finalize_and_stamp(opportunity)
-                            if opportunity:
-                                self.opportunities[symbol] = opportunity
-                                logger.info(f"Generated dynamic signal for {symbol}: {opportunity['direction']}")
+                        self.opportunities[symbol] = opportunity
+                        logger.info(f"Generated dynamic signal for {symbol}: {opportunity['direction']}")
                             
                 except Exception as e:
                     logger.error(f"Error scanning {symbol}: {e}")
@@ -347,18 +281,10 @@ class OpportunityManager:
                         opportunity['last_updated'] = current_time
                         opportunity['signal_id'] = f"{symbol}_{int(current_time/60)}"  # Stable ID per minute
                         
-                        # Apply finalization and debouncing
-                        new_dir = str(opportunity.get('direction', '')).upper()
-                        momentum = opportunity.get('price_change_5')  # or your momentum field
-                        if not self._should_accept_flip(symbol, new_dir, momentum):
-                            opportunity = None
-
-                        if opportunity:
-                            opportunity = self._finalize_and_stamp(opportunity)
-                            if opportunity:
-                                self.opportunities[symbol] = opportunity
-                                processed_count += 1
-                                logger.info(f"✅ [{processed_count}/{len(symbols_to_scan)}] Generated/updated signal for {symbol}: {opportunity['direction']} (confidence: {opportunity['confidence']:.2f}) - STORED")
+                        # STORE THE OPPORTUNITY IMMEDIATELY
+                        self.opportunities[symbol] = opportunity
+                        processed_count += 1
+                        logger.info(f"✅ [{processed_count}/{len(symbols_to_scan)}] Generated/updated signal for {symbol}: {opportunity['direction']} (confidence: {opportunity['confidence']:.2f}) - STORED")
                     else:
                         logger.debug(f"❌ [{processed_count}/{len(symbols_to_scan)}] No signal for {symbol}")
                         
@@ -502,17 +428,7 @@ class OpportunityManager:
                             # Don't fail signal generation if tracking fails
                             pass
                         
-                        # Apply finalization and debouncing
-                        if opportunity:
-                            new_dir = str(opportunity.get('direction', '')).upper()
-                            momentum = opportunity.get('price_change_5')  # or your momentum field
-                            if not self._should_accept_flip(symbol, new_dir, momentum):
-                                opportunity = None
-
-                        if opportunity:
-                            opportunity = self._finalize_and_stamp(opportunity)
-                            if opportunity:
-                                self.opportunities[symbol] = opportunity
+                        self.opportunities[symbol] = opportunity
                         processed_count += 1
                         
                         # Log swing trading specific details
@@ -578,20 +494,11 @@ class OpportunityManager:
                                 # Don't fail signal generation if tracking fails
                                 pass
                             
-                            # Apply finalization and debouncing to basic swing fallback
-                            new_dir = str(basic_opportunity.get('direction', '')).upper()
-                            momentum = basic_opportunity.get('price_vs_sma')  # Use the momentum field from basic swing
-                            if not self._should_accept_flip(symbol, new_dir, momentum):
-                                basic_opportunity = None
-
-                            if basic_opportunity:
-                                basic_opportunity = self._finalize_and_stamp(basic_opportunity)
-                                if basic_opportunity:
-                                    self.opportunities[symbol] = basic_opportunity
-                                processed_count += 1
-                                
-                                logger.info(f"🎯 SWING BASIC [{processed_count}/{len(symbols_to_scan)}] {symbol}: {basic_opportunity['direction']} "
-                                          f"(conf: {basic_opportunity['confidence']:.2f}, strategy: {basic_opportunity['strategy']})")
+                            self.opportunities[symbol] = basic_opportunity
+                            processed_count += 1
+                            
+                            logger.info(f"🎯 SWING BASIC [{processed_count}/{len(symbols_to_scan)}] {symbol}: {basic_opportunity['direction']} "
+                                      f"(conf: {basic_opportunity['confidence']:.2f}, strategy: {basic_opportunity['strategy']})")
                         else:
                             # 🎯 LOG REJECTION REASONS for live tuning (your insight!)
                             logger.debug(f"❌ SWING [{processed_count}/{len(symbols_to_scan)}] No signal for {symbol} - both advanced and basic failed")
@@ -1539,9 +1446,6 @@ class OpportunityManager:
             
             # Get real market data
             klines = market_data.get('klines', [])
-            
-            # Use last closed candle for direction decisions (prevents flip-flops)
-            klines = self._drop_forming_candle(klines)
             if not klines or len(klines) < 20:
                 logger.warning(f"Insufficient market data for {symbol}: {len(klines) if klines else 0} candles")
                 return None
@@ -1812,7 +1716,6 @@ class OpportunityManager:
             }
             
             klines = market_data['klines']
-            klines = self._drop_forming_candle(klines)  # Use closed candles only
             if len(klines) < 50:  # Need more data for swing analysis
                 rejection_log["rejection_reason"] = f"Insufficient data: {len(klines)} candles < 50 required"
                 logger.debug(f"🚫 SWING REJECTED {symbol}: {rejection_log['rejection_reason']}")
@@ -2759,8 +2662,6 @@ class OpportunityManager:
         """Generate basic swing signal when advanced voting fails - ensures we get swing signals."""
         try:
             klines = market_data['klines']
-            # Use last CLOSED bar for direction math to avoid flip-flops
-            klines = self._drop_forming_candle(klines)
             if len(klines) < 20:
                 return None
                 
@@ -3778,85 +3679,6 @@ class OpportunityManager:
         except Exception as e:
             logger.error(f"Error copying learning criteria: {e}")
             return self.learning_criteria
-
-    def _enhanced_signal_validation(self, opportunity: dict, symbol: str) -> dict:
-        """Enhanced signal validation with comprehensive safety checks."""
-        if not opportunity:
-            return None
-        
-        try:
-            # 1. Validate required fields
-            required_fields = ['symbol', 'direction', 'entry_price', 'take_profit', 'stop_loss']
-            for field in required_fields:
-                if field not in opportunity or opportunity[field] is None:
-                    logger.warning(f"Missing required field {field} in signal for {symbol}")
-                    return None
-            
-            # 2. Validate direction consistency
-            direction = str(opportunity.get('direction', '')).upper()
-            if direction not in ['LONG', 'SHORT']:
-                logger.warning(f"Invalid direction '{direction}' for {symbol}")
-                return None
-            
-            # 3. Validate price levels
-            entry = float(opportunity['entry_price'])
-            tp = float(opportunity['take_profit'])
-            sl = float(opportunity['stop_loss'])
-            
-            if entry <= 0 or tp <= 0 or sl <= 0:
-                logger.warning(f"Invalid price levels for {symbol}: entry={entry}, tp={tp}, sl={sl}")
-                return None
-            
-            # 4. Validate TP/SL positioning
-            if direction == 'LONG':
-                if tp <= entry or sl >= entry:
-                    logger.warning(f"Invalid LONG TP/SL positioning for {symbol}: entry={entry}, tp={tp}, sl={sl}")
-                    return None
-            elif direction == 'SHORT':
-                if tp >= entry or sl <= entry:
-                    logger.warning(f"Invalid SHORT TP/SL positioning for {symbol}: entry={entry}, tp={tp}, sl={sl}")
-                    return None
-            
-            # 5. Apply final normalization
-            opportunity = self._finalize_and_stamp(opportunity)
-            
-            return opportunity
-            
-        except Exception as e:
-            logger.error(f"Error in enhanced signal validation for {symbol}: {e}")
-            return None
-
-    def _safe_signal_assignment(self, symbol: str, opportunity: dict) -> bool:
-        """Safely assign a signal to the opportunities dict with validation."""
-        if not opportunity:
-            return False
-        
-        try:
-            # Apply enhanced validation
-            validated_opportunity = self._enhanced_signal_validation(opportunity, symbol)
-            if not validated_opportunity:
-                return False
-            
-            # Check for direction flip
-            existing = self.opportunities.get(symbol, {})
-            existing_direction = str(existing.get('direction', '')).upper()
-            new_direction = str(validated_opportunity.get('direction', '')).upper()
-            
-            if existing_direction and new_direction and existing_direction != new_direction:
-                # Apply flip debouncing
-                if not self._should_accept_flip(symbol, new_direction):
-                    logger.info(f"🚫 Direction flip rejected for {symbol}: {existing_direction} → {new_direction}")
-                    return False
-                else:
-                    logger.info(f"✅ Direction flip accepted for {symbol}: {existing_direction} → {new_direction}")
-            
-            # Safe assignment
-            self.opportunities[symbol] = validated_opportunity
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error in safe signal assignment for {symbol}: {e}")
-            return False
 
     def _determine_direction_with_confluence(self, symbol: str, market_data: Dict[str, Any], 
                                            current_price: float, volatility: float, 

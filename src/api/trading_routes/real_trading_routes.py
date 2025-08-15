@@ -20,8 +20,8 @@ logger = setup_logger(__name__)
 # Global real trading engine instance
 real_trading_engine = None
 
-def get_real_trading_engine():
-    """Get or create real trading engine instance with auto-connected OpportunityManager"""
+async def get_real_trading_engine():
+    """Get or create real trading engine instance with properly initialized OpportunityManager"""
     global real_trading_engine
     if real_trading_engine is None:
         # Load configuration
@@ -30,19 +30,70 @@ def get_real_trading_engine():
                 config = yaml.safe_load(f)
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
-            config = {}
+            config = {
+                'risk': {
+                    'max_drawdown': 0.2,
+                    'max_leverage': 5.0,
+                    'position_size_limit': 1000.0,
+                    'daily_loss_limit': 500.0,
+                    'initial_balance': 10000.0
+                },
+                'trading': {
+                    'max_volatility': 0.1,
+                    'max_spread': 0.01
+                }
+            }
         
+        # Create exchange client and initialize
         exchange_client = ExchangeClient()
+        try:
+            await exchange_client.initialize()
+            logger.info("✅ Exchange client initialized")
+        except Exception as e:
+            logger.warning(f"Exchange client initialization failed: {e}")
+        
+        # Create real trading engine
         real_trading_engine = RealTradingEngine(config, exchange_client)
         
-        # Auto-connect OpportunityManager
+        # Auto-connect OpportunityManager with proper dependencies
         try:
             from ...opportunity.opportunity_manager import OpportunityManager
-            opportunity_manager = OpportunityManager()
+            from ...strategy.strategy_manager import StrategyManager
+            from ...risk.risk_manager import RiskManager
+            
+            logger.info("🔧 Initializing OpportunityManager dependencies...")
+            
+            # Create and initialize StrategyManager
+            strategy_manager = StrategyManager(exchange_client)
+            await strategy_manager.initialize()
+            logger.info("✅ StrategyManager initialized")
+            
+            # Create and initialize RiskManager
+            risk_manager = RiskManager(config)
+            await risk_manager.initialize()
+            logger.info("✅ RiskManager initialized")
+            
+            # Create OpportunityManager with all required dependencies
+            opportunity_manager = OpportunityManager(
+                exchange_client=exchange_client,
+                strategy_manager=strategy_manager,
+                risk_manager=risk_manager
+            )
+            
+            # Initialize the OpportunityManager
+            await opportunity_manager.initialize()
+            logger.info("✅ OpportunityManager initialized")
+            
+            # Connect to real trading engine
             real_trading_engine.connect_opportunity_manager(opportunity_manager)
-            logger.info("✅ OpportunityManager auto-connected to Real Trading Engine")
+            logger.info("🔗 OpportunityManager connected to Real Trading Engine")
+            
         except Exception as e:
-            logger.warning(f"Could not auto-connect OpportunityManager: {e}")
+            logger.error(f"❌ Failed to initialize OpportunityManager: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail the engine creation, but log the issue clearly
+            logger.error("⚠️  Real Trading Engine will start without OpportunityManager")
     
     return real_trading_engine
 
@@ -55,7 +106,7 @@ router = APIRouter(prefix="/api/v1/real-trading", tags=["real-trading"])
 async def get_real_trading_status():
     """Get real trading engine status"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         status = engine.get_status()
         
         # 🔧 Compatibility aliases for the frontend
@@ -81,7 +132,7 @@ async def start_real_trading(payload: StartPayload):
     try:
         symbols = payload.symbols or ['BTCUSDT', 'ETHUSDT']  # Default symbols
         
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         # Safety confirmation required
         logger.warning("🚨 REAL TRADING START REQUEST RECEIVED")
@@ -117,7 +168,7 @@ async def start_real_trading(payload: StartPayload):
 async def stop_real_trading():
     """Stop real trading and close all positions"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         logger.warning("🛑 REAL TRADING STOP REQUEST RECEIVED")
         
@@ -144,7 +195,7 @@ async def stop_real_trading():
 async def get_real_positions():
     """Get all active real positions"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         positions = engine.get_active_positions()
         
         return {
@@ -161,7 +212,7 @@ async def get_real_positions():
 async def get_completed_trades():
     """Get all completed real trades"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         trades = engine.get_completed_trades()
         
         return {
@@ -178,7 +229,7 @@ async def get_completed_trades():
 async def close_real_position(position_id: str, reason: str = "MANUAL"):
     """Close a specific real position (idempotent)"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         # Check if position exists
         pos = engine.positions.get(position_id)
@@ -227,7 +278,7 @@ async def close_real_position(position_id: str, reason: str = "MANUAL"):
 async def emergency_stop():
     """Emergency stop - immediately halt all real trading"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         logger.error("🚨 EMERGENCY STOP ACTIVATED")
         
@@ -253,7 +304,7 @@ async def emergency_stop():
 async def reset_emergency_stop():
     """Reset emergency stop flag (use with caution)"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         logger.warning("🔄 EMERGENCY STOP RESET REQUEST")
         
@@ -271,38 +322,11 @@ async def reset_emergency_stop():
         logger.error(f"Error resetting emergency stop: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/connect-opportunity-manager")
-async def connect_opportunity_manager():
-    """Connect OpportunityManager to real trading engine"""
-    try:
-        engine = get_real_trading_engine()
-        
-        # Import and create OpportunityManager
-        from ...opportunity.opportunity_manager import OpportunityManager
-        
-        # Create OpportunityManager instance
-        opportunity_manager = OpportunityManager()
-        
-        # Connect to real trading engine
-        engine.connect_opportunity_manager(opportunity_manager)
-        
-        logger.info("🔗 OpportunityManager connected to Real Trading Engine")
-        
-        return {
-            "success": True,
-            "message": "OpportunityManager connected successfully",
-            "info": "Real trading engine will now receive signals from OpportunityManager"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error connecting OpportunityManager: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.get("/opportunity-manager/status")
 async def get_opportunity_manager_status():
     """Get OpportunityManager connection status"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         has_opportunity_manager = engine.opportunity_manager is not None
         
@@ -342,7 +366,7 @@ async def get_opportunity_manager_status():
 async def get_safety_status():
     """Get safety status and limits"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         safety_status = {
             "emergency_stop": engine.emergency_stop,
@@ -408,7 +432,7 @@ async def get_safety_status():
 async def get_real_trading_performance():
     """Get real trading performance metrics"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         win_rate = engine.winning_trades / engine.total_trades if engine.total_trades > 0 else 0.0
         uptime_minutes = 0
@@ -444,7 +468,7 @@ async def get_real_trading_performance():
 async def get_trade_sync_status():
     """Get trade synchronization service status"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         if not hasattr(engine, 'trade_sync_service') or not engine.trade_sync_service:
             return {
@@ -467,7 +491,7 @@ async def get_trade_sync_status():
 async def get_manual_trades():
     """Get detected manual trades"""
     try:
-        engine = get_real_trading_engine()
+        engine = await get_real_trading_engine()
         
         if not hasattr(engine, 'trade_sync_service') or not engine.trade_sync_service:
             return {

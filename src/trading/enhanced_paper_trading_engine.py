@@ -156,7 +156,9 @@ class EnhancedPaperTradingEngine:
         """
         try:
             symbol = signal.get('symbol', '')
-            direction = signal.get('direction', 'LONG')
+            # ✅ Normalize direction so any BUY/BULL/UP become LONG; everything else → SHORT
+            direction_raw = str(signal.get('direction', 'LONG')).upper()
+            direction = 'LONG' if direction_raw in ('LONG', 'BUY', 'BULL', 'UP') else 'SHORT'
             entry_price = signal.get('entry_price', 0)
             stop_loss = signal.get('stop_loss')
             take_profit = signal.get('take_profit')

@@ -743,6 +743,48 @@ def create_app():
             logger.error(f"Error getting real trading performance: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get("/api/v1/real-trading/opportunity-manager/status")
+    async def get_opportunity_manager_status():
+        """Get OpportunityManager connection status"""
+        try:
+            engine = get_real_trading_engine()
+            
+            has_opportunity_manager = engine.opportunity_manager is not None
+            
+            status = {
+                "connected": has_opportunity_manager,
+                "opportunities_available": 0,
+                "last_update": None
+            }
+            
+            if has_opportunity_manager:
+                try:
+                    opportunities = engine.opportunity_manager.get_opportunities() or []
+                    if isinstance(opportunities, dict):
+                        # Count opportunities in dict format
+                        total_opps = sum(len(opp_list) for opp_list in opportunities.values())
+                        status["opportunities_available"] = total_opps
+                    elif isinstance(opportunities, list):
+                        status["opportunities_available"] = len(opportunities)
+                    
+                    # Get last update time if available
+                    if hasattr(engine.opportunity_manager, 'last_update'):
+                        status["last_update"] = engine.opportunity_manager.last_update
+                        
+                except Exception as e:
+                    logger.warning(f"Error getting opportunity status: {e}")
+            
+            return {
+                "success": True,
+                "data": status
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting OpportunityManager status: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     return app
 
 async def initialize_components_background():

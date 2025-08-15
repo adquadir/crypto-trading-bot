@@ -351,32 +351,6 @@ class RealTradingEngine:
             return False
     
     async def _open_live_position_from_opportunity(self, opp: Dict[str, Any]):
-        # Freshness guard - skip stale signals
-        gen_ts = float(opp.get("signal_timestamp", 0) or 0)
-        if gen_ts and (time.time() - gen_ts) > 90:
-            logger.warning("Skip %s: signal too old (%.1fs)", opp.get("symbol"), time.time() - gen_ts)
-            return
-
-        # Price drift guard - skip if price moved too much from entry
-        try:
-            symbol = opp["symbol"]
-            entry_price = float(opp["entry_price"])
-            # Get current market price
-            live_price = None
-            try:
-                live_price = float(await self.exchange_client.get_price(symbol))
-            except Exception:
-                # fallback to ticker lastPrice
-                ticker = await self.exchange_client.get_ticker_24h(symbol)
-                live_price = float(ticker.get("lastPrice"))
-
-            drift = abs(live_price - entry_price) / entry_price
-            if drift > 0.002:  # > 0.2%
-                logger.warning("Skip %s: price drift %.3f%% exceeds threshold", symbol, drift * 100.0)
-                return
-        except Exception as e:
-            logger.warning("Drift check failed for %s, continuing: %s", opp.get("symbol"), e)
-
         """Open a live position from an opportunity"""
         try:
             symbol = opp["symbol"]
