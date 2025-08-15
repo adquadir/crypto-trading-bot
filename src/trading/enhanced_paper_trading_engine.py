@@ -94,6 +94,9 @@ class EnhancedPaperTradingEngine:
         self.simulate_real_conditions = self.config.get('simulate_real_conditions', True)
         self.learning_enabled = self.config.get('learning_enabled', True)
         
+        # NEW: per-symbol position cap (default 2 = max 2 active positions per symbol)
+        self.max_positions_per_symbol = int(self.config.get('max_positions_per_symbol', 2))
+        
         # Trading simulation parameters
         self.slippage = self.config.get('slippage', {})
         self.fees = self.config.get('fees', {})
@@ -171,6 +174,13 @@ class EnhancedPaperTradingEngine:
             
             if not all([symbol, entry_price, position_size_usd > 0]):
                 logger.error(f"❌ Invalid trade parameters: {signal}")
+                return None
+            
+            # Enforce per-symbol cap
+            open_for_symbol = sum(1 for p in self.virtual_positions.values() if p.symbol == symbol)
+            if open_for_symbol >= self.max_positions_per_symbol:
+                logger.info(f"🚫 Skipping trade for {symbol}: per-symbol cap reached "
+                            f"({open_for_symbol}/{self.max_positions_per_symbol})")
                 return None
             
             # Simulate realistic order execution delay
@@ -942,6 +952,15 @@ class EnhancedPaperTradingEngine:
                 for signal in (*profit_signals, *opp_signals):
                     if len(self.virtual_positions) >= max_positions:
                         break
+
+                    # NEW: cheap pre-check to avoid calling execute when per-symbol cap is hit
+                    sym = signal.get('symbol')
+                    if sym:
+                        open_for_sym = sum(1 for p in self.virtual_positions.values() if p.symbol == sym)
+                        if open_for_sym >= self.max_positions_per_symbol:
+                            logger.debug(f"Skip {sym} signal: per-symbol cap {self.max_positions_per_symbol}")
+                            continue
+
                     try:
                         # Normalize profit scraper signal shape
                         if 'side' in signal and 'direction' not in signal:

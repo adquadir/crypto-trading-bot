@@ -16,6 +16,8 @@ Virtual starting capital is $10,000 with $500 for each trade we will have 20 tra
 
 The paper trading works by using the profit scraper with the opportunity manager to excute trades.
 
+pm2 uses lightweight_api.py
+
 Make sure
 Paper Trading Engine: Running and executing trades
 Profit Scraping Engine: Active and finding opportunities
