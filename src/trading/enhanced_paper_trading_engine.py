@@ -214,8 +214,7 @@ class EnhancedPaperTradingEngine:
             position_id = f"paper_{int(time.time())}_{uuid.uuid4().hex[:8]}"
             
             # Get floor configuration from config
-            paper_config = self.config.get('paper_trading', {})
-            absolute_floor_dollars = float(paper_config.get('absolute_floor_dollars', 15.0))
+            absolute_floor_dollars = float(self.config.get('absolute_floor_dollars', 15.0))
             # Convert gross floor to net floor (subtract fees on stake)
             fee_rate = self.fees.get('rate', 0.0004)
             total_fees = position_size_usd * fee_rate * 2  # Entry + exit fees on stake

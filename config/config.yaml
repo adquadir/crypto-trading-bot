@@ -38,7 +38,7 @@ paper_trading:
   initial_balance: 10000.0
   risk_per_trade_pct: 0.05
   max_positions: 20
-  max_positions_per_symbol: 2  # Maximum 2 positions per symbol (prevents concentration risk)
+  max_positions_per_symbol: 1  # Maximum 2 positions per symbol (prevents concentration risk)
   stake_amount: 500.0  # $500 per trade
   leverage: 10.0
   primary_target_dollars: 18.0
@@ -62,6 +62,8 @@ real_trading:
   default_leverage: 3  # Conservative 3x leverage default
   max_leverage: 5  # Maximum 5x leverage cap
   max_daily_loss: 500.0  # $500 daily loss limit
+  signal_freshness_max_sec: 90
+  max_entry_price_drift: 0.002     # 0.2%
 
 signal_sources:
   pure_profit_scraping_mode: true
@@ -102,6 +104,3 @@ opportunity_manager:
   hysteresis_momentum_mult: 1.25   # used by _should_accept_flip
   base_momentum_threshold: 0.001   # 0.1% baseline for hysteresis guard
 
-real_trading:
-  signal_freshness_max_sec: 90
-  max_entry_price_drift: 0.002     # 0.2%
