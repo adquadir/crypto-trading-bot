@@ -100,7 +100,10 @@ class RealTradingEngine:
         self.opportunity_manager = None
         
         # Real trading configuration - CONSERVATIVE FOR REAL MONEY
-        self.stake_usd = float(self.cfg.get("stake_usd", 200.0))  # Fixed $200 per trade
+        self.stake_usd = float(self.cfg.get("stake_usd", 100.0))  # $100 capital per position
+        self.stake_mode = str(self.cfg.get("stake_mode", "NOTIONAL")).upper()  # NOTIONAL | MARGIN
+        self.margin_mode = str(self.cfg.get("margin_mode", "ISOLATED")).upper()  # ISOLATED | CROSS
+        self.default_leverage = float(self.cfg.get("default_leverage", 10))  # Default 10x leverage
         self.max_positions = int(self.cfg.get("max_positions", 20))
         self.accept_sources = set(self.cfg.get("accept_sources", ["opportunity_manager"]))
         
@@ -113,7 +116,6 @@ class RealTradingEngine:
         # Position tracking
         self.positions: Dict[str, LivePosition] = {}   # key: position_id
         self.positions_by_symbol: Dict[str, str] = {}  # symbol -> position_id
-        self.completed_trades: List[Dict] = []
         
         # Engine state
         self.is_running = False
@@ -531,23 +533,23 @@ class RealTradingEngine:
             
             # Set leverage and margin mode BEFORE placing orders
             try:
-                # Set isolated margin mode for safety
-                await self.exchange_client.set_margin_type(symbol, "ISOLATED")
+                # Set margin mode (ISOLATED or CROSS)
+                await self.exchange_client.set_margin_type(symbol, self.margin_mode)
                 
                 # Calculate bounded leverage
-                recommended_leverage = float(opp.get("recommended_leverage", self.cfg.get("default_leverage", 3)))
-                max_leverage = int(self.cfg.get("max_leverage", 5))
+                recommended_leverage = float(opp.get("recommended_leverage", self.default_leverage))
+                max_leverage = int(self.cfg.get("max_leverage", 20))
                 leverage = int(min(recommended_leverage, max_leverage))
                 
                 # Set leverage for this symbol
                 await self.exchange_client.set_leverage(symbol, leverage)
                 
-                logger.info(f"✅ Leverage setup: {symbol} ISOLATED margin, {leverage}x leverage")
+                logger.info(f"✅ Leverage setup: {symbol} {self.margin_mode} margin, {leverage}x leverage")
                 
             except Exception as e:
                 logger.warning(f"Leverage/margin setup failed for {symbol}: {e}")
                 # Continue with trade - some exchanges may not support these calls
-                leverage = 1  # Fallback to 1x if setup failed
+                leverage = int(self.default_leverage)  # Use default leverage if setup failed
             
             # Get symbol precision info
             try:
@@ -562,8 +564,16 @@ class RealTradingEngine:
                 tick_size = 0.01
                 min_notional = 10
             
-            # Calculate quantity from fixed stake
-            qty = max(self.stake_usd / entry_hint, step_size)
+            # Compute target notional from stake mode
+            if self.stake_mode == "MARGIN":
+                notional_target = self.stake_usd * leverage   # capital × leverage
+                logger.info(f"💰 MARGIN mode: ${self.stake_usd} capital × {leverage}x = ${notional_target:.2f} notional")
+            else:
+                notional_target = self.stake_usd              # backwards-compatible (treat stake as size)
+                logger.info(f"💰 NOTIONAL mode: ${self.stake_usd} notional (legacy)")
+            
+            # Convert notional to quantity and round
+            qty = max(notional_target / entry_hint, step_size)
             qty = self._round_step(qty, step_size)
             
             # Check minimum notional
@@ -1095,6 +1105,9 @@ class RealTradingEngine:
                 'uptime_minutes': uptime_minutes,
                 'max_daily_loss': self.max_daily_loss,
                 'stake_usd': self.stake_usd,
+                'stake_mode': self.stake_mode,
+                'margin_mode': self.margin_mode,
+                'default_leverage': self.default_leverage,
                 'max_positions': self.max_positions,
                 'mode': 'real',
                 'engine': 'opportunity_manager_only',

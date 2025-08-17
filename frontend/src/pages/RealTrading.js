@@ -71,7 +71,7 @@ const RealTrading = () => {
     setPositions(Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : []);
   };
   const fetchTrades = async () => {
-    const r = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.REAL_TRADING.COMPLETED_TRADES}`);
+    const r = await fetch(`${config.API_BASE_URL}${config.ENDPOINTS.REAL_TRADING.COMPLETED_TRADES}?limit=100&backfill=true`);
     const j = await r.json();
     setCompleted(Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : []);
   };

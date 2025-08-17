@@ -39,7 +39,7 @@ paper_trading:
   risk_per_trade_pct: 0.05
   max_positions: 20
   max_positions_per_symbol: 1  # Maximum 2 positions per symbol (prevents concentration risk)
-  stake_amount: 500.0  # $500 per trade
+  stake_amount: 100.0  # $100 per trade (match real trading)
   leverage: 10.0
   primary_target_dollars: 18.0
   absolute_floor_dollars: 15.0
@@ -55,15 +55,17 @@ paper_trading:
 
 real_trading:
   enabled: true  # ✅ ENABLED FOR REAL TRADING
-  stake_usd: 200.0  # Fixed $200 per trade
+  stake_usd: 100.0  # $100 capital per position (margin)
+  stake_mode: MARGIN  # interpret stake as margin, not notional
+  margin_mode: ISOLATED  # use isolated margin for safety
   max_positions: 20  # Maximum concurrent positions
   accept_sources: ["opportunity_manager"]  # Only OpportunityManager signals
   pure_3_rule_mode: true  # Enable Pure 3-rule mode
   primary_target_dollars: 10.0  # $10 take profit target
   absolute_floor_dollars: 7.0  # $7 floor protection
   stop_loss_percent: 0.5  # 0.5% stop loss from entry
-  default_leverage: 3  # Conservative 3x leverage default
-  max_leverage: 5  # Maximum 5x leverage cap
+  default_leverage: 10  # Default 10x leverage
+  max_leverage: 20  # Maximum 20x leverage cap
   max_daily_loss: 500.0  # $500 daily loss limit
   min_confidence: 0.50  # NEW: Configurable confidence threshold (aligns with paper trading)
   signal_freshness_max_sec: 90

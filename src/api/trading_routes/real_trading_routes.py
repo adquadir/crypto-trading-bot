@@ -209,16 +209,67 @@ async def get_real_positions():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/completed-trades")
-async def get_completed_trades():
-    """Get all completed real trades"""
+async def get_completed_trades(limit: int = 100, backfill: bool = True):
+    """Get completed real trades (in-memory + optional exchange backfill)"""
     try:
         engine = await get_real_trading_engine()
-        trades = engine.get_completed_trades()
-        
+        trades = engine.get_completed_trades() or []
+
+        # If no trades (or backfill requested), try to backfill from exchange history
+        if backfill and len(trades) == 0:
+            try:
+                # Pull recent account trades from exchange
+                recent = await engine.exchange_client.get_account_trades(limit=limit)
+
+                merged = []
+                for t in recent or []:
+                    # Extremely lightweight normalization for UI:
+                    # We only include completed/closing-looking fills and shape them to the UI row.
+                    symbol = t.get("symbol")
+                    price = float(t.get("price", 0) or 0)
+                    qty = float(t.get("qty", 0) or 0)
+                    side = ("LONG" if t.get("side", "").upper() == "BUY" else "SHORT")
+                    ts = t.get("time") or t.get("transactTime")
+                    if not (symbol and price and qty and ts):
+                        continue
+
+                    merged.append({
+                        "position_id": f"ex_{symbol}_{ts}",
+                        "symbol": symbol,
+                        "side": side,
+                        "entry_price": None,     # unknown from raw trade; DB can improve later
+                        "qty": qty,
+                        "stake_usd": None,
+                        "leverage": None,
+                        "entry_time": None,
+                        "tp_order_id": None,
+                        "sl_order_id": None,
+                        "tp_price": None,
+                        "sl_price": None,
+                        "highest_profit_ever": 0.0,
+                        "profit_floor_activated": False,
+                        "status": "CLOSED",
+                        "exit_price": price,
+                        "exit_time": datetime.fromtimestamp(int(ts)/1000).isoformat() if isinstance(ts, (int, float)) else ts,
+                        "pnl": None,            # cannot compute without entry; DB upgrade recommended
+                        "pnl_pct": None,
+                        "current_price": None,
+                        "unrealized_pnl": None,
+                        "unrealized_pnl_pct": None,
+                        "exit_reason": "exchange_history"
+                    })
+
+                # Only extend if we truly have nothing in memory to show
+                if len(trades) == 0 and len(merged) > 0:
+                    trades = merged[:limit]
+
+            except Exception as e:
+                logger.warning(f"Backfill of completed trades failed: {e}")
+
         return {
             "success": True,
-            "data": trades,
-            "count": len(trades)
+            "data": trades[:limit],
+            "count": len(trades[:limit])
         }
         
     except Exception as e:
