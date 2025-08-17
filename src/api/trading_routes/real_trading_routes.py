@@ -510,3 +510,131 @@ async def get_manual_trades():
     except Exception as e:
         logger.error(f"Error getting manual trades: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/debug-stats")
+async def get_debug_statistics():
+    """Get comprehensive debugging statistics for troubleshooting signal rejections and skips"""
+    try:
+        engine = await get_real_trading_engine()
+        
+        # Get comprehensive statistics
+        stats = engine.stats.copy()
+        
+        # Add configuration context
+        config_info = {
+            'signal_freshness_max_sec': float(engine.cfg.get("signal_freshness_max_sec", 90)),
+            'entry_drift_check_enabled': bool(engine.cfg.get("entry_drift_check_enabled", False)),
+            'entry_drift_pct': float(engine.cfg.get("entry_drift_pct", 0.6)),
+            'min_confidence': float(engine.cfg.get("min_confidence", 0.50)),
+            'stake_usd': engine.stake_usd,
+            'max_positions': engine.max_positions,
+            'current_positions': len(engine.positions)
+        }
+        
+        # Calculate rejection/skip rates
+        total_signals_processed = stats['rejections']['total'] + stats['skips']['total'] + stats['successes']['total']
+        
+        rates = {
+            'rejection_rate': stats['rejections']['total'] / max(total_signals_processed, 1) * 100,
+            'skip_rate': stats['skips']['total'] / max(total_signals_processed, 1) * 100,
+            'success_rate': stats['successes']['total'] / max(total_signals_processed, 1) * 100,
+            'total_signals_processed': total_signals_processed
+        }
+        
+        # Top rejection/skip reasons
+        top_rejections = sorted(
+            [(k, v) for k, v in stats['rejections'].items() if k != 'total' and v > 0],
+            key=lambda x: x[1], reverse=True
+        )[:5]
+        
+        top_skips = sorted(
+            [(k, v) for k, v in stats['skips'].items() if k != 'total' and v > 0],
+            key=lambda x: x[1], reverse=True
+        )[:5]
+        
+        # Opportunity manager status
+        om_status = {
+            'connected': engine.opportunity_manager is not None,
+            'opportunities_available': 0
+        }
+        
+        if engine.opportunity_manager:
+            try:
+                opportunities = engine.opportunity_manager.get_opportunities() or []
+                if isinstance(opportunities, dict):
+                    om_status['opportunities_available'] = sum(len(opp_list) for opp_list in opportunities.values())
+                elif isinstance(opportunities, list):
+                    om_status['opportunities_available'] = len(opportunities)
+            except Exception as e:
+                logger.debug(f"Error getting opportunity count: {e}")
+        
+        return {
+            "success": True,
+            "data": {
+                "stats": stats,
+                "config": config_info,
+                "rates": rates,
+                "top_rejections": top_rejections,
+                "top_skips": top_skips,
+                "opportunity_manager": om_status,
+                "engine_status": {
+                    "is_running": engine.is_running,
+                    "emergency_stop": engine.emergency_stop,
+                    "uptime_minutes": (datetime.now() - engine.start_time).total_seconds() / 60 if engine.start_time else 0
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting debug statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/reset-stats")
+async def reset_statistics():
+    """Reset all statistics counters (for debugging/testing)"""
+    try:
+        engine = await get_real_trading_engine()
+        
+        # Reset all statistics
+        engine.stats = {
+            'rejections': {
+                'missing_fields': 0,
+                'not_tradable': 0,
+                'not_real_data': 0,
+                'low_confidence': 0,
+                'source_mismatch': 0,
+                'total': 0
+            },
+            'skips': {
+                'stale_signal': 0,
+                'price_drift': 0,
+                'min_notional': 0,
+                'symbol_exists': 0,
+                'max_positions': 0,
+                'total': 0
+            },
+            'successes': {
+                'positions_opened': 0,
+                'positions_closed': 0,
+                'total': 0
+            },
+            'errors': {
+                'exchange_errors': 0,
+                'order_failures': 0,
+                'price_lookup_failures': 0,
+                'total': 0
+            },
+            'last_reset': datetime.now().isoformat()
+        }
+        
+        logger.info("📊 Real trading statistics reset")
+        
+        return {
+            "success": True,
+            "message": "Statistics reset successfully",
+            "reset_time": engine.stats['last_reset']
+        }
+        
+    except Exception as e:
+        logger.error(f"Error resetting statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

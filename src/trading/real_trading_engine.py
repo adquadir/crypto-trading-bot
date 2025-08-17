@@ -127,6 +127,38 @@ class RealTradingEngine:
         # Frontend compatibility - in-memory completed trades list
         self.completed_trades: List[Dict[str, Any]] = []
         
+        # NEW: Comprehensive statistics tracking for observability
+        self.stats = {
+            'rejections': {
+                'missing_fields': 0,
+                'not_tradable': 0,
+                'not_real_data': 0,
+                'low_confidence': 0,
+                'source_mismatch': 0,
+                'total': 0
+            },
+            'skips': {
+                'stale_signal': 0,
+                'price_drift': 0,
+                'min_notional': 0,
+                'symbol_exists': 0,
+                'max_positions': 0,
+                'total': 0
+            },
+            'successes': {
+                'positions_opened': 0,
+                'positions_closed': 0,
+                'total': 0
+            },
+            'errors': {
+                'exchange_errors': 0,
+                'order_failures': 0,
+                'price_lookup_failures': 0,
+                'total': 0
+            },
+            'last_reset': datetime.now().isoformat()
+        }
+        
         # Safety controls
         self.emergency_stop = False
         self.max_daily_loss = 500.0  # Conservative $500 daily loss limit
@@ -388,46 +420,83 @@ class RealTradingEngine:
                 await asyncio.sleep(10)
     
     def _is_acceptable_opportunity(self, opp: Dict[str, Any]) -> bool:
-        """Check if opportunity is acceptable for real trading"""
+        """Check if opportunity is acceptable for real trading with comprehensive logging and statistics"""
         try:
-            # Accept signals from the attached Opportunity Manager (no brittle name checks)
+            symbol = opp.get("symbol", "UNKNOWN")
             
             # Must have required fields
             if not opp.get("symbol") or not opp.get("entry_price") or not opp.get("direction"):
+                self.stats['rejections']['missing_fields'] += 1
+                self.stats['rejections']['total'] += 1
+                logger.info(f"🚫 REJECT {symbol}: missing_fields (symbol={bool(opp.get('symbol'))}, "
+                           f"entry_price={bool(opp.get('entry_price'))}, direction={bool(opp.get('direction'))})")
                 return False
             
             # Must be tradable
             if not opp.get("tradable", True):
+                self.stats['rejections']['not_tradable'] += 1
+                self.stats['rejections']['total'] += 1
+                logger.info(f"🚫 REJECT {symbol}: not_tradable (tradable={opp.get('tradable')})")
                 return False
             
             # Optional: require real data tag if available
             if opp.get("is_real_data") is False:
-                logger.debug(f"Skipping {opp.get('symbol')} - not real data")
+                self.stats['rejections']['not_real_data'] += 1
+                self.stats['rejections']['total'] += 1
+                logger.info(f"🚫 REJECT {symbol}: not_real_data (is_real_data={opp.get('is_real_data')})")
                 return False
             
             # Confidence check - configurable threshold
             confidence = opp.get("confidence", opp.get("confidence_score", 0))
             min_conf = float(self.cfg.get("min_confidence", 0.50))
-            if confidence < min_conf:  # Configurable threshold
-                logger.debug(f"Skipping {opp.get('symbol')} - low confidence: {confidence} < {min_conf}")
+            if confidence < min_conf:
+                self.stats['rejections']['low_confidence'] += 1
+                self.stats['rejections']['total'] += 1
+                logger.info(f"🚫 REJECT {symbol}: low_confidence (confidence={confidence:.3f} < {min_conf:.3f})")
                 return False
             
+            # If we get here, opportunity is acceptable
+            logger.debug(f"✅ ACCEPT {symbol}: confidence={confidence:.3f}, tradable={opp.get('tradable', True)}, "
+                        f"real_data={opp.get('is_real_data', 'N/A')}")
             return True
             
         except Exception as e:
-            logger.error(f"Error checking opportunity acceptability: {e}")
+            self.stats['errors']['total'] += 1
+            logger.error(f"🚫 REJECT {opp.get('symbol', 'UNKNOWN')}: error checking acceptability: {e}")
             return False
     
     async def _open_live_position_from_opportunity(self, opp: Dict[str, Any]):
-        # Freshness guard - skip stale signals
+        """Open a live position from an opportunity with comprehensive skip tracking"""
+        symbol = opp.get("symbol", "UNKNOWN")
+        
+        # FIXED: Configurable freshness guard - use config value instead of hardcoded 300
         gen_ts = float(opp.get("signal_timestamp", 0) or 0)
-        if gen_ts and (time.time() - gen_ts) > 300:
-            logger.warning("⏭️ Skip %s: stale_signal age=%.1fs", opp.get("symbol"), time.time() - gen_ts)
+        max_age_sec = float(self.cfg.get("signal_freshness_max_sec", 90))  # Use config value, default 90s
+        
+        if gen_ts and (time.time() - gen_ts) > max_age_sec:
+            age_sec = time.time() - gen_ts
+            self.stats['skips']['stale_signal'] += 1
+            self.stats['skips']['total'] += 1
+            logger.warning("⏭️ SKIP %s: stale_signal age=%.1fs > %.1fs (configured threshold)", 
+                          symbol, age_sec, max_age_sec)
+            return
+
+        # Check if symbol already has position
+        if symbol in self.positions_by_symbol:
+            self.stats['skips']['symbol_exists'] += 1
+            self.stats['skips']['total'] += 1
+            logger.info(f"⏭️ SKIP {symbol}: symbol_exists (already have position)")
+            return
+
+        # Check max positions limit
+        if len(self.positions) >= self.max_positions:
+            self.stats['skips']['max_positions'] += 1
+            self.stats['skips']['total'] += 1
+            logger.info(f"⏭️ SKIP {symbol}: max_positions ({len(self.positions)}/{self.max_positions})")
             return
 
         # Optional: price drift guard (disabled by default to mirror paper trading)
         try:
-            symbol = opp["symbol"]
             entry_price = float(opp["entry_price"])
             drift_check_enabled = bool(self.cfg.get("entry_drift_check_enabled", False))
             
@@ -444,11 +513,13 @@ class RealTradingEngine:
                 drift = abs(live_price - entry_price) / entry_price
                 max_drift = float(self.cfg.get("entry_drift_pct", 0.6)) / 100.0
                 if drift > max_drift:
-                    logger.warning("⏭️ Skip %s: price drift %.3f%% > %.2f%% (live=%f, entry=%f)",
+                    self.stats['skips']['price_drift'] += 1
+                    self.stats['skips']['total'] += 1
+                    logger.warning("⏭️ SKIP %s: price_drift %.3f%% > %.2f%% (live=$%.6f, entry=$%.6f)",
                                    symbol, drift*100.0, max_drift*100.0, live_price, entry_price)
                     return
         except Exception as e:
-            logger.warning("Drift check failed for %s, continuing: %s", opp.get("symbol"), e)
+            logger.warning("Drift check failed for %s, continuing: %s", symbol, e)
 
         """Open a live position from an opportunity"""
         try:
@@ -498,7 +569,9 @@ class RealTradingEngine:
             # Check minimum notional
             notional = qty * entry_hint
             if notional < min_notional:
-                logger.warning("⏭️ Skip %s: min_notional notional=%.2f < %.2f (qty=%.6f entry=%.6f)",
+                self.stats['skips']['min_notional'] += 1
+                self.stats['skips']['total'] += 1
+                logger.warning("⏭️ SKIP %s: min_notional notional=$%.2f < $%.2f (qty=%.6f entry=$%.6f)",
                                symbol, notional, min_notional, qty, entry_hint)
                 return
             
@@ -597,6 +670,8 @@ class RealTradingEngine:
             
             # Update statistics
             self.total_trades += 1
+            self.stats['successes']['positions_opened'] += 1
+            self.stats['successes']['total'] += 1
             
             # Store in database
             await self._store_position_in_db(position)
@@ -999,7 +1074,7 @@ class RealTradingEngine:
             logger.error(f"Error updating position in database: {e}")
     
     def get_status(self) -> Dict[str, Any]:
-        """Get current real trading status"""
+        """Get current real trading status with comprehensive observability statistics"""
         try:
             win_rate = self.winning_trades / self.total_trades if self.total_trades > 0 else 0.0
             uptime_minutes = 0
@@ -1026,7 +1101,13 @@ class RealTradingEngine:
                 'pure_3_rule_mode': self.pure_3_rule_mode,
                 'primary_target_dollars': self.primary_target_dollars,
                 'absolute_floor_dollars': self.absolute_floor_dollars,
-                'stop_loss_percent': self.stop_loss_percent * 100
+                'stop_loss_percent': self.stop_loss_percent * 100,
+                # NEW: Comprehensive observability statistics
+                'stats': self.stats.copy(),
+                'signal_freshness_max_sec': float(self.cfg.get("signal_freshness_max_sec", 90)),
+                'entry_drift_check_enabled': bool(self.cfg.get("entry_drift_check_enabled", False)),
+                'entry_drift_pct': float(self.cfg.get("entry_drift_pct", 0.6)),
+                'min_confidence': float(self.cfg.get("min_confidence", 0.50))
             }
             
         except Exception as e:
