@@ -608,7 +608,7 @@ class ExchangeClient:
                 'side': side,
                 'type': order_type,
                 'quantity': quantity,
-                'reduceOnly': reduce_only
+                'reduceOnly': 'true' if reduce_only else 'false'  # Convert boolean to string
             }
             if price:
                 params['price'] = price
@@ -617,6 +617,38 @@ class ExchangeClient:
             return await self._make_request('POST', '/fapi/v1/order', params, signed=True)
         except Exception as e:
             logger.error(f"Error placing order for {symbol}: {e}")
+            raise
+
+    # --- Compatibility shim for RealTradingEngine ---
+    async def create_order(
+        self,
+        symbol: str,
+        side: str,
+        type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        stopPrice: Optional[float] = None,
+        reduceOnly: bool = False,
+        **kwargs: Any,
+    ) -> Dict:
+        """
+        Compatibility wrapper expected by RealTradingEngine.
+        Maps to `place_order(...)` and passes through Binance Futures params.
+        """
+        try:
+            return await self.place_order(
+                symbol=symbol,
+                side=side,
+                order_type=type,
+                quantity=quantity,
+                price=price,
+                stop_price=stopPrice,
+                reduce_only=reduceOnly,
+            )
+        except Exception as e:
+            logger.error(
+                f"create_order shim failed for {symbol} type={type} qty={quantity}: {e}"
+            )
             raise
 
     def _setup_proxy(self):
