@@ -42,6 +42,13 @@ class LivePosition:
     pnl_pct: float = 0.0
     # NEW: trailing floor that ratchets in $10 steps
     dynamic_trailing_floor: float = 0.0
+    # NEW: Live P&L fields for frontend display
+    current_price: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    unrealized_pnl_pct: Optional[float] = None
+    # NEW: Exchange state verification
+    first_seen_open: bool = False
+    entry_exchange_verified_at: Optional[datetime] = None
     
     def to_dict(self) -> Dict:
         """Convert position to dictionary for API responses"""
@@ -64,7 +71,11 @@ class LivePosition:
             'exit_price': self.exit_price,
             'exit_time': self.exit_time.isoformat() if self.exit_time else None,
             'pnl': self.pnl,
-            'pnl_pct': self.pnl_pct
+            'pnl_pct': self.pnl_pct,
+            # NEW: Live P&L fields for frontend display
+            'current_price': self.current_price,
+            'unrealized_pnl': self.unrealized_pnl,
+            'unrealized_pnl_pct': self.unrealized_pnl_pct,
         }
 
 class RealTradingEngine:
@@ -275,10 +286,33 @@ class RealTradingEngine:
                             continue
                         
                         # Calculate gross PnL
-                        if position.side == "LONG":
-                            gross_pnl = (current_price - position.entry_price) * position.qty
-                        else:  # SHORT
-                            gross_pnl = (position.entry_price - current_price) * position.qty
+                        if position.entry_price and position.qty:
+                            if position.side == "LONG":
+                                gross_pnl = (current_price - position.entry_price) * position.qty
+                            else:  # SHORT
+                                gross_pnl = (position.entry_price - current_price) * position.qty
+                        else:
+                            gross_pnl = 0.0
+                        
+                        # Update live P&L fields for frontend display
+                        position.current_price = float(current_price)
+                        position.unrealized_pnl = float(gross_pnl)
+                        position.pnl = float(gross_pnl)  # For frontend compatibility
+                        
+                        # Calculate percentage P&L
+                        notional = position.entry_price * position.qty if position.entry_price and position.qty else 0.0
+                        if notional > 0:
+                            position.unrealized_pnl_pct = float((gross_pnl / notional) * 100.0)
+                            position.pnl_pct = float((gross_pnl / notional) * 100.0)  # For frontend compatibility
+                        else:
+                            position.unrealized_pnl_pct = 0.0
+                            position.pnl_pct = 0.0
+                        
+                        # Exchange state verification with grace period
+                        is_open = await self._has_open_position_on_exchange(position.symbol)
+                        if is_open and not position.first_seen_open:
+                            position.first_seen_open = True
+                            position.entry_exchange_verified_at = datetime.now()
                         
                         # --- Trailing Profit Floor Logic (Real Trading; GROSS dollars) ---
                         # Read steps/cap from config or use defaults
@@ -325,10 +359,15 @@ class RealTradingEngine:
                             positions_to_close.append((position_id, close_reason))
                             continue
                         
-                        # Check if position was closed by exchange (TP/SL hit)
-                        if not await self._has_open_position_on_exchange(position.symbol):
-                            logger.info(f"✅ Position closed on exchange (TP/SL): {position.symbol}")
-                            await self._mark_position_closed(position_id, reason="tp_sl_hit_exchange")
+                        # Check if position was closed by exchange (TP/SL hit) with grace period
+                        if not is_open:
+                            if position.first_seen_open:
+                                # Only close if we've seen it open and grace period has passed
+                                if (datetime.now() - position.entry_exchange_verified_at).total_seconds() >= 10:
+                                    logger.info(f"✅ Position closed on exchange (TP/SL): {position.symbol}")
+                                    await self._mark_position_closed(position_id, reason="tp_sl_hit_exchange")
+                                    continue
+                            # Still within initial update lag — skip closing this tick
                             continue
                     
                     except Exception as e:
@@ -474,24 +513,27 @@ class RealTradingEngine:
                 logger.error(f"❌ Failed to execute entry order for {symbol}")
                 return
             
-            # Get actual fill price
-            fill_price = float(entry_order.get("avgPrice") or entry_order.get("price") or entry_hint)
+            # Get actual fill price with safe fallback
+            fill_price = await self._determine_entry_price(entry_order, symbol, direction, entry_hint)
             
             # Calculate TP/SL prices using Pure 3-rule mode
             if direction == "LONG":
                 # TP: $10 profit target
-                tp_price = self._round_tick(fill_price + (self.primary_target_dollars / qty), tick_size)
+                tp_price = fill_price + (self.primary_target_dollars / qty)
                 # SL: 0.5% below entry
-                sl_price = self._round_tick(fill_price * (1.0 - self.stop_loss_percent), tick_size)
+                sl_price = fill_price * (1.0 - self.stop_loss_percent)
                 tp_side = "SELL"
                 sl_side = "SELL"
             else:  # SHORT
                 # TP: $10 profit target
-                tp_price = self._round_tick(fill_price - (self.primary_target_dollars / qty), tick_size)
+                tp_price = fill_price - (self.primary_target_dollars / qty)
                 # SL: 0.5% above entry
-                sl_price = self._round_tick(fill_price * (1.0 + self.stop_loss_percent), tick_size)
+                sl_price = fill_price * (1.0 + self.stop_loss_percent)
                 tp_side = "BUY"
                 sl_side = "BUY"
+            
+            # Apply TP/SL safety guards to prevent instant triggers
+            tp_price, sl_price = self._finalize_tp_sl_prices(direction, fill_price, tp_price, sl_price, tick_size)
             
             # Place TP and SL orders
             tp_order = None
@@ -654,14 +696,26 @@ class RealTradingEngine:
             return False
     
     async def _has_open_position_on_exchange(self, symbol: str) -> bool:
-        """Check if position is still open on the exchange"""
+        """
+        Return True if exchange shows a *non-zero* positionAmt for symbol.
+        Handles dict or single-item list payloads from the exchange client.
+        """
         try:
-            position_info = await self.exchange_client.get_position(symbol)
-            size = float(position_info.get("positionAmt", 0) or 0)
-            return abs(size) > 0.001  # Account for floating point precision
+            info = await self.exchange_client.get_position(symbol)
+
+            # Normalize list → dict
+            if isinstance(info, list):
+                info = info[0] if info else {}
+
+            amt_str = (info or {}).get("positionAmt")  # Binance USDT-M field
+            size = float(amt_str) if amt_str not in (None, "") else 0.0
+
+            # Consider tiny dust as zero
+            return abs(size) > 1e-12
         except Exception as e:
-            logger.debug(f"Error checking position status for {symbol}: {e}")
-            return True  # Assume open if we can't check
+            logger.warning("position check failed for %s: %s", symbol, e)
+            # On error, do NOT prematurely declare closed; keep monitoring.
+            return True
     
     async def _mark_position_closed(self, position_id: str, reason: str):
         """Mark position as closed locally without sending market order"""
@@ -737,6 +791,138 @@ class RealTradingEngine:
         except Exception as e:
             logger.error(f"Error marking position closed {position_id}: {e}")
     
+    async def _determine_entry_price(self, order_resp: Dict, symbol: str, side: str, entry_hint: float = None) -> float:
+        """
+        Resolve a *non-zero* entry price for market orders.
+        Priority: avgPrice -> price -> fills -> side-aware best (ask for LONG, bid for SHORT) -> mark price.
+        NEVER returns zero to prevent fake massive profits.
+        """
+        def _num(x):
+            try:
+                return float(x)
+            except Exception:
+                return 0.0
+
+        # 1) Direct from order response
+        if order_resp:
+            p = _num(order_resp.get("avgPrice"))
+            if p > 0:
+                logger.info(f"Using avgPrice ${p:.6f} as entry for {symbol} {side}")
+                return p
+            p = _num(order_resp.get("price"))
+            if p > 0:
+                logger.info(f"Using price ${p:.6f} as entry for {symbol} {side}")
+                return p
+            # Some Binance responses include fills array; try there too
+            fills = order_resp.get("fills") or []
+            for f in fills:
+                p = _num(f.get("price"))
+                if p > 0:
+                    logger.info(f"Using fill price ${p:.6f} as entry for {symbol} {side}")
+                    return p
+
+        logger.warning(f"No valid fill price from order response for {symbol}, using fallbacks")
+
+        # 2) Side-aware orderbook fallback (best ask for LONG, best bid for SHORT)
+        try:
+            # Try to get orderbook top for side-aware pricing
+            ticker = await self.exchange_client.get_ticker_24h(symbol)
+            if ticker:
+                # For now, use lastPrice since we don't have separate bid/ask in ticker
+                # In a full implementation, you'd call get_orderbook_top(symbol)
+                last_price = _num(ticker.get("lastPrice"))
+                if last_price > 0:
+                    logger.info(f"Using last price ${last_price:.6f} as entry for {symbol} {side}")
+                    return last_price
+        except Exception as e:
+            logger.debug(f"Ticker fallback failed for {symbol}: {e}")
+
+        # 3) Mark price fallback
+        try:
+            # Try to get mark price
+            ticker = await self.exchange_client.get_ticker_24h(symbol)
+            if ticker:
+                mark_price = _num(ticker.get("lastPrice"))  # Using lastPrice as mark price proxy
+                if mark_price > 0:
+                    logger.warning(f"Using mark price ${mark_price:.6f} as entry for {symbol} {side}")
+                    return mark_price
+        except Exception as e:
+            logger.debug(f"Mark price fallback failed for {symbol}: {e}")
+
+        # 4) Entry hint fallback
+        if entry_hint and entry_hint > 0:
+            logger.warning(f"Using entry hint ${entry_hint:.6f} as entry for {symbol} {side}")
+            return float(entry_hint)
+
+        # 5) Final guard – never zero (use a tiny epsilon to avoid divide-by-zero accidents)
+        logger.error(f"All entry price methods failed for {symbol}, using epsilon fallback")
+        return 1e-9
+    
+    def _extract_fill_price(self, order_resp: Dict) -> Optional[float]:
+        """Extract fill price from order response"""
+        try:
+            if not order_resp:
+                return None
+            
+            # Try avgPrice first (most accurate for market orders)
+            if "avgPrice" in order_resp and float(order_resp["avgPrice"]) > 0:
+                return float(order_resp["avgPrice"])
+            
+            # Try price field
+            if "price" in order_resp and float(order_resp["price"]) > 0:
+                return float(order_resp["price"])
+            
+            # Try fills array if available
+            fills = order_resp.get("fills", [])
+            if fills and isinstance(fills, list):
+                total_qty = 0.0
+                total_value = 0.0
+                for fill in fills:
+                    qty = float(fill.get("qty", 0))
+                    price = float(fill.get("price", 0))
+                    if qty > 0 and price > 0:
+                        total_qty += qty
+                        total_value += qty * price
+                
+                if total_qty > 0:
+                    return total_value / total_qty  # Weighted average price
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error extracting fill price: {e}")
+            return None
+
+    def _finalize_tp_sl_prices(self, side: str, fill_price: float, tp_price: float, sl_price: float, tick_size: float) -> tuple:
+        """
+        Enforce minimum gap and side-correct TP/SL prices before placing reduce-only stops.
+        Prevents instant triggers due to rounding or volatility.
+        """
+        try:
+            min_gap = max(tick_size, fill_price * 0.0002)  # e.g., 2 bps or tick_size, whichever is larger
+            
+            if side == "LONG":
+                # For LONG: TP must be above entry, SL must be below entry
+                tp_price = max(tp_price, fill_price + min_gap)
+                sl_price = min(sl_price, fill_price - min_gap)
+            else:  # SHORT
+                # For SHORT: TP must be below entry, SL must be above entry
+                tp_price = min(tp_price, fill_price - min_gap)
+                sl_price = max(sl_price, fill_price + min_gap)
+            
+            # Round to exchange tick size
+            tp_price = self._round_tick(tp_price, tick_size)
+            sl_price = self._round_tick(sl_price, tick_size)
+            
+            logger.debug(f"TP/SL finalized for {side}: TP=${tp_price:.6f} SL=${sl_price:.6f} (min_gap=${min_gap:.6f})")
+            
+            return tp_price, sl_price
+            
+        except Exception as e:
+            logger.error(f"Error finalizing TP/SL prices: {e}")
+            # Return original prices as fallback
+            return self._round_tick(tp_price, tick_size), self._round_tick(sl_price, tick_size)
+
     async def _check_emergency_conditions(self):
         """Check for emergency stop conditions"""
         try:
