@@ -422,26 +422,31 @@ class RealTradingEngine:
         # Freshness guard - skip stale signals
         gen_ts = float(opp.get("signal_timestamp", 0) or 0)
         if gen_ts and (time.time() - gen_ts) > 300:
-            logger.warning("Skip %s: signal too old (%.1fs)", opp.get("symbol"), time.time() - gen_ts)
+            logger.warning("⏭️ Skip %s: stale_signal age=%.1fs", opp.get("symbol"), time.time() - gen_ts)
             return
 
-        # Price drift guard - skip if price moved too much from entry
+        # Optional: price drift guard (disabled by default to mirror paper trading)
         try:
             symbol = opp["symbol"]
             entry_price = float(opp["entry_price"])
-            # Get current market price
-            live_price = None
-            try:
-                live_price = float(await self.exchange_client.get_price(symbol))
-            except Exception:
-                # fallback to ticker lastPrice
-                ticker = await self.exchange_client.get_ticker_24h(symbol)
-                live_price = float(ticker.get("lastPrice"))
+            drift_check_enabled = bool(self.cfg.get("entry_drift_check_enabled", False))
+            
+            if drift_check_enabled and entry_price > 0:
+                # Get current market price
+                live_price = None
+                try:
+                    live_price = float(await self.exchange_client.get_price(symbol))
+                except Exception:
+                    # fallback to ticker lastPrice
+                    ticker = await self.exchange_client.get_ticker_24h(symbol)
+                    live_price = float(ticker.get("lastPrice"))
 
-            drift = abs(live_price - entry_price) / entry_price
-            if drift > 0.006:  # > 0.6%
-                logger.warning("Skip %s: price drift %.3f%% exceeds threshold", symbol, drift * 100.0)
-                return
+                drift = abs(live_price - entry_price) / entry_price
+                max_drift = float(self.cfg.get("entry_drift_pct", 0.6)) / 100.0
+                if drift > max_drift:
+                    logger.warning("⏭️ Skip %s: price drift %.3f%% > %.2f%% (live=%f, entry=%f)",
+                                   symbol, drift*100.0, max_drift*100.0, live_price, entry_price)
+                    return
         except Exception as e:
             logger.warning("Drift check failed for %s, continuing: %s", opp.get("symbol"), e)
 
@@ -493,7 +498,8 @@ class RealTradingEngine:
             # Check minimum notional
             notional = qty * entry_hint
             if notional < min_notional:
-                logger.warning(f"Skip {symbol}: notional ${notional:.2f} < min_notional ${min_notional:.2f}")
+                logger.warning("⏭️ Skip %s: min_notional notional=%.2f < %.2f (qty=%.6f entry=%.6f)",
+                               symbol, notional, min_notional, qty, entry_hint)
                 return
             
             # Execute market entry order
@@ -514,7 +520,11 @@ class RealTradingEngine:
                 return
             
             # Get actual fill price with safe fallback
-            fill_price = await self._determine_entry_price(entry_order, symbol, direction, entry_hint)
+            try:
+                fill_price = await self._determine_entry_price(entry_order, symbol, direction, entry_hint)
+            except Exception as e:
+                logger.error(f"❌ Abort open {symbol}: {e}")
+                return
             
             # Calculate TP/SL prices using Pure 3-rule mode
             if direction == "LONG":
@@ -854,9 +864,18 @@ class RealTradingEngine:
             logger.warning(f"Using entry hint ${entry_hint:.6f} as entry for {symbol} {side}")
             return float(entry_hint)
 
-        # 5) Final guard – never zero (use a tiny epsilon to avoid divide-by-zero accidents)
-        logger.error(f"All entry price methods failed for {symbol}, using epsilon fallback")
-        return 1e-9
+        # 5) Last-chance: fetch latest account trade as entry
+        try:
+            trades = await self.exchange_client.get_account_trades(symbol, limit=1)
+            if trades and float(trades[0].get("price", 0)) > 0:
+                p = float(trades[0]["price"])
+                logger.info(f"Using account trade price ${p:.6f} as entry for {symbol} {side}")
+                return p
+        except Exception as e:
+            logger.warning(f"Account trade fallback failed for {symbol}: {e}")
+
+        # Hard abort — no trustworthy price
+        raise RuntimeError(f"Cannot determine entry price for {symbol} (no valid fills)")
     
     def _extract_fill_price(self, order_resp: Dict) -> Optional[float]:
         """Extract fill price from order response"""

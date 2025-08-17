@@ -67,7 +67,9 @@ real_trading:
   max_daily_loss: 500.0  # $500 daily loss limit
   min_confidence: 0.50  # NEW: Configurable confidence threshold (aligns with paper trading)
   signal_freshness_max_sec: 90
-  max_entry_price_drift: 0.002     # 0.2%
+  # Price drift guard (disabled by default to mirror paper trading)
+  entry_drift_check_enabled: false  # Default OFF to mirror paper trading behavior
+  entry_drift_pct: 0.6  # Only used if drift check enabled (0.6% threshold)
   # Trailing profit system
   trailing_increment_dollars: 10.0      # Ratchet up by $10 each time
   trailing_cap_dollars: 100.0           # Hard take profit cap at $100
