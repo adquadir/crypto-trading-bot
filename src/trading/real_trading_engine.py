@@ -40,6 +40,8 @@ class LivePosition:
     exit_time: Optional[datetime] = None
     pnl: float = 0.0
     pnl_pct: float = 0.0
+    # NEW: trailing floor that ratchets in $10 steps
+    dynamic_trailing_floor: float = 0.0
     
     def to_dict(self) -> Dict:
         """Convert position to dictionary for API responses"""
@@ -278,21 +280,50 @@ class RealTradingEngine:
                         else:  # SHORT
                             gross_pnl = (position.entry_price - current_price) * position.qty
                         
-                        # Update highest profit ever for floor tracking
+                        # --- Trailing Profit Floor Logic (Real Trading; GROSS dollars) ---
+                        # Read steps/cap from config or use defaults
+                        increment_step = float(self.cfg.get('trailing_increment_dollars', 10.0))
+                        max_take_profit = float(self.cfg.get('trailing_cap_dollars', 100.0))
+
+                        # Ensure property exists for old positions
+                        if getattr(position, "dynamic_trailing_floor", 0.0) <= 0.0:
+                            position.dynamic_trailing_floor = self.absolute_floor_dollars
+
+                        # Update best-ever gross profit
                         position.highest_profit_ever = max(position.highest_profit_ever, gross_pnl)
+
+                        # Ratchet floor up in $10 steps, capped at $100
+                        while (
+                            position.highest_profit_ever - position.dynamic_trailing_floor >= increment_step
+                            and position.dynamic_trailing_floor < max_take_profit
+                        ):
+                            position.dynamic_trailing_floor = min(
+                                position.dynamic_trailing_floor + increment_step,
+                                max_take_profit
+                            )
+                            logger.info(
+                                f"📈 Trailing floor ↑ {position.symbol}: ${position.dynamic_trailing_floor:.2f} "
+                                f"(best ${position.highest_profit_ever:.2f})"
+                            )
+
+                        # Activate trailing behavior as soon as we surpass starting floor
+                        if position.highest_profit_ever >= self.absolute_floor_dollars:
+                            position.profit_floor_activated = True
+
+                        # Check for TP/SL hits using trailing floor system
+                        close_reason = None
                         
-                        # Floor rule enforcement (Pure 3-rule mode)
-                        if self.pure_3_rule_mode:
-                            # Activate floor if we've reached the threshold
-                            if position.highest_profit_ever >= self.absolute_floor_dollars and not position.profit_floor_activated:
-                                position.profit_floor_activated = True
-                                logger.info(f"🛡️ FLOOR ACTIVATED {position.symbol}: reached ${position.highest_profit_ever:.2f}")
-                            
-                            # Close if profit falls back to floor level
-                            if position.profit_floor_activated and gross_pnl <= self.absolute_floor_dollars:
-                                logger.info(f"🛡️ FLOOR EXIT {position.symbol}: PnL ${gross_pnl:.2f} <= ${self.absolute_floor_dollars:.2f}")
-                                positions_to_close.append((position_id, "absolute_floor_7_dollars"))
-                                continue
+                        # RULE 1: Hard TP at cap (bank the big win)
+                        if gross_pnl >= max_take_profit:
+                            close_reason = "tp_cap_100_hit"
+                            positions_to_close.append((position_id, close_reason))
+                            continue
+
+                        # RULE 2: Trailing floor stop-out
+                        elif position.profit_floor_activated and gross_pnl <= position.dynamic_trailing_floor:
+                            close_reason = f"trailing_floor_${int(position.dynamic_trailing_floor)}_hit"
+                            positions_to_close.append((position_id, close_reason))
+                            continue
                         
                         # Check if position was closed by exchange (TP/SL hit)
                         if not await self._has_open_position_on_exchange(position.symbol):
@@ -320,10 +351,7 @@ class RealTradingEngine:
     def _is_acceptable_opportunity(self, opp: Dict[str, Any]) -> bool:
         """Check if opportunity is acceptable for real trading"""
         try:
-            # Only from Opportunity Manager
-            src = (opp.get("signal_source") or opp.get("strategy") or "").lower()
-            if "opportunity_manager" not in src and "opportunity" not in src:
-                return False
+            # Accept signals from the attached Opportunity Manager (no brittle name checks)
             
             # Must have required fields
             if not opp.get("symbol") or not opp.get("entry_price") or not opp.get("direction"):
@@ -338,10 +366,11 @@ class RealTradingEngine:
                 logger.debug(f"Skipping {opp.get('symbol')} - not real data")
                 return False
             
-            # Confidence check
+            # Confidence check - configurable threshold
             confidence = opp.get("confidence", opp.get("confidence_score", 0))
-            if confidence < 0.6:  # Minimum confidence for real money
-                logger.debug(f"Skipping {opp.get('symbol')} - low confidence: {confidence}")
+            min_conf = float(self.cfg.get("min_confidence", 0.50))
+            if confidence < min_conf:  # Configurable threshold
+                logger.debug(f"Skipping {opp.get('symbol')} - low confidence: {confidence} < {min_conf}")
                 return False
             
             return True
@@ -353,7 +382,7 @@ class RealTradingEngine:
     async def _open_live_position_from_opportunity(self, opp: Dict[str, Any]):
         # Freshness guard - skip stale signals
         gen_ts = float(opp.get("signal_timestamp", 0) or 0)
-        if gen_ts and (time.time() - gen_ts) > 90:
+        if gen_ts and (time.time() - gen_ts) > 300:
             logger.warning("Skip %s: signal too old (%.1fs)", opp.get("symbol"), time.time() - gen_ts)
             return
 
@@ -371,7 +400,7 @@ class RealTradingEngine:
                 live_price = float(ticker.get("lastPrice"))
 
             drift = abs(live_price - entry_price) / entry_price
-            if drift > 0.002:  # > 0.2%
+            if drift > 0.006:  # > 0.6%
                 logger.warning("Skip %s: price drift %.3f%% exceeds threshold", symbol, drift * 100.0)
                 return
         except Exception as e:
@@ -506,7 +535,8 @@ class RealTradingEngine:
                 tp_order_id=str(tp_order.get("orderId")) if tp_order else None,
                 sl_order_id=str(sl_order.get("orderId")) if sl_order else None,
                 tp_price=tp_price,  # Store TP price for UI display
-                sl_price=sl_price   # Store SL price for UI display
+                sl_price=sl_price,  # Store SL price for UI display
+                dynamic_trailing_floor=self.absolute_floor_dollars  # NEW: start at absolute floor
             )
             
             # Store position

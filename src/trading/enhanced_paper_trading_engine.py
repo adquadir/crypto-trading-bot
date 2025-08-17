@@ -45,6 +45,8 @@ class VirtualPosition:
     floor_net_usd: float = 0.0  # Net USD floor target
     # Stake (margin) used for this position
     stake_usd: float = 0.0
+    # NEW: trailing floor that ratchets in $10 steps
+    dynamic_trailing_floor: float = 0.0
 
 @dataclass
 class VirtualTrade:
@@ -240,7 +242,8 @@ class EnhancedPaperTradingEngine:
                 tp_net_usd=tp_net_usd,
                 sl_net_usd=sl_net_usd,
                 floor_net_usd=floor_net_usd,
-                stake_usd=position_size_usd
+                stake_usd=position_size_usd,
+                dynamic_trailing_floor=net_floor  # NEW: start at the net absolute floor (e.g., $15 minus fees)
             )
             
             # Update balance
@@ -431,30 +434,49 @@ class EnhancedPaperTradingEngine:
                     total_fees = position.fees_paid + exit_fees
                     net_pnl = pnl - total_fees
                     
-                    # Use per-position rule-based targets (calculated by profit scraping engine)
-                    # These targets already account for fees and are specific to this position
-                    net_target = position.tp_net_usd if position.tp_net_usd > 0 else 0
-                    net_floor = position.floor_net_usd if position.floor_net_usd > 0 else position.absolute_floor_profit
-                    net_stop_loss = -position.sl_net_usd if position.sl_net_usd > 0 else 0  # Negative for stop loss
-                    
-                    # Check for TP/SL hits using per-position rule-based thresholds
+                    # --- Trailing Profit Floor Logic (Paper; NET dollars) ---
+                    # Read steps/cap from config or use defaults
+                    increment_step = float(self.config.get('trailing_increment_dollars', 10.0))
+                    max_take_profit = float(self.config.get('trailing_cap_dollars', 100.0))
+
+                    # Ensure property exists for old positions
+                    if getattr(position, "dynamic_trailing_floor", 0.0) <= 0.0:
+                        position.dynamic_trailing_floor = position.absolute_floor_profit
+
+                    # Update best-ever net profit
+                    position.highest_profit_ever = max(position.highest_profit_ever, net_pnl)
+
+                    # Ratchet floor up in $10 steps, capped at $100
+                    while (
+                        position.highest_profit_ever - position.dynamic_trailing_floor >= increment_step
+                        and position.dynamic_trailing_floor < max_take_profit
+                    ):
+                        position.dynamic_trailing_floor = min(
+                            position.dynamic_trailing_floor + increment_step,
+                            max_take_profit
+                        )
+                        logger.info(
+                            f"📈 Trailing floor ↑ {position.symbol}: ${position.dynamic_trailing_floor:.2f} "
+                            f"(best ${position.highest_profit_ever:.2f})"
+                        )
+
+                    # Activate trailing behavior as soon as we surpass starting floor
+                    if position.highest_profit_ever >= position.absolute_floor_profit:
+                        position.profit_floor_activated = True
+
+                    # Check for TP/SL hits using trailing floor system
                     close_reason = None
                     
-                    # RULE 1: PRIMARY TARGET (per-position take profit)
-                    if net_pnl >= net_target and net_target > 0:
-                        close_reason = "tp_hit"
+                    # RULE 1: Hard TP at cap (bank the big win)
+                    if net_pnl >= max_take_profit:
+                        close_reason = "tp_cap_100_hit"
+
+                    # RULE 2: Trailing floor stop-out
+                    elif position.profit_floor_activated and net_pnl <= position.dynamic_trailing_floor:
+                        close_reason = f"trailing_floor_${int(position.dynamic_trailing_floor)}_hit"
                     
-                    # RULE 2: FLOOR PROTECTION (per-position floor)
-                    elif position.highest_profit_ever >= net_floor and net_floor > 0:
-                        if not position.profit_floor_activated:
-                            position.profit_floor_activated = True
-                            logger.info(f"🛡️ FLOOR ACTIVATED: {position.symbol} reached ${position.highest_profit_ever:.2f}")
-                        
-                        if net_pnl <= net_floor:  # Close as soon as PnL touches the floor
-                            close_reason = "absolute_floor_15_dollars"
-                    
-                    # RULE 3: STOP LOSS (per-position stop loss)
-                    elif net_pnl <= net_stop_loss and net_stop_loss < 0:
+                    # RULE 3: STOP LOSS (per-position stop loss) - keep existing logic
+                    elif position.sl_net_usd > 0 and net_pnl <= -position.sl_net_usd:
                         close_reason = "sl_hit"
                     
                     # Check for liquidation (simplified)

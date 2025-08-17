@@ -46,6 +46,9 @@ paper_trading:
   stop_loss_dollars: 18.0
   pure_3_rule_mode: true
   mode: pure_profit_scraping
+  # Trailing profit system
+  trailing_increment_dollars: 10.0  # Ratchet up by $10 each time
+  trailing_cap_dollars: 100.0       # Hard take profit cap at $100
   fees:
     rate: 0.0004  # 0.04% entry fee
     close_rate: 0.0004  # 0.04% exit fee
@@ -62,8 +65,13 @@ real_trading:
   default_leverage: 3  # Conservative 3x leverage default
   max_leverage: 5  # Maximum 5x leverage cap
   max_daily_loss: 500.0  # $500 daily loss limit
+  min_confidence: 0.50  # NEW: Configurable confidence threshold (aligns with paper trading)
   signal_freshness_max_sec: 90
   max_entry_price_drift: 0.002     # 0.2%
+  # Trailing profit system
+  trailing_increment_dollars: 10.0      # Ratchet up by $10 each time
+  trailing_cap_dollars: 100.0           # Hard take profit cap at $100
+  trailing_floor_start_dollars: 15.0    # Start trailing from $15
 
 signal_sources:
   pure_profit_scraping_mode: true
@@ -103,4 +111,3 @@ opportunity_manager:
   min_signal_change_interval_sec: 60
   hysteresis_momentum_mult: 1.25   # used by _should_accept_flip
   base_momentum_threshold: 0.001   # 0.1% baseline for hysteresis guard
-
