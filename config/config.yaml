@@ -63,7 +63,7 @@ real_trading:
   pure_3_rule_mode: true  # Enable Pure 3-rule mode
   primary_target_dollars: 18.0  # $10 take profit target
   absolute_floor_dollars: .0  # $7 floor protection
-  stop_loss_percent: 0.5  # 0.5% stop loss from entry
+  stop_loss_percent: 0.0  # 0.5% stop loss from entry
   default_leverage: 10  # Default 10x leverage
   max_leverage: 15  # Maximum 20x leverage cap
   max_daily_loss: 500.0  # $500 daily loss limit
@@ -78,7 +78,7 @@ real_trading:
   trailing_floor_start_dollars: 15.0    # Start trailing from $15
 
 signal_sources:
-  pure_profit_scraping_mode: true
+  pure_profit_scraping_mode: false
   profit_scraping_primary: true
   allow_opportunity_fallback: false
   allow_flow_trading_fallback: false
@@ -99,7 +99,7 @@ strategy:
       parameters:
         entry_threshold: 0.02
         exit_threshold: 0.01
-        stop_loss: 0.03
+        stop_loss: 0.00
         take_profit: 0.05
         max_position_size: 0.1
         leverage: 10.0
