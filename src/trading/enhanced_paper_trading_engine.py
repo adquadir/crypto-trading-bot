@@ -671,7 +671,7 @@ class EnhancedPaperTradingEngine:
                 
                 # Create signal from opportunity
                 signal = {
-                    'symbol': selected_opp.get('symbol', 'BTCUSDT'),
+                    'symbol': selected_opp.get('symbol'),
                     'direction': selected_opp.get('direction', 'LONG'),
                     'entry_price': selected_opp.get('entry_price', 50000),
                     'stop_loss': selected_opp.get('stop_loss'),
@@ -683,6 +683,10 @@ class EnhancedPaperTradingEngine:
                     'sl_net_usd': 0.0, # No specific target for demo
                     'floor_net_usd': 0.0 # No specific target for demo
                 }
+
+                if not signal['symbol']:
+                    logger.warning("Skipping demo trade: opportunity missing symbol")
+                    return
                 
                 # Execute virtual trade with small position size
                 position_size = random.uniform(100, 500)  # $100-500 per trade
