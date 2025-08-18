@@ -62,7 +62,7 @@ real_trading:
   accept_sources: ["opportunity_manager"]  # Only OpportunityManager signals
   pure_3_rule_mode: true  # Enable Pure 3-rule mode
   primary_target_dollars: 18.0  # $10 take profit target
-  absolute_floor_dollars: 7.0  # $7 floor protection
+  absolute_floor_dollars: .0  # $7 floor protection
   stop_loss_percent: 0.5  # 0.5% stop loss from entry
   default_leverage: 10  # Default 10x leverage
   max_leverage: 15  # Maximum 20x leverage cap
