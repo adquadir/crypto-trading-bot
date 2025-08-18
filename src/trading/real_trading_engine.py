@@ -108,6 +108,10 @@ class RealTradingEngine:
         self.max_positions = int(self.cfg.get("max_positions", 20))
         self.accept_sources = set(self.cfg.get("accept_sources", ["opportunity_manager"]))
         
+        # NEW: order placement toggles
+        self.enable_take_profit = bool(self.cfg.get("enable_take_profit", True))
+        self.enable_stop_loss = bool(self.cfg.get("enable_stop_loss", True))
+        
         # Pure 3-rule mode configuration
         self.pure_3_rule_mode = bool(self.cfg.get("pure_3_rule_mode", True))
         self.primary_target_dollars = float(self.cfg.get("primary_target_dollars", 10.0))
@@ -750,31 +754,35 @@ class RealTradingEngine:
             # Apply TP/SL safety guards to prevent instant triggers
             tp_price, sl_price = self._finalize_tp_sl_prices(direction, fill_price, tp_price, sl_price, tick_size)
             
-            # Place TP and SL orders
+            # Place TP and/or SL orders (now gated by config toggles)
             tp_order = None
             sl_order = None
-            
+
             try:
-                # Take Profit order
-                tp_order = await self.exchange_client.create_order(
-                    symbol=symbol,
-                    side=tp_side,
-                    type="TAKE_PROFIT_MARKET",
-                    quantity=qty,
-                    stopPrice=tp_price,
-                    reduceOnly=True
-                )
-                
-                # Stop Loss order
-                sl_order = await self.exchange_client.create_order(
-                    symbol=symbol,
-                    side=sl_side,
-                    type="STOP_MARKET",
-                    quantity=qty,
-                    stopPrice=sl_price,
-                    reduceOnly=True
-                )
-                
+                if self.enable_take_profit:
+                    tp_order = await self.exchange_client.create_order(
+                        symbol=symbol,
+                        side=tp_side,
+                        type="TAKE_PROFIT_MARKET",
+                        quantity=qty,
+                        stopPrice=tp_price,
+                        reduceOnly=True
+                    )
+                else:
+                    logger.info("🧰 TP placement disabled by config (enable_take_profit=false)")
+
+                if self.enable_stop_loss:
+                    sl_order = await self.exchange_client.create_order(
+                        symbol=symbol,
+                        side=sl_side,
+                        type="STOP_MARKET",
+                        quantity=qty,
+                        stopPrice=sl_price,
+                        reduceOnly=True
+                    )
+                else:
+                    logger.info("🛡️ SL placement disabled by config (enable_stop_loss=false)")
+
             except Exception as e:
                 logger.error(f"Failed to place TP/SL orders for {symbol}: {e}")
                 # Continue without TP/SL - position monitoring will handle exits
@@ -791,8 +799,8 @@ class RealTradingEngine:
                 entry_time=datetime.now(),
                 tp_order_id=str(tp_order.get("orderId")) if tp_order else None,
                 sl_order_id=str(sl_order.get("orderId")) if sl_order else None,
-                tp_price=tp_price,  # Store TP price for UI display
-                sl_price=sl_price,  # Store SL price for UI display
+                tp_price=tp_price if self.enable_take_profit else None,  # UI display
+                sl_price=sl_price if self.enable_stop_loss else None,   # UI display
                 dynamic_trailing_floor=self.absolute_floor_dollars  # NEW: start at absolute floor
             )
             
@@ -1237,6 +1245,8 @@ class RealTradingEngine:
                 'primary_target_dollars': self.primary_target_dollars,
                 'absolute_floor_dollars': self.absolute_floor_dollars,
                 'stop_loss_percent': self.stop_loss_percent * 100,
+                'enable_take_profit': self.enable_take_profit,
+                'enable_stop_loss': self.enable_stop_loss,
                 # NEW: Comprehensive observability statistics
                 'stats': self.stats.copy(),
                 'signal_freshness_max_sec': float(self.cfg.get("signal_freshness_max_sec", 90)),
