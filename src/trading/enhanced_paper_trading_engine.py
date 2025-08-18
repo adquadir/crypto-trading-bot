@@ -7,6 +7,7 @@ import asyncio
 import logging
 import time
 import random
+import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
@@ -131,6 +132,101 @@ class EnhancedPaperTradingEngine:
         self._initialize_daily_performance()
         
         logger.info(f"📊 Paper Trading Engine initialized - Virtual Balance: ${self.virtual_balance:,.2f}")
+
+    # =========================
+    # PROFIT-FIRST RANKING HELPERS (NEW)
+    # =========================
+    def _compute_expected_profit_usd(self, s: Dict[str, Any], stake_amount: float, leverage: float) -> float:
+        """
+        Best-effort expected profit in USD for ranking.
+        Preference order:
+          1) explicit fields from strategies/OM: expected_profit, tp_net_usd, expected_profit_100
+          2) derive from entry/TP and notional = stake * leverage / entry
+        """
+        # 1) Prefer explicit fields if present
+        for k in ("expected_profit", "tp_net_usd", "expected_profit_100"):
+            v = s.get(k)
+            if v is None:
+                continue
+            try:
+                v = float(v)
+                if v > 0:
+                    return v
+            except Exception:
+                pass
+
+        # 2) Derive from prices
+        try:
+            direction = (s.get("direction") or s.get("side") or "LONG").upper()
+            entry = float(s.get("entry_price") or s.get("entry") or 0.0)
+            tp    = float(s.get("take_profit") or 0.0)
+            if entry <= 0 or tp <= 0:
+                return 0.0
+            qty   = (stake_amount * float(leverage)) / entry
+            delta = (tp - entry) if direction == "LONG" else (entry - tp)
+            pnl   = max(0.0, qty * delta)  # upside-only for ranking
+            return pnl
+        except Exception:
+            return 0.0
+
+    def _rank_signals(self, signals: List[Dict[str, Any]], stake_amount: float, leverage: float) -> List[Dict[str, Any]]:
+        """
+        Sort signals so we always try the most profitable first, then by:
+           expected_profit_usd DESC → confidence DESC → risk/reward DESC → volatility ASC → tiny deterministic jitter
+        """
+        ranked: List[Dict[str, Any]] = []
+
+        # Optional config weights (safe defaults if not present)
+        ranking_cfg = (self.config or {}).get("ranking", {})
+        weight_profit = float(ranking_cfg.get("weight_profit", 1.0))
+        weight_conf   = float(ranking_cfg.get("weight_confidence", 0.0))  # can be >0 later if desired
+
+        minute_bucket = int(time.time() // 60)
+
+        for s in signals:
+            x = dict(s)  # avoid mutating caller's object
+
+            # Normalize fields present in OpportunityManager outputs
+            # (OM already supplies these fields; see OM opportunity fields) 
+            try:
+                x["confidence"] = float(x.get("confidence", x.get("confidence_score", 0.0)) or 0.0)
+            except Exception:
+                x["confidence"] = 0.0
+            try:
+                x["risk_reward"] = float(x.get("risk_reward", 0.0) or 0.0)
+            except Exception:
+                x["risk_reward"] = 0.0
+            try:
+                # OM publishes volatility as percent in some flows; lower is better. If missing, set high number.
+                x["volatility"] = float(x.get("volatility", 999.0) or 999.0)
+            except Exception:
+                x["volatility"] = 999.0
+
+            ep = self._compute_expected_profit_usd(x, stake_amount, leverage)
+            # Bucket to cents to avoid noisy reordering
+            x["_ep_bucket"] = round(ep, 2)
+
+            # Deterministic micro-jitter so exact ties don't always pick the same symbol
+            sym = x.get("symbol", "UNKNOWN")
+            x["_jitter"] = (hash(f"{sym}:{minute_bucket}") % 1000) / 1e9
+
+            # Linear score (optional) = weight_profit * EP + weight_conf * confidence
+            x["_lin_score"] = (weight_profit * x["_ep_bucket"]) + (weight_conf * x["confidence"])
+
+            ranked.append(x)
+
+        # Sort by tuple: EP/score → confidence → R/R → lower volatility → jitter
+        ranked.sort(
+            key=lambda r: (
+                r["_lin_score"],                # primary aggregate
+                r["confidence"],
+                r["risk_reward"],
+                -r["volatility"],               # lower vol first
+                r["_jitter"]
+            ),
+            reverse=True
+        )
+        return ranked
 
     async def start(self):
         """Start the paper trading engine and background loops."""
@@ -969,12 +1065,36 @@ class EnhancedPaperTradingEngine:
                 elif not is_opportunity_manager_enabled():
                     logger.debug("🚫 Opportunity manager signals disabled by configuration")
 
-                # Merge and execute, respecting limits
-                for signal in (*profit_signals, *opp_signals):
+                # 🎯 PROFIT-FIRST RANKING: Merge all signals and rank by expected profit
+                all_signals = list(profit_signals) + list(opp_signals)
+                if not all_signals:
+                    await asyncio.sleep(poll_interval_sec)
+                    continue
+
+                # Get stake amount and leverage for ranking calculations
+                stake_amount = float(self.config.get('stake_amount', 500.0))
+                leverage = float(self.config.get('leverage', 10.0))
+
+                # Rank signals by expected profit (highest first)
+                ranked_signals = self._rank_signals(all_signals, stake_amount, leverage)
+                
+                if ranked_signals:
+                    logger.info(f"🎯 PROFIT-FIRST RANKING: {len(ranked_signals)} signals ranked by expected profit")
+                    # Log top 3 for visibility
+                    for i, s in enumerate(ranked_signals[:3]):
+                        ep = s.get('_ep_bucket', 0)
+                        conf = s.get('confidence', 0)
+                        logger.info(f"  #{i+1}: {s.get('symbol', 'UNKNOWN')} {s.get('direction', 'UNKNOWN')} - "
+                                   f"Expected: ${ep:.2f}, Confidence: {conf:.2f}")
+
+                # Execute signals in profit-first order, respecting limits
+                executed_count = 0
+                for signal in ranked_signals:
                     if len(self.virtual_positions) >= max_positions:
+                        logger.debug(f"Max positions reached ({max_positions}), stopping execution")
                         break
 
-                    # NEW: cheap pre-check to avoid calling execute when per-symbol cap is hit
+                    # Per-symbol position cap check
                     sym = signal.get('symbol')
                     if sym:
                         open_for_sym = sum(1 for p in self.virtual_positions.values() if p.symbol == sym)
@@ -989,12 +1109,20 @@ class EnhancedPaperTradingEngine:
                         if 'strategy' not in signal:
                             signal['strategy'] = signal.get('signal_source', 'unknown')
                         if 'optimal_leverage' not in signal:
-                            signal['optimal_leverage'] = float(self.config.get('leverage', 10.0))
-                        # Execute trade with $500 stake (from config)
-                        stake_amount = float(self.config.get('stake_amount', 500.0))
-                        await self.execute_virtual_trade(signal, stake_amount)
+                            signal['optimal_leverage'] = leverage
+
+                        # Execute trade with configured stake amount
+                        position_id = await self.execute_virtual_trade(signal, stake_amount)
+                        if position_id:
+                            executed_count += 1
+                            ep = signal.get('_ep_bucket', 0)
+                            logger.info(f"✅ EXECUTED #{executed_count}: {sym} {signal.get('direction')} - Expected: ${ep:.2f}")
+                        
                     except Exception as e:
-                        logger.warning(f"Error executing unified signal: {e}")
+                        logger.warning(f"Error executing ranked signal for {sym}: {e}")
+
+                if executed_count > 0:
+                    logger.info(f"🎯 PROFIT-FIRST EXECUTION: {executed_count} trades executed from {len(ranked_signals)} ranked signals")
 
                 await asyncio.sleep(poll_interval_sec)
             except Exception as e:

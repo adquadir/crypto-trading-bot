@@ -61,11 +61,11 @@ real_trading:
   max_positions: 20  # Maximum concurrent positions
   accept_sources: ["opportunity_manager"]  # Only OpportunityManager signals
   pure_3_rule_mode: true  # Enable Pure 3-rule mode
-  primary_target_dollars: 10.0  # $10 take profit target
+  primary_target_dollars: 18.0  # $10 take profit target
   absolute_floor_dollars: 7.0  # $7 floor protection
   stop_loss_percent: 0.5  # 0.5% stop loss from entry
   default_leverage: 10  # Default 10x leverage
-  max_leverage: 20  # Maximum 20x leverage cap
+  max_leverage: 15  # Maximum 20x leverage cap
   max_daily_loss: 500.0  # $500 daily loss limit
   min_confidence: 0.50  # NEW: Configurable confidence threshold (aligns with paper trading)
   signal_freshness_max_sec: 90

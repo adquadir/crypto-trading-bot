@@ -6,6 +6,7 @@ For actual money trading with real exchange connections using OpportunityManager
 import asyncio
 import logging
 import time
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional, List
@@ -174,6 +175,101 @@ class RealTradingEngine:
         
         logger.info("🚀 Real Trading Engine initialized - OpportunityManager only, $%.2f per trade", self.stake_usd)
     
+    # =========================
+    # PROFIT-FIRST RANKING HELPERS (NEW)
+    # =========================
+    def _compute_expected_profit_usd(self, s: Dict[str, Any], stake_amount: float, leverage: float) -> float:
+        """
+        Best-effort expected profit in USD for ranking.
+        Preference order:
+          1) explicit fields from strategies/OM: expected_profit, tp_net_usd, expected_profit_100
+          2) derive from entry/TP and notional = stake * leverage / entry
+        """
+        # 1) Prefer explicit fields if present
+        for k in ("expected_profit", "tp_net_usd", "expected_profit_100"):
+            v = s.get(k)
+            if v is None:
+                continue
+            try:
+                v = float(v)
+                if v > 0:
+                    return v
+            except Exception:
+                pass
+
+        # 2) Derive from prices
+        try:
+            direction = (s.get("direction") or s.get("side") or "LONG").upper()
+            entry = float(s.get("entry_price") or s.get("entry") or 0.0)
+            tp    = float(s.get("take_profit") or 0.0)
+            if entry <= 0 or tp <= 0:
+                return 0.0
+            qty   = (stake_amount * float(leverage)) / entry
+            delta = (tp - entry) if direction == "LONG" else (entry - tp)
+            pnl   = max(0.0, qty * delta)  # upside-only for ranking
+            return pnl
+        except Exception:
+            return 0.0
+
+    def _rank_signals(self, signals: List[Dict[str, Any]], stake_amount: float, leverage: float) -> List[Dict[str, Any]]:
+        """
+        Sort signals so we always try the most profitable first, then by:
+           expected_profit_usd DESC → confidence DESC → risk/reward DESC → volatility ASC → tiny deterministic jitter
+        """
+        ranked: List[Dict[str, Any]] = []
+
+        # Optional config weights (safe defaults if not present)
+        ranking_cfg = (self.cfg or {}).get("ranking", {})
+        weight_profit = float(ranking_cfg.get("weight_profit", 1.0))
+        weight_conf   = float(ranking_cfg.get("weight_confidence", 0.0))  # can be >0 later if desired
+
+        minute_bucket = int(time.time() // 60)
+
+        for s in signals:
+            x = dict(s)  # avoid mutating caller's object
+
+            # Normalize fields present in OpportunityManager outputs
+            # (OM already supplies these fields; see OM opportunity fields) 
+            try:
+                x["confidence"] = float(x.get("confidence", x.get("confidence_score", 0.0)) or 0.0)
+            except Exception:
+                x["confidence"] = 0.0
+            try:
+                x["risk_reward"] = float(x.get("risk_reward", 0.0) or 0.0)
+            except Exception:
+                x["risk_reward"] = 0.0
+            try:
+                # OM publishes volatility as percent in some flows; lower is better. If missing, set high number.
+                x["volatility"] = float(x.get("volatility", 999.0) or 999.0)
+            except Exception:
+                x["volatility"] = 999.0
+
+            ep = self._compute_expected_profit_usd(x, stake_amount, leverage)
+            # Bucket to cents to avoid noisy reordering
+            x["_ep_bucket"] = round(ep, 2)
+
+            # Deterministic micro-jitter so exact ties don't always pick the same symbol
+            sym = x.get("symbol", "UNKNOWN")
+            x["_jitter"] = (hash(f"{sym}:{minute_bucket}") % 1000) / 1e9
+
+            # Linear score (optional) = weight_profit * EP + weight_conf * confidence
+            x["_lin_score"] = (weight_profit * x["_ep_bucket"]) + (weight_conf * x["confidence"])
+
+            ranked.append(x)
+
+        # Sort by tuple: EP/score → confidence → R/R → lower volatility → jitter
+        ranked.sort(
+            key=lambda r: (
+                r["_lin_score"],                # primary aggregate
+                r["confidence"],
+                r["risk_reward"],
+                -r["volatility"],               # lower vol first
+                r["_jitter"]
+            ),
+            reverse=True
+        )
+        return ranked
+
     def connect_opportunity_manager(self, manager: Any) -> None:
         """Connect the OpportunityManager to this engine"""
         self.opportunity_manager = manager
@@ -284,17 +380,43 @@ class RealTradingEngine:
                             if self._is_acceptable_opportunity(opp):
                                 signals.append(opp)
                     
-                    # Execute signals
-                    for signal in signals:
-                        if len(self.positions) >= self.max_positions:
-                            break
+                    # 🎯 PROFIT-FIRST RANKING: Rank signals by expected profit (highest first)
+                    if signals:
+                        # Get stake amount and leverage for ranking calculations
+                        stake_amount = self.stake_usd
+                        leverage = self.default_leverage
+
+                        # Rank signals by expected profit (highest first)
+                        ranked_signals = self._rank_signals(signals, stake_amount, leverage)
                         
-                        symbol = signal.get('symbol')
-                        if symbol in self.positions_by_symbol:
-                            continue  # Already have position in this symbol
-                        
-                        # Execute the trade
-                        await self._open_live_position_from_opportunity(signal)
+                        logger.info(f"🎯 PROFIT-FIRST RANKING: {len(ranked_signals)} signals ranked by expected profit")
+                        # Log top 3 for visibility
+                        for i, s in enumerate(ranked_signals[:3]):
+                            ep = s.get('_ep_bucket', 0)
+                            conf = s.get('confidence', 0)
+                            logger.info(f"  #{i+1}: {s.get('symbol', 'UNKNOWN')} {s.get('direction', 'UNKNOWN')} - "
+                                       f"Expected: ${ep:.2f}, Confidence: {conf:.2f}")
+
+                        # Execute signals in profit-first order
+                        executed_count = 0
+                        for signal in ranked_signals:
+                            if len(self.positions) >= self.max_positions:
+                                logger.debug(f"Max positions reached ({self.max_positions}), stopping execution")
+                                break
+                            
+                            symbol = signal.get('symbol')
+                            if symbol in self.positions_by_symbol:
+                                continue  # Already have position in this symbol
+                            
+                            # Execute the trade
+                            await self._open_live_position_from_opportunity(signal)
+                            executed_count += 1
+                            
+                            ep = signal.get('_ep_bucket', 0)
+                            logger.info(f"✅ EXECUTED #{executed_count}: {symbol} {signal.get('direction')} - Expected: ${ep:.2f}")
+
+                        if executed_count > 0:
+                            logger.info(f"🎯 PROFIT-FIRST EXECUTION: {executed_count} trades executed from {len(ranked_signals)} ranked signals")
                 
                 await asyncio.sleep(self.signal_poll_sec)
                 
