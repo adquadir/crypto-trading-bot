@@ -115,3 +115,7 @@ opportunity_manager:
   min_signal_change_interval_sec: 60
   hysteresis_momentum_mult: 1.25   # used by _should_accept_flip
   base_momentum_threshold: 0.001   # 0.1% baseline for hysteresis guard
+
+ranking:
+  weight_profit: 1.0
+  weight_confidence: 0.5
