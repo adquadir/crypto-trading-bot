@@ -495,7 +495,17 @@ def create_app():
                 "max_positions": status.get('max_positions', 20),
                 "positions_remaining": status.get('max_positions', 20) - status.get('active_positions', 0),
                 "enabled": status.get('enabled', False),
-                "is_running": status.get('is_running', False)
+                "is_running": status.get('is_running', False),
+
+                # ✅ Add Pure 3-Rule Mode fields so the UI chip can reflect the true state
+                "pure_3_rule_mode": status.get("pure_3_rule_mode", False),
+                "primary_target_dollars": status.get("primary_target_dollars", 0.0),
+                "absolute_floor_dollars": status.get("absolute_floor_dollars", 0.0),
+                "stop_loss_percent": status.get("stop_loss_percent", 0.0),
+
+                # (optional, but helpful for older UI variants)
+                "enable_take_profit": status.get("enable_take_profit", False),
+                "enable_stop_loss": status.get("enable_stop_loss", False),
             }
 
             # 🔹 NEW: pull and normalize real balance

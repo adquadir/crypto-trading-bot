@@ -118,6 +118,9 @@ class RealTradingEngine:
         self.absolute_floor_dollars = float(self.cfg.get("absolute_floor_dollars", 7.0))
         self.stop_loss_percent = float(self.cfg.get("stop_loss_percent", 0.5)) / 100.0  # 0.5%
         
+        # ✅ NEW: separate trailing start (defaults to absolute floor if not set)
+        self.trailing_floor_start = float(self.cfg.get("trailing_floor_start_dollars", self.absolute_floor_dollars))
+        
         # Position tracking
         self.positions: Dict[str, LivePosition] = {}   # key: position_id
         self.positions_by_symbol: Dict[str, str] = {}  # symbol -> position_id
@@ -500,8 +503,8 @@ class RealTradingEngine:
                                 f"(best ${position.highest_profit_ever:.2f})"
                             )
 
-                        # Activate trailing behavior as soon as we surpass starting floor
-                        if position.highest_profit_ever >= self.absolute_floor_dollars:
+                        # ✅ now: Activate trailing behavior when profit clears the configured start level
+                        if position.highest_profit_ever >= self.trailing_floor_start:
                             position.profit_floor_activated = True
 
                         # Check for TP/SL hits using trailing floor system
@@ -801,7 +804,7 @@ class RealTradingEngine:
                 sl_order_id=str(sl_order.get("orderId")) if sl_order else None,
                 tp_price=tp_price if self.enable_take_profit else None,  # UI display
                 sl_price=sl_price if self.enable_stop_loss else None,   # UI display
-                dynamic_trailing_floor=self.absolute_floor_dollars  # NEW: start at absolute floor
+                dynamic_trailing_floor=self.trailing_floor_start  # ✅ start from configured start
             )
             
             # Store position
